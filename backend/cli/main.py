@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 from datetime import datetime, timezone
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 import typer
 from rich.console import Console
-from rich.live import Live
 
 from cli.dashboard import render_tick
 from cli.signal_render import render_signal
@@ -51,20 +51,34 @@ def run() -> None:
     asyncio.run(_run_loop())
 
 
+def _render_dashboard(language: Literal["pt", "en"], tick: Any) -> None:
+    """Clear the screen and print the dashboard for this tick.
+
+    Works in every output mode we care about:
+    - TTY (terminal local): ANSI clear redraws in-place each cycle.
+    - `docker logs -f`: the streaming viewer renders the escape, so the
+      previous tick is wiped before the new one prints (no scrollback wall).
+    - `docker attach`: same as TTY.
+    """
+    # \x1b[2J = clear entire screen; \x1b[H = move cursor to home (top-left).
+    sys.stdout.write("\x1b[2J\x1b[H")
+    sys.stdout.flush()
+    console.print(render_tick(tick, language=language))
+
+
 async def _run_loop() -> None:
     settings = get_settings()
     container = await build_container(settings)
     try:
-        with Live(console=console, refresh_per_second=2, screen=False) as live:
-            tick = await container.run_tick.execute()
-            live.update(render_tick(tick, language=settings.output_language))
+        tick = await container.run_tick.execute()
+        _render_dashboard(settings.output_language, tick)
 
-            scheduler = TickScheduler(
-                interval_seconds=settings.tick_interval_seconds,
-                tick_use_case=container.run_tick,
-                on_tick=lambda t: live.update(render_tick(t, language=settings.output_language)),
-            )
-            await scheduler.run_forever()
+        scheduler = TickScheduler(
+            interval_seconds=settings.tick_interval_seconds,
+            tick_use_case=container.run_tick,
+            on_tick=lambda t: _render_dashboard(settings.output_language, t),
+        )
+        await scheduler.run_forever()
     finally:
         await container.aclose()
 
