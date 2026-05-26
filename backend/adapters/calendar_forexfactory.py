@@ -7,7 +7,7 @@ impact is preserved on the model so callers can filter as they wish.
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 
 import httpx
 from bs4 import BeautifulSoup
@@ -28,15 +28,23 @@ IMPACT_MAP: dict[str, ImpactLevel] = {
 
 
 def _parse_event_datetime(date_str: str, time_str: str) -> datetime | None:
-    """ForexFactory uses MM-DD-YYYY / 'h:mma' US Eastern. We treat as UTC-naive then UTC."""
+    """Parse the ForexFactory weekly feed timestamp.
+
+    Format: MM-DD-YYYY / 'h:mma'. Despite older comments suggesting otherwise,
+    the public XML feed (`ff_calendar_thisweek.xml`) publishes times in **UTC**,
+    not Eastern Time. Verified against well-known US releases — e.g.
+    CB Consumer Confidence (10:00 AM ET) appears as "2:00pm" = 14:00 UTC, and
+    Prelim GDP (8:30 AM ET) appears as "12:30pm" = 12:30 UTC. Both match UTC,
+    not ET. Previously the adapter wrongly added 5 hours, putting every US
+    event 5h in the future.
+    """
     if not date_str or not time_str or time_str.lower() in ("all day", "tentative"):
         return None
     try:
         combined = datetime.strptime(f"{date_str} {time_str}", "%m-%d-%Y %I:%M%p")
     except ValueError:
         return None
-    # XML feed publishes Eastern Time without TZ. Approximate as UTC-5 (EST).
-    return (combined + timedelta(hours=5)).replace(tzinfo=timezone.utc)
+    return combined.replace(tzinfo=timezone.utc)
 
 
 class ForexFactoryCalendarGateway:
@@ -53,7 +61,22 @@ class ForexFactoryCalendarGateway:
             logger.warning("ForexFactory fetch failed: %s", exc)
             return []
 
-        soup = BeautifulSoup(response.content, "xml")
+        # Detect the rate-limit HTML page — ForexFactory returns it with HTTP 200
+        # but the body is an HTML page, not the XML feed. Without this check, the
+        # XML parser silently sees zero <event> nodes and we look like we have a
+        # quiet calendar day.
+        content = response.content
+        if b"<event>" not in content:
+            preview = content[:200].decode("utf-8", errors="replace")
+            logger.warning(
+                "ForexFactory returned no <event> nodes (status=%s). Likely rate "
+                "limit or feed shape change. Body preview: %r",
+                response.status_code,
+                preview,
+            )
+            return []
+
+        soup = BeautifulSoup(content, "xml")
         events: list[EconomicEvent] = []
         for event_node in soup.find_all("event"):
             currency = event_node.find("country") or event_node.find("currency")

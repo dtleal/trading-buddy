@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
 from zoneinfo import ZoneInfo
 
@@ -84,7 +84,7 @@ def _events_table(tick: DashboardTick, language: Language) -> Table:
     table = Table(title=t("events_header", language), expand=True)
     table.add_column("UTC", style="cyan")
     table.add_column("BRT", style="cyan")
-    table.add_column("Impact")
+    table.add_column("Status / Impact")
     table.add_column("Event")
     table.add_column("Forecast / Previous", justify="right")
 
@@ -92,20 +92,32 @@ def _events_table(tick: DashboardTick, language: Language) -> Table:
         table.add_row("", "", "", t("no_events", language), "")
         return table
 
+    now_utc = datetime.now(timezone.utc)
     for e in tick.events_today:
-        impact_style = {
-            "high": "bold red",
-            "medium": "yellow",
-            "low": "dim",
-        }.get(e.impact.value, "white")
+        already_happened = e.scheduled_at < now_utc
         brt_str = e.scheduled_at.astimezone(BRT).strftime("%H:%M")
-        table.add_row(
-            e.scheduled_at.strftime("%H:%M"),
-            brt_str,
-            Text(e.impact.value.upper(), style=impact_style),
-            e.name,
-            f"{e.forecast or '-'} / {e.previous or '-'}",
-        )
+        utc_str = e.scheduled_at.strftime("%H:%M")
+        if already_happened:
+            actual_part = f" → {e.actual}" if e.actual else ""
+            status = Text(f"✓ ENCERRADO{actual_part}", style="dim italic")
+            time_utc = Text(utc_str, style="dim strike")
+            time_brt = Text(brt_str, style="dim strike")
+            name = Text(e.name, style="dim strike")
+            forecast_prev = Text(f"{e.forecast or '-'} / {e.previous or '-'}", style="dim")
+            table.add_row(time_utc, time_brt, status, name, forecast_prev)
+        else:
+            impact_style = {
+                "high": "bold red",
+                "medium": "yellow",
+                "low": "dim",
+            }.get(e.impact.value, "white")
+            table.add_row(
+                utc_str,
+                brt_str,
+                Text(e.impact.value.upper(), style=impact_style),
+                e.name,
+                f"{e.forecast or '-'} / {e.previous or '-'}",
+            )
     return table
 
 
