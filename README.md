@@ -1,4 +1,4 @@
-# day-trading-buddy
+# trading-buddy
 
 Macro context co-pilot for day trading **USTEC (Nasdaq 100), S&P 500 and Gold**.
 
@@ -43,20 +43,23 @@ make explain EVENT=CPI          # pre/post-event explainer
 ## Architecture
 
 ```
-day-trading-buddy/
+trading-buddy/
 ├── docker/      Docker images and compose files
-├── backend/     Python 3.12 service (uv-managed)
-│   └── src/day_trading_buddy/
-│       ├── core/        Domain models, enums, interfaces (Protocols). No I/O.
-│       ├── use_cases/   One class per business task. Async `execute()`.
-│       ├── adapters/    External-world implementations (HTTP, DB, Redis, LLM).
-│       ├── cli/         Typer entry point + Rich dashboard.
-│       └── db/          SQLAlchemy schema + Alembic migrations.
+├── backend/     Python 3.12 service (uv-managed, flat layout)
+│   ├── core/         Domain models, enums, interfaces (Protocols). No I/O.
+│   ├── use_cases/    One class per business task. Async `execute()`.
+│   ├── adapters/     External-world implementations (HTTP, DB, Redis, LLM).
+│   ├── cli/          Typer entry point + Rich dashboard.
+│   ├── db/           SQLAlchemy schema + Alembic migrations.
+│   ├── container.py  Dependency injection (plain factory).
+│   ├── scheduler.py  APScheduler wiring (5-min tick).
+│   └── settings.py   pydantic-settings (env-driven config).
 └── frontend/    Reserved for phase 2 (web UI).
 ```
 
 Each computation lives in its own use case, wired together by `container.py`.
 Adapters are swappable behind Protocol interfaces defined in `core/interfaces.py`.
+Imports are top-level: `from core.models import ...`, `from use_cases.fetch_market import ...`.
 
 ## Make targets
 
