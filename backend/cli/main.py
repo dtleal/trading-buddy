@@ -15,6 +15,11 @@ from cli.dashboard import render_tick
 from container import Container, build_container
 from scheduler import TickScheduler
 from settings import get_settings
+from use_cases.generate_briefing import (
+    SYSTEM_PROMPT_EN,
+    SYSTEM_PROMPT_PT,
+    format_tick_payload,
+)
 
 app = typer.Typer(add_completion=False, help="day-trading-buddy CLI")
 console = Console()
@@ -116,6 +121,41 @@ async def _explain(event_name: str, mode: Literal["pre", "post"]) -> None:
         console.rule(f"[bold]{match.name} — {mode}")
         console.print(output.content)
         console.rule()
+    finally:
+        await container.aclose()
+
+
+@app.command()
+def snapshot(
+    include_prompt: bool = typer.Option(
+        True,
+        "--with-prompt/--no-prompt",
+        help="Prepend the system prompt so an external LLM can run the briefing.",
+    ),
+) -> None:
+    """Dump the current tick payload as markdown, without calling the LLM.
+
+    Use this to hand the payload to an external Claude session (or any LLM)
+    and produce a briefing without spending Anthropic API credits.
+    """
+    settings = get_settings()
+    _configure_logging(settings.log_level)
+    asyncio.run(_snapshot(include_prompt))
+
+
+async def _snapshot(include_prompt: bool) -> None:
+    settings = get_settings()
+    container = await build_container(settings)
+    try:
+        tick = await container.run_tick.execute()
+        if include_prompt:
+            system_prompt = (
+                SYSTEM_PROMPT_PT if settings.output_language == "pt" else SYSTEM_PROMPT_EN
+            )
+            print("=== SYSTEM PROMPT ===")
+            print(system_prompt)
+            print("=== USER PROMPT (TICK DATA) ===")
+        print(format_tick_payload(tick))
     finally:
         await container.aclose()
 

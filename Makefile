@@ -2,7 +2,8 @@ SHELL := /bin/bash
 
 .DEFAULT_GOAL := help
 
-.PHONY: help install run brief explain test test-cov test-integration \
+.PHONY: help install run brief explain snapshot docker-snapshot \
+        test test-cov test-integration \
         lint format typecheck db-migrate db-revision \
         docker-build docker-up docker-down docker-logs docker-shell clean
 
@@ -24,6 +25,12 @@ brief:  ## Generate a macro briefing via Claude
 
 explain:  ## Explain an event. Usage: make explain EVENT=CPI
 	cd backend && uv run dtb explain --event $(EVENT)
+
+snapshot:  ## Dump the current tick payload (no LLM). Pipe into another LLM.
+	cd backend && uv run dtb snapshot
+
+docker-snapshot:  ## Same as `snapshot` but runs inside the live container.
+	docker compose -f docker/docker-compose.yml exec backend dtb snapshot
 
 # -----------------------------------------------------------------------------
 # Quality gates

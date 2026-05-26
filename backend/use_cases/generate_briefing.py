@@ -70,7 +70,12 @@ def _format_events(events: list[EconomicEvent]) -> str:
     return "\n".join(lines)
 
 
-def _format_tick(tick: DashboardTick) -> str:
+def format_tick_payload(tick: DashboardTick) -> str:
+    """Render a DashboardTick as the markdown user-prompt sent to the LLM.
+
+    Also reusable for `dtb snapshot` (dump-without-LLM) so an external Claude
+    Code session can produce the briefing without calling the Anthropic API.
+    """
     parts: list[str] = ["## Market snapshot"]
     for asset, quote in tick.market.assets.items():
         ma_str = f"{quote.ma200_d:.2f}" if quote.ma200_d else "n/a"
@@ -123,7 +128,7 @@ class GenerateBriefingUseCase:
 
     async def execute(self, tick: DashboardTick) -> LLMOutput:
         system_prompt = SYSTEM_PROMPT_PT if self._language == "pt" else SYSTEM_PROMPT_EN
-        user_prompt = _format_tick(tick)
+        user_prompt = format_tick_payload(tick)
 
         output = await self._llm.generate(
             system_prompt=system_prompt,
