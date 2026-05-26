@@ -14,7 +14,10 @@ favorable.
 - Pulls spot prices and the **daily 200-period** moving average for USTEC, SPX,
   Gold, VIX, VIX9D and VIX3M.
 - Aggregates today's high/medium-impact US economic events (FOMC, CPI, NFP,
-  PCE, PPI, Jobless Claims, Consumer Confidence…) with countdowns.
+  PCE, PPI, Jobless Claims, Consumer Confidence…) with countdowns. Each event
+  is shown in both **UTC and Brazil time (BRT)**; events already released are
+  dimmed and marked **✓ ENCERRADO** (with the actual print if the source
+  provided one).
 - Pulls headlines from RSS (Reuters/CNBC/MarketWatch) and NewsAPI, and scores
   their sentiment with a keyword classifier.
 - Tracks macro indicators via FRED (Fed funds, 10Y yield, DXY, CPI, UNRATE)
@@ -213,6 +216,10 @@ Same model (Opus 4.7), zero Anthropic API spend.
   guarantee profit.
 - ^NDX / ^GSPC are **cash indices**, not futures (NQ/ES) — numbers will differ
   by basis. Confirm execution levels on your broker.
+- The **ForexFactory weekly XML feed rate-limits anonymous clients** — when
+  that happens the calendar panel says "Sem eventos relevantes" and a
+  `WARNING` is emitted. The 1-hour Redis cache (`CACHE_TTL_SECONDS`) softens
+  the issue; events return as soon as the limit clears.
 - The post-event explainer doesn't auto-fire yet (was originally planned for
   30 min before high-impact events). Run `dtb explain` manually for now.
 

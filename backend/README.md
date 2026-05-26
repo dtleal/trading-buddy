@@ -56,10 +56,24 @@ backend/
   implement the same Protocol.
 - **Render is separate from compute**. `cli/dashboard.py` and
   `cli/signal_render.py` only know how to turn a domain object into Rich
-  panels — they don't run business logic.
+  panels — they don't run business logic. Timestamps render in both UTC and
+  Brazil time (`zoneinfo("America/Sao_Paulo")`); past calendar events are
+  dimmed and tagged `✓ ENCERRADO`.
 - **Pure functions for technical math**. `compute_intraday_levels` and
   `detect_trade_setup` take values in and return values out, no `async` and no
   I/O — they get extensive unit tests.
+
+### Calendar gotcha
+
+The public ForexFactory weekly XML feed
+(`https://nfs.faireconomy.media/ff_calendar_thisweek.xml`) publishes times in
+**UTC**, not Eastern Time, despite the older docstrings on the web suggesting
+otherwise. The parser in `adapters/calendar_forexfactory.py` parses the feed
+times directly as UTC — see `tests/unit/test_calendar_forexfactory.py` for the
+locked-in cases (CB Consumer Confidence "2:00pm" → 14:00 UTC = 10:00 ET in
+EDT). The feed also rate-limits anonymous clients; the adapter logs a
+`WARNING` when the response has no `<event>` nodes so we can tell rate-limit
+days from quiet calendar days.
 
 ## CLI commands
 
