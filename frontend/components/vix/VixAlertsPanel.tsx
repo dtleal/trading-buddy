@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { useAlertsStore } from "@/lib/alerts/store";
 import { requestNotificationPermission } from "@/lib/alerts/notify";
 import type { AlertRule } from "@/lib/alerts/types";
+import { cn } from "@/lib/utils";
 
 export function VixAlertsPanel() {
   const rules = useAlertsStore((s) => s.rules);
@@ -121,25 +122,40 @@ function RuleRow({
   return (
     <div className="flex items-center justify-between gap-3 rounded border border-zinc-800 bg-zinc-900/30 p-2.5">
       <div className="flex items-center gap-3">
-        <button
-          onClick={onToggle}
-          className={`h-5 w-9 rounded-full transition-colors ${
-            rule.enabled ? "bg-emerald-600" : "bg-zinc-700"
-          } relative`}
-          aria-label="toggle rule"
-        >
-          <span
-            className={`absolute top-0.5 size-4 rounded-full bg-white transition-transform ${
-              rule.enabled ? "translate-x-4" : "translate-x-0.5"
-            }`}
-          />
-        </button>
+        <ToggleSwitch enabled={rule.enabled} onToggle={onToggle} />
         <div className="text-sm text-zinc-200">{describeRule(rule)}</div>
       </div>
       <Button variant="ghost" size="icon" onClick={onDelete} aria-label="remover regra">
         <Trash2 className="size-4 text-zinc-500" />
       </Button>
     </div>
+  );
+}
+
+/**
+ * Accessible toggle switch. Track 44×24px, thumb 20×20, 2px gap each side.
+ * Dot travels exactly 20px between states (44 - 20 - 2 - 2).
+ */
+function ToggleSwitch({ enabled, onToggle }: { enabled: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={enabled}
+      onClick={onToggle}
+      className={cn(
+        "relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full p-0.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900",
+        enabled ? "bg-emerald-600" : "bg-zinc-700",
+      )}
+    >
+      <span
+        aria-hidden
+        className={cn(
+          "block size-5 rounded-full bg-white shadow ring-1 ring-black/10 transition-transform",
+          enabled ? "translate-x-5" : "translate-x-0",
+        )}
+      />
+    </button>
   );
 }
 
