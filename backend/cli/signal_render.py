@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from zoneinfo import ZoneInfo
+
 from rich.console import Group
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
 from core.models import IntradayLevels
+
+BRT = ZoneInfo("America/Sao_Paulo")
 
 
 def _fmt(v: float | None, digits: int = 2) -> str:
@@ -141,10 +145,14 @@ def render_signal(
     stop_buffer_atr: float = 0.5,
     contract_multiplier: float = 1.0,
 ) -> Group:
+    brt_str = levels.asof.astimezone(BRT).strftime("%H:%M BRT")
     header = Text()
     header.append(f"{levels.symbol}", style="bold cyan")
     header.append(f"  |  Last: {levels.last_price:.2f}")
-    header.append(f"  |  asof {levels.asof.strftime('%Y-%m-%d %H:%M UTC')}", style="dim")
+    header.append(
+        f"  |  asof {levels.asof.strftime('%Y-%m-%d %H:%M UTC')}  ·  {brt_str}",
+        style="dim",
+    )
 
     return Group(
         Panel(header, border_style="cyan"),

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from rich.console import Group
 from rich.panel import Panel
@@ -12,6 +14,15 @@ from rich.text import Text
 from cli.i18n import t
 from core.enums import BiasLevel, TermStructure, VixRegime
 from core.models import DashboardTick, TradeSetup
+
+BRT = ZoneInfo("America/Sao_Paulo")
+
+
+def _utc_and_brt(ts: datetime) -> str:
+    """Format a UTC timestamp alongside Brazilian time."""
+    brt = ts.astimezone(BRT)
+    return f"{ts.strftime('%Y-%m-%d %H:%M:%S UTC')}  ·  {brt.strftime('%H:%M:%S BRT')}"
+
 
 Language = Literal["pt", "en"]
 
@@ -71,13 +82,14 @@ def _vix_panel(tick: DashboardTick, language: Language) -> Panel:
 
 def _events_table(tick: DashboardTick, language: Language) -> Table:
     table = Table(title=t("events_header", language), expand=True)
-    table.add_column("Time (UTC)", style="cyan")
+    table.add_column("UTC", style="cyan")
+    table.add_column("BRT", style="cyan")
     table.add_column("Impact")
     table.add_column("Event")
     table.add_column("Forecast / Previous", justify="right")
 
     if not tick.events_today:
-        table.add_row("", "", t("no_events", language), "")
+        table.add_row("", "", "", t("no_events", language), "")
         return table
 
     for e in tick.events_today:
@@ -86,8 +98,10 @@ def _events_table(tick: DashboardTick, language: Language) -> Table:
             "medium": "yellow",
             "low": "dim",
         }.get(e.impact.value, "white")
+        brt_str = e.scheduled_at.astimezone(BRT).strftime("%H:%M")
         table.add_row(
             e.scheduled_at.strftime("%H:%M"),
+            brt_str,
             Text(e.impact.value.upper(), style=impact_style),
             e.name,
             f"{e.forecast or '-'} / {e.previous or '-'}",
@@ -177,7 +191,7 @@ def _setups_panel(tick: DashboardTick) -> Panel:
 def render_tick(tick: DashboardTick, language: Language) -> Group:
     return Group(
         Panel(
-            f"[bold]{t('title', language)}[/bold]   {tick.timestamp.strftime('%Y-%m-%d %H:%M:%S UTC')}",
+            f"[bold]{t('title', language)}[/bold]   {_utc_and_brt(tick.timestamp)}",
             border_style="white",
         ),
         _prices_table(tick, language),
