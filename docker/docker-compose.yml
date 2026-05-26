@@ -50,6 +50,21 @@ services:
       retries: 10
     restart: unless-stopped
 
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.frontend
+      args:
+        # Browser hits the backend on the host network, so localhost is correct
+        # for users running the stack on their own machine. Override at build
+        # time for remote deploys.
+        NEXT_PUBLIC_API_URL: "http://localhost:8000"
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:

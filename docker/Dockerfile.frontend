@@ -1,0 +1,55 @@
+# syntax=docker/dockerfile:1.7
+
+# -----------------------------------------------------------------------------
+# Stage 1 — deps: install node_modules with the lockfile only (cacheable).
+# -----------------------------------------------------------------------------
+FROM node:22-alpine AS deps
+
+WORKDIR /app
+
+COPY frontend/package.json frontend/package-lock.json ./
+# `npm ci` (not --omit=optional) — Tailwind 4's PostCSS pipeline needs the
+# platform-specific lightningcss native binary, which ships as an optional
+# dependency on each os/arch triplet (linux-arm64-musl in this image).
+RUN npm ci
+
+# -----------------------------------------------------------------------------
+# Stage 2 — builder: copy sources and produce the production bundle.
+# -----------------------------------------------------------------------------
+FROM node:22-alpine AS builder
+
+WORKDIR /app
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY frontend/ ./
+
+# NEXT_PUBLIC_API_URL is baked into the static bundle at build time.
+ARG NEXT_PUBLIC_API_URL=http://localhost:8000
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+
+RUN npm run build
+
+# -----------------------------------------------------------------------------
+# Stage 3 — runtime: standalone server, minimal image.
+# -----------------------------------------------------------------------------
+FROM node:22-alpine AS runtime
+
+ENV NODE_ENV=production \
+    PORT=3000 \
+    HOSTNAME=0.0.0.0
+
+WORKDIR /app
+
+# Copy the production node_modules + built app. Next 16's default output is a
+# regular .next dir; we serve it with `next start`. For an even slimmer image
+# users can add `output: "standalone"` to next.config.ts and copy .next/standalone
+# here instead.
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/next.config.ts ./next.config.ts
+
+EXPOSE 3000
+
+CMD ["npm", "start"]

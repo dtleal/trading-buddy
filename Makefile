@@ -5,7 +5,9 @@ SHELL := /bin/bash
 .PHONY: help install run brief explain snapshot docker-snapshot \
         test test-cov test-integration \
         lint format typecheck db-migrate db-revision \
-        docker-build docker-up docker-down docker-logs docker-shell clean
+        docker-build docker-build-backend docker-build-frontend \
+        docker-up docker-down docker-logs docker-logs-frontend docker-shell \
+        frontend-install frontend-dev frontend-build frontend-lint clean
 
 help:  ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -73,10 +75,16 @@ db-revision:  ## New migration. Usage: make db-revision MSG="add foo"
 # Docker
 # -----------------------------------------------------------------------------
 
-docker-build:  ## Build backend image
+docker-build:  ## Build all images (backend + frontend)
 	docker compose -f docker/docker-compose.yml build
 
-docker-up:  ## Start backend + postgres + redis
+docker-build-backend:  ## Build only the backend image
+	docker compose -f docker/docker-compose.yml build backend
+
+docker-build-frontend:  ## Build only the frontend image
+	docker compose -f docker/docker-compose.yml build frontend
+
+docker-up:  ## Start the full stack (backend + frontend + postgres + redis)
 	docker compose -f docker/docker-compose.yml --env-file .env up -d
 
 docker-down:  ## Stop and remove containers
@@ -84,6 +92,25 @@ docker-down:  ## Stop and remove containers
 
 docker-logs:  ## Follow backend logs
 	docker compose -f docker/docker-compose.yml logs -f backend
+
+docker-logs-frontend:  ## Follow frontend logs
+	docker compose -f docker/docker-compose.yml logs -f frontend
+
+# -----------------------------------------------------------------------------
+# Frontend dev (outside Docker)
+# -----------------------------------------------------------------------------
+
+frontend-install:  ## npm install in frontend/
+	cd frontend && npm install
+
+frontend-dev:  ## next dev (http://localhost:3000, hot reload)
+	cd frontend && npm run dev
+
+frontend-build:  ## next build (production bundle)
+	cd frontend && npm run build
+
+frontend-lint:  ## eslint
+	cd frontend && npm run lint
 
 docker-shell:  ## Open a shell inside the backend container
 	docker compose -f docker/docker-compose.yml exec backend bash

@@ -2,6 +2,10 @@
 
 Macro context co-pilot for day trading **USTEC (Nasdaq 100), S&P 500 and Gold**.
 
+Two surfaces:
+- **CLI dashboard** (`dtb run`) — Rich-based terminal view, same data, no browser needed.
+- **Web app** (`http://localhost:3000`) — Next.js 15 frontend with live VIX chart and configurable VIX alerts. See [`frontend/README.md`](frontend/README.md).
+
 It is **not** a trading bot. It does not place orders. It gives you a refreshed
 read of the macro + intraday environment while you trade, and points out
 **high-confluence setups** when (and only when) the data alignment is objectively
@@ -73,8 +77,15 @@ cp .env.example .env
 #   - NEWSAPI_KEY     (optional — supplements RSS news)
 
 make install         # uv sync inside backend/
-make docker-up       # postgres + redis + backend dashboard
+make docker-up       # postgres + redis + backend + frontend
 make docker-logs     # watch the dashboard refresh every 10s
+```
+
+Open the web UI:
+
+```
+http://localhost:3000   # live VIX chart + alerts + asset overview
+http://localhost:8000/health   # backend liveness probe
 ```
 
 Manual commands once the stack is up:
@@ -105,16 +116,21 @@ make run                                       # local TTY without container
 
 ```
 trading-buddy/
-├── docker/      Docker images and compose files
+├── docker/      Docker images and compose files (backend + frontend)
 ├── backend/     Python 3.12 service (uv-managed, flat layout)
 │   ├── core/         Domain models, enums, interfaces (Protocols). No I/O.
 │   ├── use_cases/    One class per business task. Async `execute()`.
 │   ├── adapters/     External-world implementations (HTTP, DB, Redis, LLM).
 │   ├── cli/          Typer entry point + Rich dashboard + signal renderer.
+│   ├── api/          FastAPI app (REST + WebSocket) for the frontend.
 │   ├── db/           SQLAlchemy schema + Alembic migrations.
 │   ├── container.py  Dependency injection (plain factory).
 │   └── settings.py   pydantic-settings (env-driven config).
-└── frontend/    Reserved for phase 2 (web UI).
+└── frontend/    Next.js 15 web app (TypeScript + Tailwind 4).
+    ├── app/          App Router pages + providers
+    ├── components/   ui/, shared/, vix/ — VixChart + VixAlertsPanel
+    ├── hooks/        useLiveTick, useVixAlerts
+    └── lib/          api.ts, ws.ts, types.ts, alerts/{store,engine,notify}
 ```
 
 Imports are top-level: `from core.models import ...`,
@@ -149,12 +165,19 @@ make format             black + isort (write)
 make typecheck          mypy
 make db-migrate         Apply pending Alembic migrations
 make db-revision MSG=…  Generate a new Alembic migration
-make docker-build       Build the backend image
-make docker-up          docker compose up (backend + postgres + redis)
-make docker-down        docker compose down
-make docker-logs        Follow backend logs (recommended view mode)
-make docker-snapshot    Run `dtb snapshot` inside the live container
-make clean              Wipe caches and build artefacts
+make docker-build         Build all images (backend + frontend)
+make docker-build-backend Build only backend image
+make docker-build-frontend Build only frontend image
+make docker-up            docker compose up (backend + frontend + postgres + redis)
+make docker-down          docker compose down
+make docker-logs          Follow backend logs (recommended view mode)
+make docker-logs-frontend Follow frontend logs
+make docker-snapshot      Run `dtb snapshot` inside the live container
+make frontend-install     npm install in frontend/
+make frontend-dev         next dev (http://localhost:3000, hot reload)
+make frontend-build       next build (production bundle)
+make frontend-lint        eslint
+make clean                Wipe caches and build artefacts
 ```
 
 ## CLI commands (`dtb`)
@@ -222,6 +245,22 @@ Same model (Opus 4.7), zero Anthropic API spend.
   the issue; events return as soon as the limit clears.
 - The post-event explainer doesn't auto-fire yet (was originally planned for
   30 min before high-impact events). Run `dtb explain` manually for now.
+
+## Backend HTTP surface (for the frontend)
+
+The backend runs FastAPI in the same process as the tick loop. Each new
+`DashboardTick` is fanned out to connected WebSocket clients.
+
+```
+GET   /health                            liveness probe
+GET   /api/tick                          latest DashboardTick (503 until first)
+GET   /api/vix/history?lookback_days=N   5m VIX bars (1-60 day lookback)
+WS    /ws/ticks                          streams each new tick
+```
+
+CORS is open for `http://localhost:3000` and `http://127.0.0.1:3000` by
+default. For remote deploys, override the allowlist in
+`backend/api/app.py:DEFAULT_CORS_ORIGINS`.
 
 ## Out of scope (phase 2+)
 

@@ -1,59 +1,61 @@
 "use client";
 
 import { Header } from "@/components/shared/Header";
+import { VixChart } from "@/components/vix/VixChart";
+import { VixAlertsPanel } from "@/components/vix/VixAlertsPanel";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useLiveTick } from "@/hooks/useLiveTick";
+import { useVixAlerts } from "@/hooks/useVixAlerts";
 import { fmtPrice, fmtPct } from "@/lib/utils";
 
 export default function Home() {
   const { tick, status } = useLiveTick();
+  const vix = tick?.market.vix.vix ?? null;
+  useVixAlerts(tick);
 
   return (
     <>
       <Header status={status} lastTickAt={tick?.timestamp ?? null} />
 
       <main className="mx-auto w-full max-w-7xl flex-1 px-6 py-6 space-y-6">
-        {/* TODO Phase 3: VixChart and VixAlertsPanel land here */}
-
         <Card>
           <CardHeader>
-            <CardTitle>VIX</CardTitle>
-            <CardDescription>
-              Gráfico e alertas chegam na Fase 3 — por enquanto leitura ao vivo
-              via WebSocket abaixo.
-            </CardDescription>
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <CardTitle>VIX</CardTitle>
+                <CardDescription>
+                  5m intraday · linhas verdes (calmo, 15) e vermelha (stress, 25)
+                </CardDescription>
+              </div>
+              {tick && (
+                <div className="flex items-baseline gap-3">
+                  <span className="text-3xl font-semibold tabular-nums text-zinc-100">
+                    {fmtPrice(tick.market.vix.vix)}
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    <Badge tone={regimeTone(tick.market.vix.regime)}>
+                      {tick.market.vix.regime}
+                    </Badge>
+                    <Badge tone={termTone(tick.market.vix.term_structure)}>
+                      {tick.market.vix.term_structure}
+                    </Badge>
+                  </div>
+                </div>
+              )}
+            </div>
           </CardHeader>
           <CardContent>
-            {tick ? (
-              <div className="space-y-2">
-                <div className="flex items-baseline gap-3 text-3xl font-semibold tabular-nums">
-                  {fmtPrice(tick.market.vix.vix)}
-                </div>
-                <div className="flex flex-wrap gap-2 text-xs">
-                  <Badge tone={regimeTone(tick.market.vix.regime)}>
-                    regime: {tick.market.vix.regime}
-                  </Badge>
-                  <Badge tone={termTone(tick.market.vix.term_structure)}>
-                    term: {tick.market.vix.term_structure}
-                  </Badge>
-                  {tick.market.vix.vix9d !== null && (
-                    <Badge>VIX9D: {fmtPrice(tick.market.vix.vix9d)}</Badge>
-                  )}
-                  {tick.market.vix.vix3m !== null && (
-                    <Badge>VIX3M: {fmtPrice(tick.market.vix.vix3m)}</Badge>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <p className="text-sm text-zinc-500">Aguardando primeiro tick…</p>
-            )}
+            <VixChart liveVix={vix} />
           </CardContent>
         </Card>
+
+        <VixAlertsPanel />
 
         <Card>
           <CardHeader>
             <CardTitle>Ativos</CardTitle>
+            <CardDescription>USTEC · SPX · GOLD — leitura ao vivo</CardDescription>
           </CardHeader>
           <CardContent>
             {tick ? (
