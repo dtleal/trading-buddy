@@ -40,12 +40,12 @@ test:  ## Unit tests only (fast, no network)
 	cd backend && uv run pytest -m "not integration"
 
 test-cov:  ## Unit tests with coverage report
-	cd backend && uv run pytest --cov=core --cov=adapters --cov=use_cases --cov=cli --cov=db --cov=container --cov=settings --cov-report=term-missing -m "not integration"
+	cd backend && uv run pytest --cov=core --cov=adapters --cov=use_cases --cov=cli --cov=db --cov=api --cov=container --cov=settings --cov-report=term-missing -m "not integration"
 
 test-integration:  ## Integration tests (hit real APIs and live DB/Redis)
 	cd backend && uv run pytest -m integration
 
-SRC_DIRS := core adapters use_cases cli db container.py settings.py
+SRC_DIRS := core adapters use_cases cli db api container.py settings.py
 
 lint:  ## black --check + isort --check + mypy
 	cd backend && uv run black --check $(SRC_DIRS) tests

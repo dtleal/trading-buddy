@@ -10,6 +10,8 @@ services:
     environment:
       POSTGRES_HOST: postgres
       REDIS_HOST: redis
+    ports:
+      - "8000:8000"  # FastAPI (REST + WebSocket for the frontend)
     depends_on:
       postgres:
         condition: service_healthy

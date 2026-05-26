@@ -9,8 +9,11 @@ from datetime import datetime, timezone
 from typing import Any, Literal, cast
 
 import typer
+import uvicorn
 from rich.console import Console
 
+from api.app import app as fastapi_app
+from api.broadcaster import broadcaster
 from cli.dashboard import render_tick
 from cli.signal_render import render_signal
 from container import Container, build_container
@@ -84,9 +87,24 @@ def _render_dashboard(
 async def _run_loop() -> None:
     settings = get_settings()
     container = await build_container(settings)
+
+    # Start the HTTP + WebSocket API in the same event loop. The tick loop
+    # publishes to `broadcaster`; the API streams from it.
+    api_server = uvicorn.Server(
+        uvicorn.Config(
+            fastapi_app,
+            host="0.0.0.0",
+            port=8000,
+            log_level=settings.log_level.lower(),
+            lifespan="on",
+        )
+    )
+    api_task = asyncio.create_task(api_server.serve(), name="fastapi-server")
+
     try:
         while True:
             tick = await container.run_tick.execute()
+            await broadcaster.publish(tick)
             elapsed = 0
             # Re-render the SAME tick every display_refresh_seconds so the
             # screen stays alive (countdown ticks down) without burning yfinance/
@@ -98,6 +116,8 @@ async def _run_loop() -> None:
                 await asyncio.sleep(sleep_for)
                 elapsed += sleep_for
     finally:
+        api_server.should_exit = True
+        await asyncio.shield(asyncio.wait_for(api_task, timeout=5.0))
         await container.aclose()
 
 
