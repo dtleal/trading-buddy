@@ -246,6 +246,26 @@ Same model (Opus 4.7), zero Anthropic API spend.
 - The post-event explainer doesn't auto-fire yet (was originally planned for
   30 min before high-impact events). Run `dtb explain` manually for now.
 
+## Autostart at macOS login
+
+```bash
+make autostart-install     # registers a launchd agent
+make autostart-status      # check agent state + tail the log
+make autostart-uninstall   # remove the agent
+make autostart-run         # smoke-test the script without rebooting
+```
+
+What gets installed:
+- `~/Library/LaunchAgents/com.trading-buddy.autostart.plist` — registered with `launchctl load -w`
+- The plist runs `scripts/autostart-stack.sh` at login
+- Logs: `~/Library/Logs/trading-buddy/autostart.log`
+
+The script waits up to 3 minutes for the Docker daemon to become ready
+(Docker Desktop usually takes a few seconds to launch after login), then
+runs `make docker-up`. For this to work, also turn on **Docker Desktop →
+Settings → "Start Docker Desktop when you log in"**, otherwise the agent
+will time out waiting for Docker.
+
 ## Backend HTTP surface (for the frontend)
 
 The backend runs FastAPI in the same process as the tick loop. Each new

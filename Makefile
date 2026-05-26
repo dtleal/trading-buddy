@@ -7,7 +7,8 @@ SHELL := /bin/bash
         lint format typecheck db-migrate db-revision \
         docker-build docker-build-backend docker-build-frontend \
         docker-up docker-down docker-logs docker-logs-frontend docker-shell \
-        frontend-install frontend-dev frontend-build frontend-lint clean
+        frontend-install frontend-dev frontend-build frontend-lint \
+        autostart-install autostart-uninstall autostart-status autostart-run clean
 
 help:  ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -111,6 +112,43 @@ frontend-build:  ## next build (production bundle)
 
 frontend-lint:  ## eslint
 	cd frontend && npm run lint
+
+# -----------------------------------------------------------------------------
+# macOS autostart (launchd agent)
+# -----------------------------------------------------------------------------
+
+AUTOSTART_LABEL := com.trading-buddy.autostart
+AUTOSTART_PLIST := $(HOME)/Library/LaunchAgents/$(AUTOSTART_LABEL).plist
+AUTOSTART_SRC := scripts/com.trading-buddy.autostart.plist
+REPO_ABS := $(shell pwd)
+
+autostart-install:  ## Install launchd agent: stack comes up at login
+	@mkdir -p $(HOME)/Library/LaunchAgents $(HOME)/Library/Logs/trading-buddy
+	@sed -e "s|__REPO_DIR__|$(REPO_ABS)|g" -e "s|__HOME__|$(HOME)|g" \
+		$(AUTOSTART_SRC) > $(AUTOSTART_PLIST)
+	@launchctl unload $(AUTOSTART_PLIST) 2>/dev/null || true
+	@launchctl load -w $(AUTOSTART_PLIST)
+	@echo "[autostart] installed → $(AUTOSTART_PLIST)"
+	@echo "[autostart] logs       → $(HOME)/Library/Logs/trading-buddy/"
+	@echo "[autostart] verify     → make autostart-status"
+	@echo ""
+	@echo "Reminder: open Docker Desktop → Settings → 'Start Docker Desktop"
+	@echo "when you log in'. The launchd agent waits up to 3 min for Docker"
+	@echo "to come up, but it needs Docker to actually start at login."
+
+autostart-uninstall:  ## Remove launchd agent
+	@launchctl unload $(AUTOSTART_PLIST) 2>/dev/null || true
+	@rm -f $(AUTOSTART_PLIST)
+	@echo "[autostart] removed."
+
+autostart-status:  ## Show launchd agent status + tail of the log
+	@launchctl list | grep $(AUTOSTART_LABEL) || echo "[autostart] not loaded"
+	@echo "--- last 20 log lines ---"
+	@tail -n 20 $(HOME)/Library/Logs/trading-buddy/autostart.log 2>/dev/null || echo "(no log yet)"
+
+autostart-run:  ## Run the autostart script now (smoke test, no reboot needed)
+	@TRADING_BUDDY_REPO=$(REPO_ABS) $(REPO_ABS)/scripts/autostart-stack.sh
+	@echo "[autostart] manual run done."
 
 docker-shell:  ## Open a shell inside the backend container
 	docker compose -f docker/docker-compose.yml exec backend bash
