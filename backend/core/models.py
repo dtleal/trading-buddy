@@ -10,10 +10,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from core.enums import (
     AssetSymbol,
     BiasLevel,
+    BreakoutDirection,
     ImpactLevel,
     LLMOutputKind,
     SentimentLabel,
     TermStructure,
+    Timeframe,
     VixRegime,
     VolatilityIndex,
 )
@@ -221,6 +223,38 @@ class BiasReport(_Frozen):
 # -----------------------------------------------------------------------------
 
 
+class Breakout(_Frozen):
+    """A Donchian-channel breakout detected on one asset / one timeframe.
+
+    `id` is stable for the same breakout event across ticks: keyed by
+    (asset, timeframe, direction, signal_bar_timestamp). The frontend uses it
+    to dedup alerts when the same recent breakout shows up in successive ticks.
+    """
+
+    id: str
+    asset: AssetSymbol
+    timeframe: Timeframe
+    direction: BreakoutDirection
+
+    # The level that got broken (highest-high or lowest-low of the prior N bars).
+    level: float
+    # Close of the signal bar (the one that broke through).
+    close: float
+    # Range of the signal bar in price units.
+    bar_range: float
+    # Expansion ratio = bar_range / ATR(14). > 1.3 by detector design.
+    expansion_ratio: float
+    # Composite strength (0-100). Combines expansion + how far past `level`.
+    strength: float
+    # Was the volatility contracting *before* the break? (ATR(14) < SMA20 of ATR.)
+    squeeze: bool
+
+    # Timestamp of the signal bar (UTC, ISO 8601 when serialized).
+    signal_bar_at: datetime
+    # When the detector first emitted this event.
+    detected_at: datetime
+
+
 class TradeSetup(_Frozen):
     """A high-confluence trade idea detected by `DetectTradeSetupUseCase`.
 
@@ -273,6 +307,7 @@ class DashboardTick(_Frozen):
     bias: dict[AssetSymbol, BiasReport]
     setups: list[TradeSetup] = Field(default_factory=list)
     intraday_levels: dict[AssetSymbol, "IntradayLevels"] = Field(default_factory=dict)
+    breakouts_recent: list[Breakout] = Field(default_factory=list)
 
 
 __all__ = [
@@ -289,6 +324,7 @@ __all__ = [
     "BiasComponents",
     "BiasReport",
     "TradeSetup",
+    "Breakout",
     "LLMOutput",
     "DashboardTick",
     "VolatilityIndex",

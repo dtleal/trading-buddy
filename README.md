@@ -42,6 +42,33 @@ favorable.
 - Position sizing helper when `ACCOUNT_SIZE_USD > 0` (uses NQ/ES/GC contract
   multipliers by default; override with `--multiplier`).
 
+### Breakout detector (15m / 30m / 60m / 4h)
+
+A Donchian-channel breakout scanner runs on every tick across USTEC, SPX
+and GOLD, on all four timeframes (resampled in memory from a single 5m
+fetch per asset — no extra yfinance calls). A signal fires only when **all**
+of the following hold on the candidate bar:
+
+1. **Fresh Donchian cross**: `close > max(high)` of the last 20 bars
+   (or symmetric for down breakouts), AND the previous bar's close was
+   still inside the channel (not a continuation).
+2. **Range expansion**: `bar_range > 1.3 × ATR(14)` — filters wicks.
+3. **Close decisive**: the close itself, not just the wick, is past
+   the level.
+4. **Pre-squeeze**: `ATR(14)` on the bar **before** the break was at
+   most equal to the 20-bar SMA of ATR — i.e. volatility was contracting
+   right before the move.
+
+Each signal has a stable `id` (sha1 of asset/timeframe/direction/bar_ts)
+so the frontend can dedup alerts across the many ticks that carry the
+same recent-breakouts list. The frontend panel offers timeframe + asset
+filters, and the alert engine fires a toast + optional browser
+notification when a new id appears.
+
+Thresholds live in `backend/use_cases/detect_breakout.py:BreakoutThresholds`.
+Set `require_squeeze=False` to fire on any Donchian break that meets
+conditions 1-3 (more signals, more noise).
+
 ### Setup-with-edge panel (dashboard)
 
 When **multiple objective confluences align**, the dashboard emits a single

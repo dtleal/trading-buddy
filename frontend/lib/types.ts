@@ -87,6 +87,28 @@ export const BiasReport = z.object({
 });
 export type BiasReport = z.infer<typeof BiasReport>;
 
+export const Timeframe = z.enum(["5m", "15m", "30m", "60m", "4h"]);
+export type Timeframe = z.infer<typeof Timeframe>;
+
+export const BreakoutDirection = z.enum(["up", "down"]);
+export type BreakoutDirection = z.infer<typeof BreakoutDirection>;
+
+export const Breakout = z.object({
+  id: z.string(),
+  asset: AssetSymbol,
+  timeframe: Timeframe,
+  direction: BreakoutDirection,
+  level: z.number(),
+  close: z.number(),
+  bar_range: z.number(),
+  expansion_ratio: z.number(),
+  strength: z.number(),
+  squeeze: z.boolean(),
+  signal_bar_at: z.string(),
+  detected_at: z.string(),
+});
+export type Breakout = z.infer<typeof Breakout>;
+
 export const TradeSetup = z.object({
   asset: AssetSymbol,
   direction: z.enum(["LONG", "SHORT"]),
@@ -126,6 +148,7 @@ export const DashboardTick = z.object({
   bias: z.record(AssetSymbol, BiasReport),
   setups: z.array(TradeSetup),
   intraday_levels: z.record(AssetSymbol, z.unknown()),
+  breakouts_recent: z.array(Breakout).default([]),
 });
 export type DashboardTick = z.infer<typeof DashboardTick>;
 

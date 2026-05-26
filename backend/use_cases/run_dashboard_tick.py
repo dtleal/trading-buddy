@@ -11,19 +11,41 @@ import logging
 from datetime import datetime, timezone
 
 from adapters.prices_yfinance import YFinancePricesGateway
-from core.enums import AssetSymbol
+from core.enums import AssetSymbol, Timeframe
 from core.interfaces import SnapshotRepository
-from core.models import BiasReport, DashboardTick, IntradayLevels, NewsItem, TradeSetup
+from core.models import (
+    BiasReport,
+    Breakout,
+    DashboardTick,
+    IntradayLevels,
+    NewsItem,
+    TradeSetup,
+)
 from use_cases.compute_combined_bias import ComputeCombinedBiasUseCase
 from use_cases.compute_intraday_levels import ComputeIntradayLevelsUseCase
 from use_cases.compute_macro_signal import ComputeMacroSignalUseCase
 from use_cases.compute_news_sentiment import ComputeNewsSentimentUseCase
 from use_cases.compute_technical_bias import ComputeTechnicalBiasUseCase
+from use_cases.detect_breakout import DetectBreakoutsUseCase
 from use_cases.detect_trade_setup import DetectTradeSetupUseCase
 from use_cases.fetch_calendar import FetchEconomicCalendarUseCase
 from use_cases.fetch_macro import FetchMacroIndicatorsUseCase
 from use_cases.fetch_market import FetchMarketSnapshotUseCase
 from use_cases.fetch_news import FetchNewsHeadlinesUseCase
+from use_cases.resample_bars import resample_to
+
+# Timeframes the dashboard surfaces for breakout alerts.
+BREAKOUT_TIMEFRAMES: tuple[Timeframe, ...] = (
+    Timeframe.M15,
+    Timeframe.M30,
+    Timeframe.H1,
+    Timeframe.H4,
+)
+
+# Lookback days for the 5m fetch. 4h breakouts need at least 20 closed 4h bars
+# (N=20 in the Donchian) + ATR window + room for the scan. 15 days of RTH is
+# comfortably enough for indices; futures (GC=F, 23h) get even more bars.
+BREAKOUT_LOOKBACK_DAYS = 15
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +68,7 @@ class RunDashboardTickUseCase:
         prices: YFinancePricesGateway | None = None,
         compute_intraday: ComputeIntradayLevelsUseCase | None = None,
         detect_setup: DetectTradeSetupUseCase | None = None,
+        detect_breakouts: DetectBreakoutsUseCase | None = None,
         intraday_assets: tuple[AssetSymbol, ...] = (
             AssetSymbol.USTEC,
             AssetSymbol.SPX,
@@ -66,6 +89,7 @@ class RunDashboardTickUseCase:
         self._prices = prices
         self._compute_intraday = compute_intraday
         self._detect_setup = detect_setup
+        self._detect_breakouts = detect_breakouts
         self._intraday_assets = intraday_assets
 
     async def execute(self) -> DashboardTick:
@@ -91,7 +115,7 @@ class RunDashboardTickUseCase:
             sentiment=sentiment_by_asset,
         )
 
-        intraday_levels, setups = await self._compute_intraday_and_setups(bias)
+        intraday_levels, setups, breakouts = await self._compute_intraday_setups_breakouts(bias)
 
         tick = DashboardTick(
             timestamp=datetime.now(timezone.utc),
@@ -102,6 +126,7 @@ class RunDashboardTickUseCase:
             bias=bias,
             setups=setups,
             intraday_levels=intraday_levels,
+            breakouts_recent=breakouts,
         )
 
         await asyncio.gather(
@@ -113,45 +138,56 @@ class RunDashboardTickUseCase:
 
         return tick
 
-    async def _compute_intraday_and_setups(
+    async def _compute_intraday_setups_breakouts(
         self,
         bias: dict[AssetSymbol, BiasReport],
-    ) -> tuple[dict[AssetSymbol, IntradayLevels], list[TradeSetup]]:
-        """Best-effort: pull 5m bars for each asset, compute levels + setups.
+    ) -> tuple[dict[AssetSymbol, IntradayLevels], list[TradeSetup], list[Breakout]]:
+        """Best-effort: pull 5m bars per asset, compute intraday levels, trade
+        setups, and breakout signals across all configured timeframes.
 
         Failures on a single asset (rate limit, missing bars) are logged but
-        do not break the tick — the dashboard simply omits that asset's
-        intraday line and its setup.
+        do not break the tick — the dashboard simply omits that asset's data.
         """
         prices = self._prices
         compute_intraday = self._compute_intraday
         detect_setup = self._detect_setup
+        detect_breakouts = self._detect_breakouts
         if prices is None or compute_intraday is None or detect_setup is None:
-            return {}, []
+            return {}, [], []
 
         async def _one(
             asset: AssetSymbol,
-        ) -> tuple[AssetSymbol, IntradayLevels | None, TradeSetup | None]:
+        ) -> tuple[AssetSymbol, IntradayLevels | None, TradeSetup | None, list[Breakout]]:
             try:
-                bars = await prices.get_intraday_bars(asset.value, "5m", 5)
+                bars = await prices.get_intraday_bars(asset.value, "5m", BREAKOUT_LOOKBACK_DAYS)
                 levels = compute_intraday.execute(asset.value, bars)
-                if levels is None:
-                    return asset, None, None
-                setup = detect_setup.execute(levels, bias[asset])
-                return asset, levels, setup
+                setup = None
+                if levels is not None:
+                    setup = detect_setup.execute(levels, bias[asset])
+                # Breakout detection across configured timeframes.
+                asset_breakouts: list[Breakout] = []
+                if detect_breakouts is not None and bars:
+                    for tf in BREAKOUT_TIMEFRAMES:
+                        tf_bars = resample_to(bars, tf)
+                        asset_breakouts.extend(detect_breakouts.execute(asset, tf, tf_bars))
+                return asset, levels, setup, asset_breakouts
             except Exception:
-                logger.exception("Intraday/setup failed for %s", asset.value)
-                return asset, None, None
+                logger.exception("Intraday/setup/breakout failed for %s", asset.value)
+                return asset, None, None, []
 
         results = await asyncio.gather(*(_one(a) for a in self._intraday_assets))
         levels_map: dict[AssetSymbol, IntradayLevels] = {}
         setups: list[TradeSetup] = []
-        for asset, lv, sp in results:
+        breakouts: list[Breakout] = []
+        for asset, lv, sp, bk in results:
             if lv is not None:
                 levels_map[asset] = lv
             if sp is not None:
                 setups.append(sp)
-        return levels_map, setups
+            breakouts.extend(bk)
+        # Most recent first — frontend slices for display.
+        breakouts.sort(key=lambda b: b.signal_bar_at, reverse=True)
+        return levels_map, setups, breakouts
 
 
 def _with_neutral_default(items: list[NewsItem]) -> list[NewsItem]:

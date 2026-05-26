@@ -67,3 +67,26 @@ class LLMOutputKind(str, Enum):
     BRIEFING = "briefing"
     EVENT_PRE = "event_pre"
     EVENT_POST = "event_post"
+
+
+class Timeframe(str, Enum):
+    """Bar timeframes used by the breakout detector.
+
+    Higher timeframes are computed by resampling the base 5m yfinance bars in
+    memory — see `use_cases/resample_bars.py`. `M5` is here for completeness
+    (the source bars) but the detector skips it on purpose; signals at 5m are
+    too noisy and would flood the alert stream.
+    """
+
+    M5 = "5m"
+    M15 = "15m"
+    M30 = "30m"
+    H1 = "60m"
+    H4 = "4h"
+
+
+class BreakoutDirection(str, Enum):
+    """Side of a Donchian breakout."""
+
+    UP = "up"  # close > highest high of the last N bars
+    DOWN = "down"  # close < lowest low of the last N bars

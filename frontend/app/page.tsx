@@ -8,16 +8,19 @@ import { BiasPanel } from "@/components/bias/BiasPanel";
 import { SetupsPanel } from "@/components/setups/SetupsPanel";
 import { EventsPanel } from "@/components/events/EventsPanel";
 import { NewsPanel } from "@/components/news/NewsPanel";
+import { BreakoutsPanel } from "@/components/breakouts/BreakoutsPanel";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useLiveTick } from "@/hooks/useLiveTick";
 import { useVixAlerts } from "@/hooks/useVixAlerts";
+import { useBreakoutAlerts } from "@/hooks/useBreakoutAlerts";
 import { fmtPrice } from "@/lib/utils";
 
 export default function Home() {
   const { tick, status } = useLiveTick();
   const vix = tick?.market.vix.vix ?? null;
   useVixAlerts(tick);
+  useBreakoutAlerts(tick);
 
   return (
     <>
@@ -69,7 +72,10 @@ export default function Home() {
           <SetupsPanel tick={tick} />
         </div>
 
-        {/* Row 4: calendar + news side by side */}
+        {/* Row 4: breakouts (full width — most relevant for day trading) */}
+        <BreakoutsPanel tick={tick} />
+
+        {/* Row 5: calendar + news side by side */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <EventsPanel tick={tick} />
           <NewsPanel tick={tick} />
