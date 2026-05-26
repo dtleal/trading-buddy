@@ -27,6 +27,21 @@ DEFAULT_CORS_ORIGINS: list[str] = [
     "http://127.0.0.1:3000",
 ]
 
+# Also allow any private RFC1918 LAN origin so the user can open the frontend
+# from a phone or another device on the same Wi-Fi (e.g. http://192.168.x.x:3000).
+# Covers 10.0.0.0/8, 172.16-31.0.0/12, 192.168.0.0/16 + the .local mDNS suffix.
+LAN_ORIGIN_REGEX = (
+    r"^https?://"
+    r"("
+    r"localhost|127\.0\.0\.1|"
+    r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
+    r"172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|"
+    r"192\.168\.\d{1,3}\.\d{1,3}|"
+    r"[A-Za-z0-9-]+\.local"
+    r")"
+    r"(:\d+)?$"
+)
+
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -50,6 +65,7 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=DEFAULT_CORS_ORIGINS,
+        allow_origin_regex=LAN_ORIGIN_REGEX,
         allow_credentials=True,
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["*"],

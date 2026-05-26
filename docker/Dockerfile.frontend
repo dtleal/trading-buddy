@@ -24,7 +24,10 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY frontend/ ./
 
 # NEXT_PUBLIC_API_URL is baked into the static bundle at build time.
-ARG NEXT_PUBLIC_API_URL=http://localhost:8000
+# Left empty by default so the runtime falls back to `window.location.hostname`
+# — the same bundle works from localhost AND from a LAN IP (phone access).
+# For a remote/production deploy, build with --build-arg NEXT_PUBLIC_API_URL=…
+ARG NEXT_PUBLIC_API_URL=""
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 
 RUN npm run build

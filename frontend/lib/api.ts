@@ -3,8 +3,27 @@
  */
 import { DashboardTick, VixHistoryResponse } from "@/lib/types";
 
-const BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+/**
+ * API base URL resolution:
+ * 1. Build-time `NEXT_PUBLIC_API_URL` always wins (for production deploys
+ *    with a known backend host).
+ * 2. In the browser, derive from `window.location` so the same bundle works
+ *    whether you load the app at http://localhost:3000, http://<lan-ip>:3000,
+ *    http://machine.local:3000, etc. The phone hitting the LAN IP gets the
+ *    LAN IP back instead of the broken "localhost".
+ * 3. Server-side fallback (SSR / build): localhost.
+ */
+function resolveBaseUrl(): string {
+  if (process.env.NEXT_PUBLIC_API_URL && process.env.NEXT_PUBLIC_API_URL.length > 0) {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+  if (typeof window !== "undefined") {
+    return `${window.location.protocol}//${window.location.hostname}:8000`;
+  }
+  return "http://localhost:8000";
+}
+
+const BASE_URL = resolveBaseUrl();
 
 class ApiError extends Error {
   constructor(public status: number, message: string) {

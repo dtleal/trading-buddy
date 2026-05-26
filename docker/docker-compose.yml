@@ -55,10 +55,10 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.frontend
       args:
-        # Browser hits the backend on the host network, so localhost is correct
-        # for users running the stack on their own machine. Override at build
-        # time for remote deploys.
-        NEXT_PUBLIC_API_URL: "http://localhost:8000"
+        # Empty → bundle auto-detects the host at runtime from window.location,
+        # so the same image works whether you load the app at localhost,
+        # 192.168.x.x:3000 (phone on same Wi-Fi), or a remote hostname.
+        NEXT_PUBLIC_API_URL: ""
     ports:
       - "3000:3000"
     depends_on:
