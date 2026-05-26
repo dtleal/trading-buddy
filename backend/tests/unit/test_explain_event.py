@@ -4,10 +4,10 @@ from datetime import datetime, timezone
 
 import pytest
 
-from day_trading_buddy.core.enums import ImpactLevel, LLMOutputKind
-from day_trading_buddy.core.models import EconomicEvent
-from day_trading_buddy.use_cases.explain_event import ExplainEventUseCase
+from core.enums import ImpactLevel, LLMOutputKind
+from core.models import EconomicEvent
 from tests.fakes import FakeLLMGateway, FakeSnapshotRepository, InMemoryCache
+from use_cases.explain_event import ExplainEventUseCase
 
 
 def _event() -> EconomicEvent:

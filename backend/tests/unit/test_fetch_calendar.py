@@ -4,9 +4,9 @@ from datetime import date
 
 import pytest
 
-from day_trading_buddy.core.enums import ImpactLevel
-from day_trading_buddy.use_cases.fetch_calendar import FetchEconomicCalendarUseCase
+from core.enums import ImpactLevel
 from tests.fakes import FakeCalendarGateway, InMemoryCache
+from use_cases.fetch_calendar import FetchEconomicCalendarUseCase
 
 
 @pytest.mark.asyncio

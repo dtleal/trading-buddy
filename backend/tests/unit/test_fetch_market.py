@@ -4,10 +4,10 @@ from datetime import datetime, timezone
 
 import pytest
 
-from day_trading_buddy.core.enums import AssetSymbol, TermStructure, VixRegime
-from day_trading_buddy.core.models import PriceQuote
-from day_trading_buddy.use_cases.fetch_market import FetchMarketSnapshotUseCase
+from core.enums import AssetSymbol, TermStructure, VixRegime
+from core.models import PriceQuote
 from tests.fakes import FakePricesGateway, InMemoryCache
+from use_cases.fetch_market import FetchMarketSnapshotUseCase
 
 
 @pytest.mark.asyncio

@@ -4,10 +4,10 @@ from datetime import datetime, timezone
 
 import pytest
 
-from day_trading_buddy.core.enums import AssetSymbol, SentimentLabel
-from day_trading_buddy.core.models import NewsItem
-from day_trading_buddy.use_cases.compute_news_sentiment import ComputeNewsSentimentUseCase
+from core.enums import AssetSymbol, SentimentLabel
+from core.models import NewsItem
 from tests.fakes import FakeSentimentClassifier
+from use_cases.compute_news_sentiment import ComputeNewsSentimentUseCase
 
 
 @pytest.mark.asyncio

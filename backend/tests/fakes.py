@@ -9,8 +9,8 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from typing import Any, Callable
 
-from day_trading_buddy.core.enums import LLMOutputKind, SentimentLabel
-from day_trading_buddy.core.models import (
+from core.enums import LLMOutputKind, SentimentLabel
+from core.models import (
     BiasReport,
     EconomicEvent,
     FedWatchProbability,

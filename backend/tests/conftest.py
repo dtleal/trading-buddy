@@ -7,13 +7,13 @@ from typing import Iterator
 
 import pytest
 
-from day_trading_buddy.core.enums import (
+from core.enums import (
     AssetSymbol,
     ImpactLevel,
     TermStructure,
     VixRegime,
 )
-from day_trading_buddy.core.models import (
+from core.models import (
     EconomicEvent,
     MacroIndicator,
     MacroSnapshot,

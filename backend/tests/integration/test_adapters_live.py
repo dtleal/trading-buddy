@@ -20,27 +20,27 @@ from datetime import datetime, timezone
 
 import pytest
 
-from day_trading_buddy.adapters.cache_redis import RedisCacheStore
-from day_trading_buddy.adapters.calendar_forexfactory import ForexFactoryCalendarGateway
-from day_trading_buddy.adapters.db_postgres import PostgresSnapshotRepository
-from day_trading_buddy.adapters.llm_anthropic import AnthropicLLMGateway
-from day_trading_buddy.adapters.macro_fred import FREDMacroGateway
-from day_trading_buddy.adapters.news_newsapi import NewsAPIGateway
-from day_trading_buddy.adapters.news_rss import DEFAULT_FEEDS, RSSNewsGateway
-from day_trading_buddy.adapters.prices_yfinance import YFinancePricesGateway
-from day_trading_buddy.core.enums import (
+from adapters.cache_redis import RedisCacheStore
+from adapters.calendar_forexfactory import ForexFactoryCalendarGateway
+from adapters.db_postgres import PostgresSnapshotRepository
+from adapters.llm_anthropic import AnthropicLLMGateway
+from adapters.macro_fred import FREDMacroGateway
+from adapters.news_newsapi import NewsAPIGateway
+from adapters.news_rss import DEFAULT_FEEDS, RSSNewsGateway
+from adapters.prices_yfinance import YFinancePricesGateway
+from core.enums import (
     AssetSymbol,
     LLMOutputKind,
     TermStructure,
     VixRegime,
 )
-from day_trading_buddy.core.models import (
+from core.models import (
     EconomicEvent,
     MarketSnapshot,
     PriceQuote,
     VixSnapshot,
 )
-from day_trading_buddy.settings import Settings
+from settings import Settings
 
 pytestmark = pytest.mark.integration
 

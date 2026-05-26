@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from day_trading_buddy.adapters.sentiment_keyword import KeywordSentimentClassifier
-from day_trading_buddy.core.enums import SentimentLabel
+from adapters.sentiment_keyword import KeywordSentimentClassifier
+from core.enums import SentimentLabel
 
 
 @pytest.mark.asyncio

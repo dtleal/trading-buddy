@@ -4,9 +4,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from day_trading_buddy.core.models import NewsItem
-from day_trading_buddy.use_cases.fetch_news import FetchNewsHeadlinesUseCase
+from core.models import NewsItem
 from tests.fakes import FakeNewsGateway
+from use_cases.fetch_news import FetchNewsHeadlinesUseCase
 
 
 @pytest.mark.asyncio

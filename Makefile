@@ -33,22 +33,24 @@ test:  ## Unit tests only (fast, no network)
 	cd backend && uv run pytest -m "not integration"
 
 test-cov:  ## Unit tests with coverage report
-	cd backend && uv run pytest --cov=day_trading_buddy --cov-report=term-missing -m "not integration"
+	cd backend && uv run pytest --cov=core --cov=adapters --cov=use_cases --cov=cli --cov=db --cov=container --cov=scheduler --cov=settings --cov-report=term-missing -m "not integration"
 
 test-integration:  ## Integration tests (hit real APIs and live DB/Redis)
 	cd backend && uv run pytest -m integration
 
+SRC_DIRS := core adapters use_cases cli db container.py scheduler.py settings.py
+
 lint:  ## black --check + isort --check + mypy
-	cd backend && uv run black --check src tests
-	cd backend && uv run isort --check-only src tests
-	cd backend && uv run mypy src
+	cd backend && uv run black --check $(SRC_DIRS) tests
+	cd backend && uv run isort --check-only $(SRC_DIRS) tests
+	cd backend && uv run mypy $(SRC_DIRS)
 
 format:  ## Apply black + isort
-	cd backend && uv run black src tests
-	cd backend && uv run isort src tests
+	cd backend && uv run black $(SRC_DIRS) tests
+	cd backend && uv run isort $(SRC_DIRS) tests
 
 typecheck:  ## Run mypy on the source tree
-	cd backend && uv run mypy src
+	cd backend && uv run mypy $(SRC_DIRS)
 
 # -----------------------------------------------------------------------------
 # Database (Alembic)

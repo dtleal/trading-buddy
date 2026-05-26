@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import pytest
 
-from day_trading_buddy.core.enums import AssetSymbol, BiasLevel
-from day_trading_buddy.use_cases.compute_combined_bias import (
+from core.enums import AssetSymbol, BiasLevel
+from use_cases.compute_combined_bias import (
     BiasThresholds,
     BiasWeights,
     ComputeCombinedBiasUseCase,
 )
-from day_trading_buddy.use_cases.compute_macro_signal import MacroBias
-from day_trading_buddy.use_cases.compute_news_sentiment import SentimentBias
-from day_trading_buddy.use_cases.compute_technical_bias import TechnicalBias
+from use_cases.compute_macro_signal import MacroBias
+from use_cases.compute_news_sentiment import SentimentBias
+from use_cases.compute_technical_bias import TechnicalBias
 
 
 def _weights() -> BiasWeights:

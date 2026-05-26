@@ -4,9 +4,9 @@ from datetime import datetime, timezone
 
 import pytest
 
-from day_trading_buddy.core.enums import AssetSymbol
-from day_trading_buddy.core.models import FedWatchProbability, MacroIndicator, MacroSnapshot
-from day_trading_buddy.use_cases.compute_macro_signal import ComputeMacroSignalUseCase
+from core.enums import AssetSymbol
+from core.models import FedWatchProbability, MacroIndicator, MacroSnapshot
+from use_cases.compute_macro_signal import ComputeMacroSignalUseCase
 
 
 @pytest.mark.asyncio

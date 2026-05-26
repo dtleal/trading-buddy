@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from day_trading_buddy.core.enums import AssetSymbol, TermStructure, VixRegime
-from day_trading_buddy.core.models import MarketSnapshot, PriceQuote, VixSnapshot
-from day_trading_buddy.use_cases.compute_technical_bias import ComputeTechnicalBiasUseCase
+from core.enums import AssetSymbol, TermStructure, VixRegime
+from core.models import MarketSnapshot, PriceQuote, VixSnapshot
+from use_cases.compute_technical_bias import ComputeTechnicalBiasUseCase
 
 
 @pytest.mark.asyncio

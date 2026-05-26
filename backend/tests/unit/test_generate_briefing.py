@@ -4,14 +4,14 @@ from datetime import datetime, timezone
 
 import pytest
 
-from day_trading_buddy.core.enums import (
+from core.enums import (
     AssetSymbol,
     BiasLevel,
     LLMOutputKind,
     TermStructure,
     VixRegime,
 )
-from day_trading_buddy.core.models import (
+from core.models import (
     BiasComponents,
     BiasReport,
     DashboardTick,
@@ -20,8 +20,8 @@ from day_trading_buddy.core.models import (
     PriceQuote,
     VixSnapshot,
 )
-from day_trading_buddy.use_cases.generate_briefing import GenerateBriefingUseCase
 from tests.fakes import FakeLLMGateway, FakeSnapshotRepository, InMemoryCache
+from use_cases.generate_briefing import GenerateBriefingUseCase
 
 
 def _tick() -> DashboardTick:
