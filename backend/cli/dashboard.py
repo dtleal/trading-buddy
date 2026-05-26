@@ -11,7 +11,7 @@ from rich.text import Text
 
 from cli.i18n import t
 from core.enums import BiasLevel, TermStructure, VixRegime
-from core.models import DashboardTick
+from core.models import DashboardTick, TradeSetup
 
 Language = Literal["pt", "en"]
 
@@ -125,6 +125,55 @@ def _news_panel(tick: DashboardTick, language: Language) -> Panel:
     return Panel(body, title=t("news_header", language), border_style="blue")
 
 
+def _setup_card(setup: TradeSetup) -> Text:
+    """One setup formatted as a multi-line Text block."""
+    direction = setup.direction
+    arrow = "🟢 COMPRA" if direction == "LONG" else "🔴 VENDA"
+    style = "bold green" if direction == "LONG" else "bold red"
+
+    body = Text()
+    body.append(f"{setup.asset.value}  ", style="bold cyan")
+    body.append(f"{arrow}\n", style=style)
+    body.append(f"  Tendência: {setup.trend_label}\n")
+    body.append(f"  Continuação: {setup.continuation_label}\n")
+    body.append(
+        f"  Região de entrada: {setup.entry_zone_low:.2f} – {setup.entry_zone_high:.2f}\n",
+        style="bold",
+    )
+    body.append(f"  Stop: {setup.stop_level:.2f}\n", style="red")
+    body.append(
+        f"  Alvo: {setup.target_level:.2f}   |   R:R = {setup.risk_reward:.2f}\n",
+        style="green",
+    )
+    body.append("  Razões:\n", style="dim")
+    for r in setup.rationale:
+        body.append(f"    • {r}\n", style="dim")
+    return body
+
+
+def _setups_panel(tick: DashboardTick) -> Panel:
+    """Panel with detected setups; silent message when none."""
+    if not tick.setups:
+        return Panel(
+            Text(
+                "Sem setup com vantagem clara agora — mercado em LATERAL ou sem confluência.",
+                style="dim italic",
+            ),
+            title="🎯 Setup com vantagem",
+            border_style="yellow",
+        )
+    blocks: list[Text] = []
+    for i, setup in enumerate(tick.setups):
+        if i > 0:
+            blocks.append(Text("─" * 60, style="dim"))
+        blocks.append(_setup_card(setup))
+    combined = Text()
+    for b in blocks:
+        combined.append_text(b)
+        combined.append("\n")
+    return Panel(combined, title="🎯 Setup com vantagem", border_style="yellow")
+
+
 def render_tick(tick: DashboardTick, language: Language) -> Group:
     return Group(
         Panel(
@@ -134,6 +183,7 @@ def render_tick(tick: DashboardTick, language: Language) -> Group:
         _prices_table(tick, language),
         _vix_panel(tick, language),
         _bias_table(tick, language),
+        _setups_panel(tick),
         _events_table(tick, language),
         _news_panel(tick, language),
     )

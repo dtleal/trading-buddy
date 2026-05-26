@@ -27,9 +27,11 @@ from use_cases.compute_combined_bias import (
     BiasWeights,
     ComputeCombinedBiasUseCase,
 )
+from use_cases.compute_intraday_levels import ComputeIntradayLevelsUseCase
 from use_cases.compute_macro_signal import ComputeMacroSignalUseCase
 from use_cases.compute_news_sentiment import ComputeNewsSentimentUseCase
 from use_cases.compute_technical_bias import ComputeTechnicalBiasUseCase
+from use_cases.detect_trade_setup import DetectTradeSetupUseCase
 from use_cases.explain_event import ExplainEventUseCase
 from use_cases.fetch_calendar import FetchEconomicCalendarUseCase
 from use_cases.fetch_macro import FetchMacroIndicatorsUseCase
@@ -128,6 +130,11 @@ async def build_container(settings: Settings) -> Container:
         ),
     )
 
+    compute_intraday = ComputeIntradayLevelsUseCase(
+        opening_range_minutes=settings.opening_range_minutes
+    )
+    detect_setup = DetectTradeSetupUseCase()
+
     run_tick = RunDashboardTickUseCase(
         fetch_market=fetch_market,
         fetch_calendar=fetch_calendar,
@@ -138,6 +145,9 @@ async def build_container(settings: Settings) -> Container:
         compute_macro=compute_macro,
         compute_combined=compute_combined,
         repository=repository,
+        prices=prices,
+        compute_intraday=compute_intraday,
+        detect_setup=detect_setup,
     )
 
     generate_briefing = GenerateBriefingUseCase(

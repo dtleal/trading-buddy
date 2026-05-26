@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -217,6 +217,31 @@ class BiasReport(_Frozen):
 
 
 # -----------------------------------------------------------------------------
+# Trade setups (only emitted when objective confluence is detected)
+# -----------------------------------------------------------------------------
+
+
+class TradeSetup(_Frozen):
+    """A high-confluence trade idea detected by `DetectTradeSetupUseCase`.
+
+    This is a *heuristic* — multiple data conditions aligning in a way the
+    literature considers favorable. It is NOT a forecast. The user always
+    decides whether to take the trade.
+    """
+
+    asset: AssetSymbol
+    direction: Literal["LONG", "SHORT"]
+    trend_label: str  # e.g. "tendência alta forte"
+    continuation_label: str  # e.g. "alta probabilidade de continuação"
+    entry_zone_low: float
+    entry_zone_high: float
+    stop_level: float
+    target_level: float
+    risk_reward: float
+    rationale: list[str] = Field(default_factory=list)
+
+
+# -----------------------------------------------------------------------------
 # LLM outputs
 # -----------------------------------------------------------------------------
 
@@ -246,6 +271,8 @@ class DashboardTick(_Frozen):
     events_today: list[EconomicEvent]
     recent_news: list[NewsItem]
     bias: dict[AssetSymbol, BiasReport]
+    setups: list[TradeSetup] = Field(default_factory=list)
+    intraday_levels: dict[AssetSymbol, "IntradayLevels"] = Field(default_factory=dict)
 
 
 __all__ = [
@@ -261,6 +288,7 @@ __all__ = [
     "MacroSnapshot",
     "BiasComponents",
     "BiasReport",
+    "TradeSetup",
     "LLMOutput",
     "DashboardTick",
     "VolatilityIndex",
