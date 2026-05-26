@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     # --- Application tuning -----------------------------------------------
 
     tick_interval_seconds: int = 300
+    # How often the dashboard redraws itself with the same data so `docker
+    # attach` (which only streams future output) sees a live screen instead
+    # of waiting up to a full tick interval for the next render.
+    display_refresh_seconds: int = 10
     output_language: Literal["pt", "en"] = "pt"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 

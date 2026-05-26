@@ -74,7 +74,6 @@ packages = ["core", "adapters", "use_cases", "cli", "db"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "container.py" = "container.py"
-"scheduler.py" = "scheduler.py"
 "settings.py" = "settings.py"
 
 # -----------------------------------------------------------------------------
@@ -88,7 +87,7 @@ target-version = ["py312"]
 [tool.isort]
 profile = "black"
 line_length = 100
-known_first_party = ["core", "adapters", "use_cases", "cli", "db", "container", "scheduler", "settings"]
+known_first_party = ["core", "adapters", "use_cases", "cli", "db", "container", "settings"]
 src_paths = [".", "tests"]
 
 [tool.mypy]
@@ -130,7 +129,7 @@ addopts = [
 ]
 
 [tool.coverage.run]
-source = ["core", "adapters", "use_cases", "cli", "db", "container", "scheduler", "settings"]
+source = ["core", "adapters", "use_cases", "cli", "db", "container", "settings"]
 branch = true
 
 [tool.coverage.report]

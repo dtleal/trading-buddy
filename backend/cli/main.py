@@ -15,7 +15,6 @@ from cli.dashboard import render_tick
 from cli.signal_render import render_signal
 from container import Container, build_container
 from core.enums import AssetSymbol
-from scheduler import TickScheduler
 from settings import get_settings
 from use_cases.compute_intraday_levels import ComputeIntradayLevelsUseCase
 from use_cases.generate_briefing import (
@@ -51,34 +50,53 @@ def run() -> None:
     asyncio.run(_run_loop())
 
 
-def _render_dashboard(language: Literal["pt", "en"], tick: Any) -> None:
-    """Clear the screen and print the dashboard for this tick.
+def _format_countdown(remaining_s: int) -> str:
+    if remaining_s <= 0:
+        return "agora"
+    m, s = divmod(remaining_s, 60)
+    return f"{m:d}m {s:02d}s" if m else f"{s}s"
+
+
+def _render_dashboard(
+    language: Literal["pt", "en"],
+    tick: Any,
+    next_tick_in_s: int,
+) -> None:
+    """Clear the screen, print the dashboard, append a countdown footer.
 
     Works in every output mode we care about:
     - TTY (terminal local): ANSI clear redraws in-place each cycle.
     - `docker logs -f`: the streaming viewer renders the escape, so the
-      previous tick is wiped before the new one prints (no scrollback wall).
-    - `docker attach`: same as TTY.
+      previous frame is wiped before the new one prints (no scrollback wall).
+    - `docker attach`: same as TTY — the periodic redraw means a freshly
+      attached terminal sees the dashboard within display_refresh_seconds.
     """
     # \x1b[2J = clear entire screen; \x1b[H = move cursor to home (top-left).
     sys.stdout.write("\x1b[2J\x1b[H")
     sys.stdout.flush()
     console.print(render_tick(tick, language=language))
+    console.print(
+        f"[dim]Próximo refresh de dados em [bold]{_format_countdown(next_tick_in_s)}[/bold]"
+        f"  ·  display redraws a cada {get_settings().display_refresh_seconds}s[/dim]"
+    )
 
 
 async def _run_loop() -> None:
     settings = get_settings()
     container = await build_container(settings)
     try:
-        tick = await container.run_tick.execute()
-        _render_dashboard(settings.output_language, tick)
-
-        scheduler = TickScheduler(
-            interval_seconds=settings.tick_interval_seconds,
-            tick_use_case=container.run_tick,
-            on_tick=lambda t: _render_dashboard(settings.output_language, t),
-        )
-        await scheduler.run_forever()
+        while True:
+            tick = await container.run_tick.execute()
+            elapsed = 0
+            # Re-render the SAME tick every display_refresh_seconds so the
+            # screen stays alive (countdown ticks down) without burning yfinance/
+            # FRED calls. New data is only fetched on the next outer iteration.
+            while elapsed < settings.tick_interval_seconds:
+                remaining = settings.tick_interval_seconds - elapsed
+                _render_dashboard(settings.output_language, tick, remaining)
+                sleep_for = min(settings.display_refresh_seconds, remaining)
+                await asyncio.sleep(sleep_for)
+                elapsed += sleep_for
     finally:
         await container.aclose()
 
