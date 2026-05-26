@@ -159,3 +159,13 @@ export const VixHistoryResponse = z.object({
   count: z.number(),
 });
 export type VixHistoryResponse = z.infer<typeof VixHistoryResponse>;
+
+/** Response from /api/brief. */
+export const BriefResponse = z.object({
+  kind: z.enum(["briefing", "snapshot"]),
+  content: z.string(),
+  timestamp: z.string(),
+  model: z.string().nullable().default(null),
+  note: z.string().nullable().default(null),
+});
+export type BriefResponse = z.infer<typeof BriefResponse>;

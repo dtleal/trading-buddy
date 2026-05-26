@@ -14,6 +14,7 @@ from typing import AsyncIterator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from api.routes import brief as brief_route
 from api.routes import tick as tick_route
 from api.routes import vix as vix_route
 from api.routes import ws as ws_route
@@ -73,6 +74,7 @@ def create_app() -> FastAPI:
 
     app.include_router(tick_route.router)
     app.include_router(vix_route.router)
+    app.include_router(brief_route.router)
     app.include_router(ws_route.router)
 
     @app.get("/health", tags=["meta"])

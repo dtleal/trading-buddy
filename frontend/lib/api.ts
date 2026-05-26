@@ -1,7 +1,7 @@
 /**
  * HTTP client. Validates every response against the Zod schemas in `types.ts`.
  */
-import { DashboardTick, VixHistoryResponse } from "@/lib/types";
+import { BriefResponse, DashboardTick, VixHistoryResponse } from "@/lib/types";
 
 /**
  * API base URL resolution:
@@ -32,8 +32,12 @@ class ApiError extends Error {
   }
 }
 
-async function fetchJson<T>(path: string, schema: { parse: (v: unknown) => T }): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, { cache: "no-store" });
+async function fetchJson<T>(
+  path: string,
+  schema: { parse: (v: unknown) => T },
+  init?: RequestInit,
+): Promise<T> {
+  const res = await fetch(`${BASE_URL}${path}`, { cache: "no-store", ...init });
   if (!res.ok) {
     let detail = res.statusText;
     try {
@@ -55,6 +59,8 @@ export const api = {
       `/api/vix/history?lookback_days=${lookbackDays}&interval=${interval}`,
       VixHistoryResponse,
     ),
+  generateBrief: () =>
+    fetchJson("/api/brief", BriefResponse, { method: "POST" }),
 };
 
 export { ApiError, BASE_URL };

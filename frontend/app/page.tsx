@@ -9,6 +9,7 @@ import { SetupsPanel } from "@/components/setups/SetupsPanel";
 import { EventsPanel } from "@/components/events/EventsPanel";
 import { NewsPanel } from "@/components/news/NewsPanel";
 import { BreakoutsPanel } from "@/components/breakouts/BreakoutsPanel";
+import { BriefingPanel } from "@/components/briefing/BriefingPanel";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useLiveTick } from "@/hooks/useLiveTick";
@@ -27,6 +28,9 @@ export default function Home() {
       <Header status={status} lastTickAt={tick?.timestamp ?? null} />
 
       <main className="mx-auto w-full max-w-7xl flex-1 px-6 py-6 space-y-6">
+        {/* Briefing panel — collapsed by default, full-width on top */}
+        <BriefingPanel />
+
         {/* Row 1: VIX hero — chart on the left, summary stat on the right */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[2fr_1fr]">
           <Card>
