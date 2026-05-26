@@ -190,7 +190,9 @@ def signal(
     asset: str = typer.Option(..., "--asset", "-a", help="Asset: USTEC | SPX | GOLD"),
     interval: str = typer.Option("5m", "--interval", "-i", help="Bar interval (5m default)"),
     lookback_days: int = typer.Option(
-        2, "--lookback", help="Lookback in days (yfinance limit: 60d)"
+        5,
+        "--lookback",
+        help="Lookback in days. Need ≥3 for the 200-period MAs on 5m. yfinance cap: 60d.",
     ),
     risk_pct: float | None = typer.Option(
         None, "--risk-pct", help="Override RISK_PER_TRADE_PCT for this run."

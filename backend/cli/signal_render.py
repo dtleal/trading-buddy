@@ -42,16 +42,19 @@ def _levels_table(levels: IntradayLevels) -> Table:
 
 
 def _trend_table(levels: IntradayLevels) -> Table:
-    t = Table(title="Tendência intraday (5m EMAs)", show_header=False, expand=False)
-    t.add_column("EMA", style="bold cyan")
+    t = Table(title="Tendência intraday (médias no 5m)", show_header=False, expand=False)
+    t.add_column("MA", style="bold cyan")
     t.add_column("Value", justify="right")
-    t.add_column("Side", justify="center")
+    t.add_column("Last vs MA", justify="center")
     last = levels.last_price
-    for label, val in (
+    rows = (
         ("EMA 9", levels.ema_9),
         ("EMA 20", levels.ema_20),
         ("EMA 50", levels.ema_50),
-    ):
+        ("EMA 200", levels.ema_200),
+        ("SMA 200", levels.sma_200),
+    )
+    for label, val in rows:
         if val is None:
             t.add_row(label, "n/a", "—")
             continue

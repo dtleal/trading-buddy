@@ -36,6 +36,12 @@ def _ema(values: Sequence[float], period: int) -> float | None:
     return ema
 
 
+def _sma(values: Sequence[float], period: int) -> float | None:
+    if len(values) < period:
+        return None
+    return sum(values[-period:]) / period
+
+
 def _atr(bars: Sequence[IntradayBar], period: int) -> float | None:
     if len(bars) < period + 1:
         return None
@@ -155,11 +161,16 @@ class ComputeIntradayLevelsUseCase:
         vwap = _vwap(rth)
         orh, orl = _opening_range(rth, self._or_minutes)
 
-        closes = [b.close for b in today]
-        ema_9 = _ema(closes, 9)
-        ema_20 = _ema(closes, 20)
-        ema_50 = _ema(closes, 50)
+        closes_today = [b.close for b in today]
+        ema_9 = _ema(closes_today, 9)
+        ema_20 = _ema(closes_today, 20)
+        ema_50 = _ema(closes_today, 50)
         atr_14 = _atr(today, 14)
+
+        # Long-period MAs need bars from earlier sessions (200×5m ≈ 17h trading).
+        closes_all = [b.close for b in bars]
+        ema_200 = _ema(closes_all, 200)
+        sma_200 = _sma(closes_all, 200)
 
         sh, sh_at, sl, sl_at = _last_swings(rth)
 
@@ -179,6 +190,8 @@ class ComputeIntradayLevelsUseCase:
             ema_9=ema_9,
             ema_20=ema_20,
             ema_50=ema_50,
+            ema_200=ema_200,
+            sma_200=sma_200,
             atr_14=atr_14,
             last_swing_high=sh,
             last_swing_high_at=sh_at,

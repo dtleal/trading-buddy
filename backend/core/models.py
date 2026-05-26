@@ -109,6 +109,10 @@ class IntradayLevels(_Frozen):
     ema_20: float | None
     ema_50: float | None
 
+    # Long-term means on the bar timeframe (e.g. 5m). Require 200+ bars.
+    ema_200: float | None
+    sma_200: float | None
+
     # Average True Range (14 bars) on the bar timeframe
     atr_14: float | None
 

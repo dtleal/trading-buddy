@@ -157,3 +157,33 @@ def test_no_swing_when_not_enough_bars() -> None:
     assert levels is not None
     assert levels.last_swing_high is None
     assert levels.last_swing_low is None
+
+
+def test_ma200_none_when_insufficient_bars() -> None:
+    uc = ComputeIntradayLevelsUseCase()
+    bars = [_bar(i * 5, open_=100, high=101, low=99, close=100) for i in range(50)]
+    levels = uc.execute("USTEC", bars)
+    assert levels is not None
+    assert levels.ema_200 is None
+    assert levels.sma_200 is None
+
+
+def test_ma200_with_exactly_200_bars() -> None:
+    uc = ComputeIntradayLevelsUseCase()
+    # 200 bars at close=100 → SMA200=100, EMA200=100.
+    bars = [_bar(i * 5, open_=100, high=100, low=100, close=100) for i in range(200)]
+    levels = uc.execute("USTEC", bars)
+    assert levels is not None
+    assert levels.sma_200 == pytest.approx(100.0)
+    assert levels.ema_200 == pytest.approx(100.0)
+
+
+def test_sma200_takes_last_200_closes() -> None:
+    uc = ComputeIntradayLevelsUseCase()
+    # 201 bars: first one has close=0, the other 200 have close=100.
+    # SMA200 should ignore the first and equal 100.
+    bars = [_bar(0, open_=100, high=100, low=100, close=0)]
+    bars += [_bar((i + 1) * 5, open_=100, high=100, low=100, close=100) for i in range(200)]
+    levels = uc.execute("USTEC", bars)
+    assert levels is not None
+    assert levels.sma_200 == pytest.approx(100.0)
