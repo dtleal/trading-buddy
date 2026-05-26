@@ -1,0 +1,55 @@
+# syntax=docker/dockerfile:1.7
+
+# -----------------------------------------------------------------------------
+# Stage 1 — builder: install uv and resolve deps into a hermetic .venv.
+# -----------------------------------------------------------------------------
+FROM python:3.12-slim AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/opt/venv
+
+# Install uv (single static binary).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/* \
+ && curl -LsSf https://astral.sh/uv/install.sh | sh \
+ && mv /root/.local/bin/uv /usr/local/bin/uv
+
+WORKDIR /app
+
+# Cache layer: only metadata first so dep resolution is reusable.
+COPY backend/pyproject.toml ./
+RUN uv venv /opt/venv \
+ && uv sync --frozen --no-dev --no-install-project --project . || \
+    uv sync --no-dev --no-install-project --project .
+
+# Now bring the source and install the package itself.
+COPY backend/ ./
+RUN uv sync --no-dev --project .
+
+# -----------------------------------------------------------------------------
+# Stage 2 — runtime: thin image with the prepared venv + source.
+# -----------------------------------------------------------------------------
+FROM python:3.12-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/opt/venv/bin:${PATH}"
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends tini \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /app /app
+
+# Run Alembic on boot, then launch the dashboard loop.
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
+CMD ["dtb", "run"]

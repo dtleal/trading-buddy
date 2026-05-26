@@ -1,0 +1,20 @@
+name: day-trading-buddy
+
+# Dev overrides. Use with:
+#   docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up
+
+services:
+  backend:
+    environment:
+      LOG_LEVEL: DEBUG
+    volumes:
+      - ../backend/src:/app/src
+    command: ["dtb", "run"]
+
+  postgres:
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"

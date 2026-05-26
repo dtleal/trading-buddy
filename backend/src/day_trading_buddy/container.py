@@ -1,0 +1,171 @@
+"""Composition root.
+
+Builds every adapter from `Settings`, wires them into every use case, and
+returns a `Container` of ready-to-call use cases. The CLI is the only place
+that talks to the container.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+
+from day_trading_buddy.adapters.cache_redis import RedisCacheStore
+from day_trading_buddy.adapters.calendar_forexfactory import ForexFactoryCalendarGateway
+from day_trading_buddy.adapters.db_postgres import PostgresSnapshotRepository
+from day_trading_buddy.adapters.llm_anthropic import AnthropicLLMGateway
+from day_trading_buddy.adapters.macro_fedwatch import FedWatchMacroGateway
+from day_trading_buddy.adapters.macro_fred import FREDMacroGateway
+from day_trading_buddy.adapters.news_newsapi import NewsAPIGateway
+from day_trading_buddy.adapters.news_rss import DEFAULT_FEEDS, RSSNewsGateway
+from day_trading_buddy.adapters.prices_yfinance import YFinancePricesGateway
+from day_trading_buddy.adapters.sentiment_keyword import KeywordSentimentClassifier
+from day_trading_buddy.core.interfaces import NewsGateway
+from day_trading_buddy.settings import Settings
+from day_trading_buddy.use_cases.compute_combined_bias import (
+    BiasThresholds,
+    BiasWeights,
+    ComputeCombinedBiasUseCase,
+)
+from day_trading_buddy.use_cases.compute_macro_signal import ComputeMacroSignalUseCase
+from day_trading_buddy.use_cases.compute_news_sentiment import ComputeNewsSentimentUseCase
+from day_trading_buddy.use_cases.compute_technical_bias import ComputeTechnicalBiasUseCase
+from day_trading_buddy.use_cases.explain_event import ExplainEventUseCase
+from day_trading_buddy.use_cases.fetch_calendar import FetchEconomicCalendarUseCase
+from day_trading_buddy.use_cases.fetch_macro import FetchMacroIndicatorsUseCase
+from day_trading_buddy.use_cases.fetch_market import FetchMarketSnapshotUseCase
+from day_trading_buddy.use_cases.fetch_news import FetchNewsHeadlinesUseCase
+from day_trading_buddy.use_cases.generate_briefing import GenerateBriefingUseCase
+from day_trading_buddy.use_cases.run_dashboard_tick import RunDashboardTickUseCase
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class Container:
+    """Materialised dependency graph. Holds adapters for lifecycle management."""
+
+    # Adapters (kept for aclose())
+    cache: RedisCacheStore
+    repository: PostgresSnapshotRepository
+    newsapi: NewsAPIGateway
+    calendar_gateway: ForexFactoryCalendarGateway
+    fedwatch_gateway: FedWatchMacroGateway
+
+    # Use cases (the public surface)
+    run_tick: RunDashboardTickUseCase
+    generate_briefing: GenerateBriefingUseCase
+    explain_event: ExplainEventUseCase
+    fetch_calendar: FetchEconomicCalendarUseCase
+    fetch_market: FetchMarketSnapshotUseCase
+    fetch_news: FetchNewsHeadlinesUseCase
+    fetch_macro: FetchMacroIndicatorsUseCase
+
+    async def aclose(self) -> None:
+        for closer in (
+            self.cache.close,
+            self.repository.close,
+            self.newsapi.close,
+            self.calendar_gateway.close,
+            self.fedwatch_gateway.close,
+        ):
+            try:
+                await closer()
+            except Exception:  # pragma: no cover - cleanup best-effort
+                logger.exception("Cleanup error in container.aclose")
+
+
+def _build_news_sources(settings: Settings) -> tuple[NewsAPIGateway, list[NewsGateway]]:
+    rss_sources: list[NewsGateway] = [
+        RSSNewsGateway(name, url) for name, url in DEFAULT_FEEDS.items()
+    ]
+    api_key = settings.newsapi_key.get_secret_value() if settings.newsapi_key else None
+    newsapi = NewsAPIGateway(api_key=api_key)
+    all_sources: list[NewsGateway] = [*rss_sources, newsapi]
+    return newsapi, all_sources
+
+
+async def build_container(settings: Settings) -> Container:
+    cache = RedisCacheStore(url=settings.redis_url)
+    repository = PostgresSnapshotRepository(dsn=settings.postgres_dsn)
+
+    prices = YFinancePricesGateway()
+    calendar_gateway = ForexFactoryCalendarGateway()
+    macro_primary = FREDMacroGateway(
+        api_key=settings.fred_api_key.get_secret_value() if settings.fred_api_key else None
+    )
+    fedwatch = FedWatchMacroGateway()
+    sentiment_classifier = KeywordSentimentClassifier()
+
+    llm = AnthropicLLMGateway(
+        api_key=settings.claude_api_key.get_secret_value(),
+        default_briefing_model=settings.anthropic_model_briefing,
+        default_classifier_model=settings.anthropic_model_classifier,
+    )
+
+    newsapi, news_sources = _build_news_sources(settings)
+
+    # --- Use cases ---------------------------------------------------------
+
+    fetch_market = FetchMarketSnapshotUseCase(prices=prices, cache=cache)
+    fetch_calendar = FetchEconomicCalendarUseCase(calendar=calendar_gateway, cache=cache)
+    fetch_news = FetchNewsHeadlinesUseCase(sources=news_sources)
+    fetch_macro = FetchMacroIndicatorsUseCase(primary=macro_primary, fedwatch=fedwatch, cache=cache)
+
+    compute_technical = ComputeTechnicalBiasUseCase()
+    compute_sentiment = ComputeNewsSentimentUseCase(classifier=sentiment_classifier)
+    compute_macro = ComputeMacroSignalUseCase()
+    compute_combined = ComputeCombinedBiasUseCase(
+        weights=BiasWeights(
+            technical=settings.bias_weight_technical,
+            macro=settings.bias_weight_macro,
+            sentiment=settings.bias_weight_sentiment,
+        ),
+        thresholds=BiasThresholds(
+            bullish=settings.bias_threshold_bullish,
+            bearish=settings.bias_threshold_bearish,
+        ),
+    )
+
+    run_tick = RunDashboardTickUseCase(
+        fetch_market=fetch_market,
+        fetch_calendar=fetch_calendar,
+        fetch_news=fetch_news,
+        fetch_macro=fetch_macro,
+        compute_technical=compute_technical,
+        compute_sentiment=compute_sentiment,
+        compute_macro=compute_macro,
+        compute_combined=compute_combined,
+        repository=repository,
+    )
+
+    generate_briefing = GenerateBriefingUseCase(
+        llm=llm,
+        cache=cache,
+        repository=repository,
+        language=settings.output_language,
+    )
+    explain_event = ExplainEventUseCase(
+        llm=llm,
+        cache=cache,
+        repository=repository,
+        language=settings.output_language,
+    )
+
+    return Container(
+        cache=cache,
+        repository=repository,
+        newsapi=newsapi,
+        calendar_gateway=calendar_gateway,
+        fedwatch_gateway=fedwatch,
+        run_tick=run_tick,
+        generate_briefing=generate_briefing,
+        explain_event=explain_event,
+        fetch_calendar=fetch_calendar,
+        fetch_market=fetch_market,
+        fetch_news=fetch_news,
+        fetch_macro=fetch_macro,
+    )
+
+
+__all__ = ["Container", "build_container"]
