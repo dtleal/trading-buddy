@@ -61,6 +61,18 @@ class Settings(BaseSettings):
     anthropic_model_briefing: str = "claude-opus-4-7"
     anthropic_model_classifier: str = "claude-haiku-4-5-20251001"
 
+    # --- Day-trade signal tuning ------------------------------------------
+
+    # Account size in USD used by `dtb signal` to compute position sizing.
+    # 0 = skip position sizing in the output (only stop levels are shown).
+    account_size_usd: float = 0.0
+    # Risk per trade as percentage of account_size_usd (default 2%).
+    risk_per_trade_pct: float = 2.0
+    # Buffer added to the swing-based stop, in ATR multiples (0.5 = half an ATR).
+    stop_buffer_atr_multiple: float = 0.5
+    # Opening-range window in minutes for the OR levels.
+    opening_range_minutes: int = 30
+
     # --- Derived -----------------------------------------------------------
 
     @property

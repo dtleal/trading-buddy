@@ -12,14 +12,25 @@ from rich.console import Console
 from rich.live import Live
 
 from cli.dashboard import render_tick
+from cli.signal_render import render_signal
 from container import Container, build_container
+from core.enums import AssetSymbol
 from scheduler import TickScheduler
 from settings import get_settings
+from use_cases.compute_intraday_levels import ComputeIntradayLevelsUseCase
 from use_cases.generate_briefing import (
     SYSTEM_PROMPT_EN,
     SYSTEM_PROMPT_PT,
     format_tick_payload,
 )
+
+# $ per point per contract. Used for position sizing in `dtb signal`.
+# Pass --multiplier to override if you trade a different instrument.
+DEFAULT_CONTRACT_MULTIPLIER: dict[str, float] = {
+    "USTEC": 20.0,  # NQ E-mini = $20/pt
+    "SPX": 50.0,  # ES E-mini = $50/pt
+    "GOLD": 100.0,  # GC full = $100/pt; MGC mini = $10
+}
 
 app = typer.Typer(add_completion=False, help="day-trading-buddy CLI")
 console = Console()
@@ -156,6 +167,89 @@ async def _snapshot(include_prompt: bool) -> None:
             print(system_prompt)
             print("=== USER PROMPT (TICK DATA) ===")
         print(format_tick_payload(tick))
+    finally:
+        await container.aclose()
+
+
+@app.command()
+def signal(
+    asset: str = typer.Option(..., "--asset", "-a", help="Asset: USTEC | SPX | GOLD"),
+    interval: str = typer.Option("5m", "--interval", "-i", help="Bar interval (5m default)"),
+    lookback_days: int = typer.Option(
+        2, "--lookback", help="Lookback in days (yfinance limit: 60d)"
+    ),
+    risk_pct: float | None = typer.Option(
+        None, "--risk-pct", help="Override RISK_PER_TRADE_PCT for this run."
+    ),
+    account_size: float | None = typer.Option(
+        None, "--account-size", help="Override ACCOUNT_SIZE_USD for this run."
+    ),
+    multiplier: float | None = typer.Option(
+        None, "--multiplier", help="$/point per contract (default per asset: NQ=20, ES=50, GC=100)."
+    ),
+) -> None:
+    """Print intraday levels + structure-based stop candidates (no LLM, no trade idea).
+
+    Deterministic technical reference for day-trade decisions on a 5m chart.
+    """
+    settings = get_settings()
+    _configure_logging(settings.log_level)
+    asset_upper = asset.upper()
+    if asset_upper not in {a.value for a in AssetSymbol}:
+        raise typer.BadParameter(f"asset must be one of: {[a.value for a in AssetSymbol]}")
+    asyncio.run(
+        _signal(
+            asset_upper,
+            interval,
+            lookback_days,
+            risk_pct,
+            account_size,
+            multiplier,
+        )
+    )
+
+
+async def _signal(
+    asset: str,
+    interval: str,
+    lookback_days: int,
+    risk_pct_override: float | None,
+    account_override: float | None,
+    multiplier_override: float | None,
+) -> None:
+    settings = get_settings()
+    container = await build_container(settings)
+    try:
+        bars = await container.prices.get_intraday_bars(asset, interval, lookback_days)
+        if not bars:
+            console.print(
+                f"[red]No bars returned for {asset}. Market closed or API throttled.[/red]"
+            )
+            return
+        uc = ComputeIntradayLevelsUseCase(opening_range_minutes=settings.opening_range_minutes)
+        levels = uc.execute(asset, bars)
+        if levels is None:
+            console.print(f"[red]Not enough bars to compute levels for {asset}.[/red]")
+            return
+        console.print(
+            render_signal(
+                levels,
+                account_size_usd=(
+                    account_override if account_override is not None else settings.account_size_usd
+                ),
+                risk_pct=(
+                    risk_pct_override
+                    if risk_pct_override is not None
+                    else settings.risk_per_trade_pct
+                ),
+                stop_buffer_atr=settings.stop_buffer_atr_multiple,
+                contract_multiplier=(
+                    multiplier_override
+                    if multiplier_override is not None
+                    else DEFAULT_CONTRACT_MULTIPLIER.get(asset, 1.0)
+                ),
+            )
+        )
     finally:
         await container.aclose()
 

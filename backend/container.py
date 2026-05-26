@@ -45,12 +45,13 @@ logger = logging.getLogger(__name__)
 class Container:
     """Materialised dependency graph. Holds adapters for lifecycle management."""
 
-    # Adapters (kept for aclose())
+    # Adapters (kept for aclose() and direct use by CLI commands like `signal`)
     cache: RedisCacheStore
     repository: PostgresSnapshotRepository
     newsapi: NewsAPIGateway
     calendar_gateway: ForexFactoryCalendarGateway
     fedwatch_gateway: FedWatchMacroGateway
+    prices: YFinancePricesGateway
 
     # Use cases (the public surface)
     run_tick: RunDashboardTickUseCase
@@ -158,6 +159,7 @@ async def build_container(settings: Settings) -> Container:
         newsapi=newsapi,
         calendar_gateway=calendar_gateway,
         fedwatch_gateway=fedwatch,
+        prices=prices,
         run_tick=run_tick,
         generate_briefing=generate_briefing,
         explain_event=explain_event,

@@ -60,6 +60,66 @@ class MarketSnapshot(_Frozen):
 
 
 # -----------------------------------------------------------------------------
+# Intraday price action (5m timeframe — used by `dtb signal`)
+# -----------------------------------------------------------------------------
+
+
+class IntradayBar(_Frozen):
+    """One OHLCV bar at the configured intraday interval (default 5m)."""
+
+    timestamp: datetime  # bar open time, UTC
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+
+
+class IntradayLevels(_Frozen):
+    """Deterministic price-action levels computed from intraday bars.
+
+    All prices are in the same units as the underlying ticker (index points
+    for ^NDX/^GSPC, dollars for GC=F). No directional opinion — the consumer
+    decides the trade. Stop candidates are reported as price levels (last swing
+    high/low ± optional buffer); position sizing helpers live in the CLI layer.
+    """
+
+    symbol: str
+    asof: datetime  # bar timestamp of the latest bar consumed
+    last_price: float
+
+    # Session extremes
+    hod: float  # high of day so far
+    lod: float  # low of day so far
+
+    # Volume-weighted average price (intraday, cumulative)
+    vwap: float | None
+
+    # Opening range (configurable window; default = first 30 min of US session)
+    orh: float | None
+    orl: float | None
+
+    # Previous-day reference levels
+    pdc: float | None  # previous day close
+    pdh: float | None  # previous day high
+    pdl: float | None  # previous day low
+
+    # Short-term EMAs on the bar timeframe (e.g. 5m)
+    ema_9: float | None
+    ema_20: float | None
+    ema_50: float | None
+
+    # Average True Range (14 bars) on the bar timeframe
+    atr_14: float | None
+
+    # Last 3-bar swing pivots within the session
+    last_swing_high: float | None
+    last_swing_high_at: datetime | None
+    last_swing_low: float | None
+    last_swing_low_at: datetime | None
+
+
+# -----------------------------------------------------------------------------
 # Economic calendar
 # -----------------------------------------------------------------------------
 
@@ -188,6 +248,8 @@ __all__ = [
     "PriceQuote",
     "VixSnapshot",
     "MarketSnapshot",
+    "IntradayBar",
+    "IntradayLevels",
     "EconomicEvent",
     "NewsItem",
     "MacroIndicator",
