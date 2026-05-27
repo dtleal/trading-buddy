@@ -42,12 +42,14 @@ favorable.
 - Position sizing helper when `ACCOUNT_SIZE_USD > 0` (uses NQ/ES/GC contract
   multipliers by default; override with `--multiplier`).
 
-### Breakout detector (15m / 30m / 60m / 4h)
+### Breakout detector (5m / 15m / 30m / 60m / 4h)
 
 A Donchian-channel breakout scanner runs on every tick across USTEC, SPX
-and GOLD, on all four timeframes (resampled in memory from a single 5m
-fetch per asset — no extra yfinance calls). A signal fires only when **all**
-of the following hold on the candidate bar:
+and GOLD, on five timeframes (5m / 15m / 30m / 60m / 4h — all resampled
+in memory from a single 5m fetch per asset, no extra yfinance calls).
+5m is included because the user trades on the 5m chart; the filters below
+keep noise low enough that even 5m signals are tradable references.
+A signal fires only when **all** of the following hold on the candidate bar:
 
 1. **Fresh Donchian cross**: `close > max(high)` of the last 20 bars
    (or symmetric for down breakouts), AND the previous bar's close was
@@ -90,10 +92,22 @@ positives**. The panel will be silent most of the day.
 ### LLM features (need `CLAUDE_API_KEY`)
 
 - `dtb brief` — pre-market briefing in PT-BR via Claude Opus 4.7.
+  **Dual-lens by design** — the system prompt now demands per-asset
+  sections covering both the daily-structural view (price vs MA200d)
+  and the 5m intraday view (VWAP/EMAs/SMA200/PDH/PDL/recent breakouts),
+  plus an explicit ✅ convergence / ⚠️ divergence flag. The trader
+  on a 5m chart immediately sees when macro and tape disagree.
 - `dtb explain --event CPI` — pre or post event explainer.
-- `dtb snapshot` — dumps the LLM prompt + tick payload **without calling the
-  API**, so you can hand it to another Claude session (e.g. via the
-  `/dtb-brief` slash command) and get the same briefing for free.
+- `dtb snapshot` — dumps the LLM prompt + tick payload **without calling
+  the API**. The payload now includes four sections:
+  - `## Market snapshot (daily structural)` — quotes + MA200d
+  - `## Intraday (5m) per asset` — full per-asset 5m levels
+  - `## Recent breakouts` — pre-computed signals across all 5 timeframes
+  - macro + events + headlines (unchanged)
+
+  Hand any of this to another Claude session (e.g. via the `/dtb-brief`
+  slash command at `~/.claude/commands/dtb-brief.md`) for a free
+  briefing equivalent to the paid `dtb brief`.
 
 ## Quickstart
 
