@@ -28,6 +28,13 @@ services:
 
   frontend:
     container_name: tb-frontend
+    build:
+      args:
+        # Bake the production API URL into the bundle. When the browser
+        # loads http://72.62.15.111:3057 it executes JS that hits
+        # http://72.62.15.111:8057 for REST + WS. Override via
+        # KVM_FRONTEND_API_URL in .env if the box ever changes IP.
+        NEXT_PUBLIC_API_URL: "${KVM_FRONTEND_API_URL:-http://72.62.15.111:8057}"
 
   postgres:
     container_name: tb-postgres

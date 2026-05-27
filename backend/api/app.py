@@ -18,6 +18,7 @@ from api.routes import brief as brief_route
 from api.routes import tick as tick_route
 from api.routes import vix as vix_route
 from api.routes import ws as ws_route
+from settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -63,9 +64,13 @@ def create_app() -> FastAPI:
         lifespan=_lifespan,
     )
 
+    extras_raw = get_settings().cors_extra_origins.strip()
+    extra_origins = [o.strip() for o in extras_raw.split(",") if o.strip()]
+    allow_origins = [*DEFAULT_CORS_ORIGINS, *extra_origins]
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=DEFAULT_CORS_ORIGINS,
+        allow_origins=allow_origins,
         allow_origin_regex=LAN_ORIGIN_REGEX,
         allow_credentials=True,
         allow_methods=["GET", "POST", "OPTIONS"],

@@ -77,6 +77,15 @@ class Settings(BaseSettings):
     # Opening-range window in minutes for the OR levels.
     opening_range_minutes: int = 30
 
+    # --- CORS / public deployments -----------------------------------------
+
+    # Comma-separated list of extra origins that the API should accept (in
+    # addition to the built-in localhost + RFC1918 LAN regex). Set this when
+    # serving the frontend from a public IP / hostname so the browser does
+    # not refuse the cross-origin /api and /ws calls. Example for the shared
+    # KVM:  CORS_EXTRA_ORIGINS=http://72.62.15.111:3057
+    cors_extra_origins: str = ""
+
     # --- ntfy.sh push notifications --------------------------------------
 
     # Secret topic name the backend will POST breakout alerts to. Leave
