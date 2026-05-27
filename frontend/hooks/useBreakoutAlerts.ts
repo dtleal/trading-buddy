@@ -5,14 +5,21 @@ import { toast } from "sonner";
 import { useAlertsStore } from "@/lib/alerts/store";
 import type { Breakout, DashboardTick } from "@/lib/types";
 
+// How recent a breakout has to be (in minutes) to still trigger an alert when
+// it first shows up after the page loads. Older signals get silently primed
+// so the user doesn't get spammed with stale alerts. 5 minutes covers "the
+// breakout happened seconds before I opened the dashboard" — exactly the
+// case we want to keep loud.
+const ALERT_FRESHNESS_MINUTES = 5;
+
 /**
  * Watch the tick stream for newly-emitted Breakout events and dispatch alerts.
  *
  * Backend includes `breakouts_recent` (last ~24h) on every tick — the same
- * breakout shows up in many consecutive ticks. We dedup by `id` so the user
- * only gets one alert per signal. Seen ids are kept in a Set ref to avoid
- * re-firing on re-renders. On a hard reload, history starts fresh — that is
- * fine, the user can scroll the persisted history panel for older events.
+ * breakout shows up in many consecutive ticks. We dedup by `id`. On first
+ * tick we **only prime stale signals** (older than ALERT_FRESHNESS_MINUTES);
+ * anything fresh fires as a real alert so the trader who just walked up to
+ * the dashboard doesn't miss the last-5-min move that motivated them.
  */
 export function useBreakoutAlerts(tick: DashboardTick | null): void {
   const seenRef = useRef<Set<string>>(new Set());
@@ -24,12 +31,19 @@ export function useBreakoutAlerts(tick: DashboardTick | null): void {
     if (!tick) return;
     const breakouts = tick.breakouts_recent ?? [];
 
-    // Prime the seen set on first tick so we don't alert for everything that
-    // happened in the last 24h the moment the page loads.
     if (!primedRef.current) {
-      breakouts.forEach((b) => seenRef.current.add(b.id));
+      const freshnessMs = ALERT_FRESHNESS_MINUTES * 60_000;
+      const now = Date.now();
+      for (const b of breakouts) {
+        const ageMs = now - new Date(b.signal_bar_at).getTime();
+        // Stale → mark as seen (no alert). Fresh → leave unseen so the loop
+        // below treats it as a brand-new event.
+        if (ageMs > freshnessMs) {
+          seenRef.current.add(b.id);
+        }
+      }
       primedRef.current = true;
-      return;
+      // Fall through to the dispatch loop — recent ones still need alerting.
     }
 
     for (const b of breakouts) {
