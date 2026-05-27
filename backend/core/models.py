@@ -223,6 +223,24 @@ class BiasReport(_Frozen):
 # -----------------------------------------------------------------------------
 
 
+class IntradayBiasReport(_Frozen):
+    """Per-asset, per-tick **intraday** verdict derived from the 5m structure.
+
+    This is the COMPANION to BiasReport, which encodes the daily structural
+    view. A 5m trader cares about both: BiasReport tells them the macro
+    backdrop; IntradayBiasReport tells them what the tape is doing right now.
+
+    Score range is 0-100 anchored at 50 (neutral). Each rule adjusts the
+    score up/down; the `signals` list explains the contributing factors so
+    the frontend can render a readable tooltip.
+    """
+
+    asset: AssetSymbol
+    score: float = Field(ge=0.0, le=100.0)
+    level: BiasLevel
+    signals: list[str] = Field(default_factory=list)
+
+
 class Breakout(_Frozen):
     """A Donchian-channel breakout detected on one asset / one timeframe.
 
@@ -307,6 +325,7 @@ class DashboardTick(_Frozen):
     bias: dict[AssetSymbol, BiasReport]
     setups: list[TradeSetup] = Field(default_factory=list)
     intraday_levels: dict[AssetSymbol, "IntradayLevels"] = Field(default_factory=dict)
+    intraday_bias: dict[AssetSymbol, IntradayBiasReport] = Field(default_factory=dict)
     breakouts_recent: list[Breakout] = Field(default_factory=list)
 
 
@@ -323,6 +342,7 @@ __all__ = [
     "MacroSnapshot",
     "BiasComponents",
     "BiasReport",
+    "IntradayBiasReport",
     "TradeSetup",
     "Breakout",
     "LLMOutput",

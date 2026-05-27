@@ -17,11 +17,13 @@ from core.models import (
     BiasReport,
     Breakout,
     DashboardTick,
+    IntradayBiasReport,
     IntradayLevels,
     NewsItem,
     TradeSetup,
 )
 from use_cases.compute_combined_bias import ComputeCombinedBiasUseCase
+from use_cases.compute_intraday_bias import ComputeIntradayBiasUseCase
 from use_cases.compute_intraday_levels import ComputeIntradayLevelsUseCase
 from use_cases.compute_macro_signal import ComputeMacroSignalUseCase
 from use_cases.compute_news_sentiment import ComputeNewsSentimentUseCase
@@ -72,6 +74,7 @@ class RunDashboardTickUseCase:
         repository: SnapshotRepository,
         prices: YFinancePricesGateway | None = None,
         compute_intraday: ComputeIntradayLevelsUseCase | None = None,
+        compute_intraday_bias: ComputeIntradayBiasUseCase | None = None,
         detect_setup: DetectTradeSetupUseCase | None = None,
         detect_breakouts: DetectBreakoutsUseCase | None = None,
         push_breakout_alerts: PushBreakoutAlertsUseCase | None = None,
@@ -94,6 +97,7 @@ class RunDashboardTickUseCase:
         # passing these, in which case setups will simply be an empty list.
         self._prices = prices
         self._compute_intraday = compute_intraday
+        self._compute_intraday_bias = compute_intraday_bias
         self._detect_setup = detect_setup
         self._detect_breakouts = detect_breakouts
         self._push_breakout_alerts = push_breakout_alerts
@@ -124,6 +128,14 @@ class RunDashboardTickUseCase:
 
         intraday_levels, setups, breakouts = await self._compute_intraday_setups_breakouts(bias)
 
+        # Per-asset intraday bias is derived from the same intraday levels —
+        # no extra API calls. Built here (vs inside the gather helper) so the
+        # helper signature stays tight and this stays trivially testable.
+        intraday_bias_map: dict[AssetSymbol, IntradayBiasReport] = {}
+        if self._compute_intraday_bias is not None:
+            for asset, levels in intraday_levels.items():
+                intraday_bias_map[asset] = self._compute_intraday_bias.execute(asset, levels)
+
         # Push new breakouts to the user's phone via ntfy.sh (no-op if not
         # configured). Done before building the tick so the user gets the
         # alert as soon as the data is detected.
@@ -142,6 +154,7 @@ class RunDashboardTickUseCase:
             bias=bias,
             setups=setups,
             intraday_levels=intraday_levels,
+            intraday_bias=intraday_bias_map,
             breakouts_recent=breakouts,
         )
 

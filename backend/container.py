@@ -28,6 +28,7 @@ from use_cases.compute_combined_bias import (
     BiasWeights,
     ComputeCombinedBiasUseCase,
 )
+from use_cases.compute_intraday_bias import ComputeIntradayBiasUseCase
 from use_cases.compute_intraday_levels import ComputeIntradayLevelsUseCase
 from use_cases.compute_macro_signal import ComputeMacroSignalUseCase
 from use_cases.compute_news_sentiment import ComputeNewsSentimentUseCase
@@ -138,6 +139,7 @@ async def build_container(settings: Settings) -> Container:
     compute_intraday = ComputeIntradayLevelsUseCase(
         opening_range_minutes=settings.opening_range_minutes
     )
+    compute_intraday_bias = ComputeIntradayBiasUseCase()
     detect_setup = DetectTradeSetupUseCase()
     detect_breakouts = DetectBreakoutsUseCase(
         thresholds=BreakoutThresholds(
@@ -165,6 +167,7 @@ async def build_container(settings: Settings) -> Container:
         repository=repository,
         prices=prices,
         compute_intraday=compute_intraday,
+        compute_intraday_bias=compute_intraday_bias,
         detect_setup=detect_setup,
         detect_breakouts=detect_breakouts,
         push_breakout_alerts=push_breakout_alerts,

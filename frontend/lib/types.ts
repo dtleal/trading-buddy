@@ -109,6 +109,15 @@ export const Breakout = z.object({
 });
 export type Breakout = z.infer<typeof Breakout>;
 
+/** Per-asset intraday-only bias (mirrors BiasReport but derived from 5m). */
+export const IntradayBiasReport = z.object({
+  asset: AssetSymbol,
+  score: z.number(),
+  level: BiasLevel,
+  signals: z.array(z.string()),
+});
+export type IntradayBiasReport = z.infer<typeof IntradayBiasReport>;
+
 export const TradeSetup = z.object({
   asset: AssetSymbol,
   direction: z.enum(["LONG", "SHORT"]),
@@ -148,6 +157,7 @@ export const DashboardTick = z.object({
   bias: z.record(AssetSymbol, BiasReport),
   setups: z.array(TradeSetup),
   intraday_levels: z.record(AssetSymbol, z.unknown()),
+  intraday_bias: z.record(AssetSymbol, IntradayBiasReport).default({}),
   breakouts_recent: z.array(Breakout).default([]),
 });
 export type DashboardTick = z.infer<typeof DashboardTick>;
