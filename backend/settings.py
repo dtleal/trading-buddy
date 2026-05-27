@@ -77,6 +77,16 @@ class Settings(BaseSettings):
     # Opening-range window in minutes for the OR levels.
     opening_range_minutes: int = 30
 
+    # --- ntfy.sh push notifications --------------------------------------
+
+    # Secret topic name the backend will POST breakout alerts to. Leave
+    # empty to disable push notifications entirely. Anyone who knows this
+    # topic can subscribe to your messages, so treat it like a password
+    # (long random string).
+    ntfy_topic: SecretStr | None = None
+    # Override only if self-hosting an ntfy server.
+    ntfy_server: str = "https://ntfy.sh"
+
     # --- Breakout detector tuning -----------------------------------------
 
     # If True, the detector only emits signals when ATR(14) was below its

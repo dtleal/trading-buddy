@@ -18,6 +18,7 @@ from adapters.macro_fedwatch import FedWatchMacroGateway
 from adapters.macro_fred import FREDMacroGateway
 from adapters.news_newsapi import NewsAPIGateway
 from adapters.news_rss import DEFAULT_FEEDS, RSSNewsGateway
+from adapters.ntfy_notifier import NtfyNotifier
 from adapters.prices_yfinance import YFinancePricesGateway
 from adapters.sentiment_keyword import KeywordSentimentClassifier
 from core.interfaces import NewsGateway
@@ -39,6 +40,7 @@ from use_cases.fetch_macro import FetchMacroIndicatorsUseCase
 from use_cases.fetch_market import FetchMarketSnapshotUseCase
 from use_cases.fetch_news import FetchNewsHeadlinesUseCase
 from use_cases.generate_briefing import GenerateBriefingUseCase
+from use_cases.push_breakout_alerts import PushBreakoutAlertsUseCase
 from use_cases.run_dashboard_tick import RunDashboardTickUseCase
 
 logger = logging.getLogger(__name__)
@@ -55,6 +57,7 @@ class Container:
     calendar_gateway: ForexFactoryCalendarGateway
     fedwatch_gateway: FedWatchMacroGateway
     prices: YFinancePricesGateway
+    ntfy: NtfyNotifier
 
     # Use cases (the public surface)
     run_tick: RunDashboardTickUseCase
@@ -72,6 +75,7 @@ class Container:
             self.newsapi.close,
             self.calendar_gateway.close,
             self.fedwatch_gateway.close,
+            self.ntfy.close,
         ):
             try:
                 await closer()
@@ -143,6 +147,12 @@ async def build_container(settings: Settings) -> Container:
         )
     )
 
+    ntfy = NtfyNotifier(
+        topic=settings.ntfy_topic.get_secret_value() if settings.ntfy_topic else None,
+        server=settings.ntfy_server,
+    )
+    push_breakout_alerts = PushBreakoutAlertsUseCase(notifier=ntfy, cache=cache)
+
     run_tick = RunDashboardTickUseCase(
         fetch_market=fetch_market,
         fetch_calendar=fetch_calendar,
@@ -157,6 +167,7 @@ async def build_container(settings: Settings) -> Container:
         compute_intraday=compute_intraday,
         detect_setup=detect_setup,
         detect_breakouts=detect_breakouts,
+        push_breakout_alerts=push_breakout_alerts,
     )
 
     generate_briefing = GenerateBriefingUseCase(
@@ -179,6 +190,7 @@ async def build_container(settings: Settings) -> Container:
         calendar_gateway=calendar_gateway,
         fedwatch_gateway=fedwatch,
         prices=prices,
+        ntfy=ntfy,
         run_tick=run_tick,
         generate_briefing=generate_briefing,
         explain_event=explain_event,

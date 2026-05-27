@@ -32,6 +32,7 @@ from use_cases.fetch_calendar import FetchEconomicCalendarUseCase
 from use_cases.fetch_macro import FetchMacroIndicatorsUseCase
 from use_cases.fetch_market import FetchMarketSnapshotUseCase
 from use_cases.fetch_news import FetchNewsHeadlinesUseCase
+from use_cases.push_breakout_alerts import PushBreakoutAlertsUseCase
 from use_cases.resample_bars import resample_to
 
 # Timeframes the dashboard surfaces for breakout alerts.
@@ -73,6 +74,7 @@ class RunDashboardTickUseCase:
         compute_intraday: ComputeIntradayLevelsUseCase | None = None,
         detect_setup: DetectTradeSetupUseCase | None = None,
         detect_breakouts: DetectBreakoutsUseCase | None = None,
+        push_breakout_alerts: PushBreakoutAlertsUseCase | None = None,
         intraday_assets: tuple[AssetSymbol, ...] = (
             AssetSymbol.USTEC,
             AssetSymbol.SPX,
@@ -94,6 +96,7 @@ class RunDashboardTickUseCase:
         self._compute_intraday = compute_intraday
         self._detect_setup = detect_setup
         self._detect_breakouts = detect_breakouts
+        self._push_breakout_alerts = push_breakout_alerts
         self._intraday_assets = intraday_assets
 
     async def execute(self) -> DashboardTick:
@@ -120,6 +123,15 @@ class RunDashboardTickUseCase:
         )
 
         intraday_levels, setups, breakouts = await self._compute_intraday_setups_breakouts(bias)
+
+        # Push new breakouts to the user's phone via ntfy.sh (no-op if not
+        # configured). Done before building the tick so the user gets the
+        # alert as soon as the data is detected.
+        if self._push_breakout_alerts is not None and breakouts:
+            try:
+                await self._push_breakout_alerts.execute(breakouts)
+            except Exception:
+                logger.exception("Push notification dispatch failed (tick continues)")
 
         tick = DashboardTick(
             timestamp=datetime.now(timezone.utc),

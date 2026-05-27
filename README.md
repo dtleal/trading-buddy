@@ -297,6 +297,45 @@ Same model (Opus 4.7), zero Anthropic API spend.
 - The post-event explainer doesn't auto-fire yet (was originally planned for
   30 min before high-impact events). Run `dtb explain` manually for now.
 
+## Phone push notifications (ntfy.sh)
+
+The backend can push every new breakout signal to your phone via
+[ntfy.sh](https://ntfy.sh), so you get alerts even with the browser
+closed and the screen locked. Free, no account, no SMS.
+
+### One-time setup (~2 minutes)
+
+1. **Install the ntfy app** on your phone (App Store / Play Store, free).
+2. **Pick a secret topic name** — any unique string. Treat it like a
+   password (anyone who guesses it can read your alerts). E.g.
+   `trading-buddy-diego-9f3a7c`.
+3. In the app: tap **+** → **"Subscribe to topic"** → paste the same string.
+4. In `.env`, set:
+   ```
+   NTFY_TOPIC=trading-buddy-diego-9f3a7c
+   ```
+5. `make docker-down && make docker-up` to reload the backend.
+
+### What you'll receive
+
+Title: `↑ USTEC 15m @ 29654.30` (or `↓` for breakdowns)
+Body: `Nivel rompido: 29635.24 | Expansao: 1.34x ATR | Strength: 74/100 | Bar: 18:35 UTC`
+Tags: arrow + asset name (emoji rendering on iOS / Android)
+Priority: 2-5 based on strength (5 = urgent on iOS, bypasses Do Not Disturb)
+
+### Dedup
+
+The backend keeps a 24h record of pushed signal IDs in Redis. A
+breakout that shows up in 10 consecutive ticks fires **one** push.
+Container restarts do not re-spam (the record survives).
+
+### Self-hosting
+
+If you want full privacy (no third-party broker), spin up your own
+ntfy server (`docker run binwiederhier/ntfy serve`) and set
+`NTFY_SERVER=http://your-host:80`. ntfy is open-source and the
+backend speaks to any compatible server.
+
 ## Autostart at macOS login
 
 ```bash
