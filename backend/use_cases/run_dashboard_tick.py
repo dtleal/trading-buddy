@@ -35,7 +35,11 @@ from use_cases.fetch_news import FetchNewsHeadlinesUseCase
 from use_cases.resample_bars import resample_to
 
 # Timeframes the dashboard surfaces for breakout alerts.
+# M5 is enabled by request: the trader operates on the 5-minute chart and wants
+# notifications for fresh breakouts at that timeframe. Squeeze + 1.3×ATR
+# expansion + fresh-cross filters already kill most 5m noise.
 BREAKOUT_TIMEFRAMES: tuple[Timeframe, ...] = (
+    Timeframe.M5,
     Timeframe.M15,
     Timeframe.M30,
     Timeframe.H1,

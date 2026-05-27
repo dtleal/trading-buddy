@@ -13,7 +13,7 @@ import type {
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-const TIMEFRAMES: TimeframeType[] = ["15m", "30m", "60m", "4h"];
+const TIMEFRAMES: TimeframeType[] = ["5m", "15m", "30m", "60m", "4h"];
 const ASSETS: AssetSymbolType[] = ["USTEC", "SPX", "GOLD"];
 
 /**
@@ -46,7 +46,7 @@ export function BreakoutsPanel({ tick }: { tick: DashboardTick | null }) {
         </div>
         <CardDescription>
           Donchian (N=20) + expansão de range &gt; 1.3× ATR + squeeze prévio.
-          15m · 30m · 60m · 4h.
+          5m · 15m · 30m · 60m · 4h. Alertas push automáticos.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
