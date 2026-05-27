@@ -1,0 +1,42 @@
+# Override applied when deploying to the shared KVM server at /root/trading-buddy.
+#
+# The same host runs polymarket_trader (poly-*) and kalshi_trader (kal-*) on
+# the same Docker daemon. Side-by-side without a single byte of interference:
+#
+#   - container names are prefixed `tb-`
+#   - host port mappings move out of any range either of the other two uses
+#       polymarket:  5051, 5556, 6667
+#       kalshi:      5050, 5555, 6666  (currently down but reserved)
+#       trading-buddy (this file):  3057 (frontend), 8057 (backend)
+#       postgres + redis: not published to host at all (internal only)
+#   - the compose project name is `trading-buddy` so the network and volumes
+#     carry that prefix
+#
+# Host ports themselves are set via env vars (BACKEND_PORT / FRONTEND_PORT)
+# in the KVM .env file — the base docker-compose.yml already substitutes
+# `${BACKEND_PORT:-8000}` etc., so this file only needs to rename containers
+# and volumes.
+#
+# Usage from /root/trading-buddy on the KVM box:
+#   docker compose -f docker/docker-compose.yml -f docker/docker-compose.kvm.yml --env-file .env up -d
+
+name: trading-buddy
+
+services:
+  backend:
+    container_name: tb-backend
+
+  frontend:
+    container_name: tb-frontend
+
+  postgres:
+    container_name: tb-postgres
+
+  redis:
+    container_name: tb-redis
+
+volumes:
+  postgres_data:
+    name: trading-buddy-postgres-data
+  redis_data:
+    name: trading-buddy-redis-data

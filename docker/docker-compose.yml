@@ -11,7 +11,9 @@ services:
       POSTGRES_HOST: postgres
       REDIS_HOST: redis
     ports:
-      - "8000:8000"  # FastAPI (REST + WebSocket for the frontend)
+      # Host port comes from .env (BACKEND_PORT, default 8000). On the shared
+      # KVM box we set it to 8057 so we never collide with polymarket / kalshi.
+      - "${BACKEND_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -60,7 +62,8 @@ services:
         # 192.168.x.x:3000 (phone on same Wi-Fi), or a remote hostname.
         NEXT_PUBLIC_API_URL: ""
     ports:
-      - "3000:3000"
+      # Host port comes from .env (FRONTEND_PORT, default 3000). KVM uses 3057.
+      - "${FRONTEND_PORT:-3000}:3000"
     depends_on:
       - backend
     restart: unless-stopped

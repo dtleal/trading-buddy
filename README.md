@@ -297,6 +297,51 @@ Same model (Opus 4.7), zero Anthropic API spend.
 - The post-event explainer doesn't auto-fire yet (was originally planned for
   30 min before high-impact events). Run `dtb explain` manually for now.
 
+## Deployment on the shared KVM (side-by-side with polymarket / kalshi)
+
+The same Hostinger KVM box also hosts `polymarket_trader` (`poly-*`) and
+`kalshi_trader` (`kal-*`). Trading-buddy installs **without touching either**:
+
+- Containers are renamed `tb-backend`, `tb-frontend`, `tb-postgres`, `tb-redis`
+- Host ports move out of the way (frontend **3057**, backend **8057**;
+  postgres + redis kept internal only)
+- Docker network + volumes are prefixed `trading-buddy-*`
+- The Compose project name is forced to `trading-buddy`
+
+The trick: a thin override file `docker/docker-compose.kvm.yml` renames the
+containers + volumes, and the base `docker-compose.yml` picks host ports up
+from `BACKEND_PORT` / `FRONTEND_PORT` env vars (with the local defaults
+8000 / 3000 preserved).
+
+### One-time setup
+
+```bash
+ssh kvm  # alias for root@72.62.15.111
+cd /root
+git clone git@github.com:dtleal/trading-buddy.git
+cd trading-buddy
+cp .env.example .env
+# edit .env, set BACKEND_PORT=8057 and FRONTEND_PORT=3057,
+# plus any API keys (CLAUDE_API_KEY, FRED_API_KEY, NEWSAPI_KEY, NTFY_TOPIC)
+make kvm-build
+make kvm-up
+make kvm-ps
+```
+
+After this the dashboard is reachable at `http://72.62.15.111:3057`.
+
+### Updates
+
+Slash command `/update-kvm-trading-buddy-prod` (Claude Code) handles the
+pull + rebuild + verify cycle, including a check that `poly-*` and `kal-*`
+containers are still present and untouched after the deploy.
+
+Manual equivalent:
+
+```bash
+ssh kvm "cd /root/trading-buddy && git pull origin main && make kvm-build && make kvm-up"
+```
+
 ## Phone push notifications (ntfy.sh)
 
 The backend can push every new breakout signal to your phone via

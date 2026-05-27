@@ -8,7 +8,8 @@ SHELL := /bin/bash
         docker-build docker-build-backend docker-build-frontend \
         docker-up docker-down docker-logs docker-logs-frontend docker-shell \
         frontend-install frontend-dev frontend-build frontend-lint \
-        autostart-install autostart-uninstall autostart-status autostart-run clean
+        autostart-install autostart-uninstall autostart-status autostart-run \
+        kvm-build kvm-up kvm-down kvm-logs kvm-ps clean
 
 help:  ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -96,6 +97,27 @@ docker-logs:  ## Follow backend logs
 
 docker-logs-frontend:  ## Follow frontend logs
 	docker compose -f docker/docker-compose.yml logs -f frontend
+
+# -----------------------------------------------------------------------------
+# KVM production deploy (side-by-side with polymarket / kalshi)
+# -----------------------------------------------------------------------------
+
+KVM_COMPOSE := -f docker/docker-compose.yml -f docker/docker-compose.kvm.yml
+
+kvm-build:  ## Build the trading-buddy images on the KVM box (tb-* containers)
+	docker compose $(KVM_COMPOSE) --env-file .env build
+
+kvm-up:  ## Bring the trading-buddy stack up on KVM (frontend :3057, backend :8057)
+	docker compose $(KVM_COMPOSE) --env-file .env up -d
+
+kvm-down:  ## Stop the trading-buddy stack on KVM
+	docker compose $(KVM_COMPOSE) --env-file .env down
+
+kvm-logs:  ## Follow backend logs on KVM
+	docker compose $(KVM_COMPOSE) --env-file .env logs -f backend
+
+kvm-ps:  ## docker compose ps with the KVM overlay (shows tb-* names)
+	docker compose $(KVM_COMPOSE) --env-file .env ps
 
 # -----------------------------------------------------------------------------
 # Frontend dev (outside Docker)
