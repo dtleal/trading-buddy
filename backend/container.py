@@ -31,7 +31,7 @@ from use_cases.compute_intraday_levels import ComputeIntradayLevelsUseCase
 from use_cases.compute_macro_signal import ComputeMacroSignalUseCase
 from use_cases.compute_news_sentiment import ComputeNewsSentimentUseCase
 from use_cases.compute_technical_bias import ComputeTechnicalBiasUseCase
-from use_cases.detect_breakout import DetectBreakoutsUseCase
+from use_cases.detect_breakout import BreakoutThresholds, DetectBreakoutsUseCase
 from use_cases.detect_trade_setup import DetectTradeSetupUseCase
 from use_cases.explain_event import ExplainEventUseCase
 from use_cases.fetch_calendar import FetchEconomicCalendarUseCase
@@ -135,7 +135,13 @@ async def build_container(settings: Settings) -> Container:
         opening_range_minutes=settings.opening_range_minutes
     )
     detect_setup = DetectTradeSetupUseCase()
-    detect_breakouts = DetectBreakoutsUseCase()
+    detect_breakouts = DetectBreakoutsUseCase(
+        thresholds=BreakoutThresholds(
+            donchian_n=settings.breakout_donchian_n,
+            expansion_atr_multiple=settings.breakout_expansion_atr_multiple,
+            require_squeeze=settings.breakout_require_squeeze,
+        )
+    )
 
     run_tick = RunDashboardTickUseCase(
         fetch_market=fetch_market,

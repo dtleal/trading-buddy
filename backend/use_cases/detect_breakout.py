@@ -128,13 +128,13 @@ def _try_signal(
     if expansion < thresholds.expansion_atr_multiple:
         return None
 
-    squeeze_ok = True
-    if thresholds.require_squeeze:
-        # Strictly greater means volatility was already expanding before this
-        # bar. Flat ATR (`atr == atr_sma`) still counts as "in squeeze".
-        if atr_sma is None or atr > atr_sma:
-            squeeze_ok = False
-    if not squeeze_ok:
+    # Evaluate the squeeze condition independently of whether we *require*
+    # it. The model field on the emitted Breakout should reflect reality
+    # (was vol contracting before this bar?) regardless of whether the
+    # detector filters by it. Frontend uses the boolean as a quality flag.
+    in_squeeze = atr_sma is not None and atr <= atr_sma
+
+    if thresholds.require_squeeze and not in_squeeze:
         return None
 
     # UP breakout
@@ -147,7 +147,7 @@ def _try_signal(
             candidate=candidate,
             bar_range=bar_range,
             expansion=expansion,
-            squeeze=thresholds.require_squeeze,
+            squeeze=in_squeeze,
             now=now,
         )
     # DOWN breakout (mirror)
@@ -160,7 +160,7 @@ def _try_signal(
             candidate=candidate,
             bar_range=bar_range,
             expansion=expansion,
-            squeeze=thresholds.require_squeeze,
+            squeeze=in_squeeze,
             now=now,
         )
     return None

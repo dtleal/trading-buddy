@@ -77,6 +77,24 @@ class Settings(BaseSettings):
     # Opening-range window in minutes for the OR levels.
     opening_range_minutes: int = 30
 
+    # --- Breakout detector tuning -----------------------------------------
+
+    # If True, the detector only emits signals when ATR(14) was below its
+    # 20-bar SMA on the bar *before* the break — i.e. volatility was
+    # contracting. Catches "coil + explosion" setups beautifully BUT misses
+    # violent reversals that happen in already-volatile sessions (e.g. a
+    # 2-day move ending in a reversal). Default False so breakouts also fire
+    # on aggressive reversals; the `squeeze=true` flag is still set on the
+    # event itself when conditions hold, so the frontend keeps the quality
+    # badge for setups that did come out of a true squeeze.
+    breakout_require_squeeze: bool = False
+    # Minimum range expansion vs ATR(14) for a signal. Lower = more signals
+    # (some marginal), higher = stricter. Default 1.3 matches the original
+    # "true expansion" rule of thumb.
+    breakout_expansion_atr_multiple: float = 1.3
+    # Donchian window length on each timeframe.
+    breakout_donchian_n: int = 20
+
     # --- Derived -----------------------------------------------------------
 
     @property

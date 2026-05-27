@@ -57,9 +57,19 @@ A signal fires only when **all** of the following hold on the candidate bar:
 2. **Range expansion**: `bar_range > 1.3 × ATR(14)` — filters wicks.
 3. **Close decisive**: the close itself, not just the wick, is past
    the level.
-4. **Pre-squeeze**: `ATR(14)` on the bar **before** the break was at
-   most equal to the 20-bar SMA of ATR — i.e. volatility was contracting
-   right before the move.
+4. **Pre-squeeze (quality flag, off by default)**: `ATR(14)` on the bar
+   **before** the break was at most equal to the 20-bar SMA of ATR — i.e.
+   volatility was contracting right before the move. This **used to be
+   a hard requirement** (filtered out roughly 60% of signals) but it
+   misses the most actionable cases — violent reversals that happen in
+   already-volatile sessions, like a strong morning rally fading hard
+   into the afternoon. Default is now `False`: every Donchian break
+   meeting conditions 1-3 fires; the `squeeze` boolean is still computed
+   honestly and shown as a ⭐ badge on the panel so you can tell the
+   "coil + explosion" setups apart from the "vol begets vol" continuations.
+
+   To restore the original strict behavior, set `BREAKOUT_REQUIRE_SQUEEZE=true`
+   in `.env`.
 
 Each signal has a stable `id` (sha1 of asset/timeframe/direction/bar_ts)
 so the frontend can dedup alerts across the many ticks that carry the
