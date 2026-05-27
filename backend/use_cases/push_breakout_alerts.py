@@ -108,22 +108,33 @@ class PushBreakoutAlertsUseCase:
 # -------- message formatters --------
 
 
-_ARROW = {"up": "↑", "down": "↓"}
+# Direction labels are intentionally explicit: phone-notification UX is
+# scanned in a hurry, so we lead with COMPRA/VENDA rather than a tiny arrow
+# that could be confused.
+_SIDE_LABEL = {"up": "COMPRA", "down": "VENDA"}
+_SIDE_EMOJI = {"up": "🟢", "down": "🔴"}
+_BREAKOUT_LABEL = {"up": "Rompimento de ALTA", "down": "Rompimento de BAIXA"}
 _TAG_ARROW = {"up": "chart_with_upwards_trend", "down": "chart_with_downwards_trend"}
 
 
 def _title(b: Breakout) -> str:
-    return f"{_ARROW[b.direction.value]} {b.asset.value} {b.timeframe.value} @ {b.close:.2f}"
+    # Lead with COMPRA/VENDA so the lock-screen banner is unambiguous.
+    return (
+        f"{_SIDE_EMOJI[b.direction.value]} {_SIDE_LABEL[b.direction.value]} · "
+        f"{b.asset.value} {b.timeframe.value} @ {b.close:.2f}"
+    )
 
 
 def _body(b: Breakout) -> str:
+    side = b.direction.value
+    above_below = "acima de" if side == "up" else "abaixo de"
     parts = [
-        f"Nivel rompido: {b.level:.2f}",
+        f"{_BREAKOUT_LABEL[side]} — fechou {above_below} {b.level:.2f}",
         f"Expansao: {b.expansion_ratio:.2f}x ATR",
         f"Strength: {b.strength:.0f}/100",
     ]
     if b.squeeze:
-        parts.append("Pos-squeeze (qualidade alta)")
+        parts.append("Pos-squeeze (alta qualidade)")
     parts.append(f"Bar: {b.signal_bar_at.strftime('%H:%M UTC')}")
     return " | ".join(parts)
 
