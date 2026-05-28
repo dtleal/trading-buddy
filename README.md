@@ -342,6 +342,57 @@ Manual equivalent:
 ssh kvm "cd /root/trading-buddy && git pull origin main && make kvm-build && make kvm-up"
 ```
 
+### Troubleshooting (lessons from the first prod cutover)
+
+**Dashboard stuck on "Aguardando primeiro tick…" despite healthy backend.**
+Open DevTools → Console. If you see
+`SyntaxError: ... "delta_1d":NaN ... is not valid JSON`, the backend is
+emitting `NaN` somewhere. JS `JSON.parse` rejects `NaN` (Python's accepts it
+silently — so backend tests stay green while the browser crashes). Fix at
+the source: convert NaN/Inf to `None` before storing in any Pydantic field.
+There's already a `_clean_float` helper in `adapters/macro_fred.py` to copy.
+
+**Frontend on a public IP refuses to call the API (CORS).**
+The default allowlist covers `localhost`, `127.0.0.1`, `*.local`, and
+RFC1918 LAN ranges via a regex. **Public IPs need to be added explicitly**
+via `CORS_EXTRA_ORIGINS` in `.env`. Comma-separated. Example:
+
+```
+CORS_EXTRA_ORIGINS=http://72.62.15.111:3057,https://app.example.com
+```
+
+**Frontend bundle hits the wrong backend port.**
+The Next.js bundle bakes `NEXT_PUBLIC_API_URL` at build time. If empty, the
+runtime falls back to `${window.location.hostname}:8000` — wrong on KVM
+where the backend is on 8057. Always rebuild the frontend image whenever
+the backend port changes:
+
+```bash
+ssh kvm "cd /root/trading-buddy && docker compose -f docker/docker-compose.yml -f docker/docker-compose.kvm.yml --env-file .env build --no-cache frontend && docker compose -f docker/docker-compose.yml -f docker/docker-compose.kvm.yml --env-file .env up -d frontend"
+```
+
+Override the baked URL via `KVM_FRONTEND_API_URL` in `.env` if the host's
+public IP ever changes.
+
+**Browser shows old behavior after deploy.**
+Next.js serves chunks with `Cache-Control: s-maxage=31536000` and content-
+hashed filenames. The browser should pick up new chunks automatically, but
+service workers and stale HTML can hold on. Order of escalation:
+1. Hard refresh: `Cmd + Shift + R` (or `Ctrl + Shift + R`).
+2. Anonymous / private window — bypasses cache + service workers.
+3. DevTools → Application → Storage → "Clear site data".
+
+**Polymarket / kalshi must not be impacted by a trading-buddy deploy.**
+After every `make kvm-up` / `kvm-build`, verify with:
+
+```bash
+ssh kvm "docker ps --format '{{.Names}}' | grep -E '^(poly|kal)-' | sort | wc -l"
+```
+
+The count must match what existed before the deploy (currently 7 for
+polymarket, 0 for kalshi while stopped). Container IDs and uptimes should
+also be unchanged — those are stronger evidence than a name count alone.
+
 ## Phone push notifications (ntfy.sh)
 
 The backend can push every new breakout signal to your phone via
