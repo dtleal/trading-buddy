@@ -7,9 +7,21 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from datetime import datetime, timezone
 
 from core.models import FedWatchProbability, MacroIndicator
+
+
+def _clean_float(value: float) -> float | None:
+    """Return `value` unchanged unless it is NaN or infinity — in which case
+    return None. NaN serialises to invalid JSON (`NaN` rather than `null`)
+    and crashes `JSON.parse` on every frontend. Always sanitise at the
+    boundary where we generate numbers from external data."""
+    if math.isnan(value) or math.isinf(value):
+        return None
+    return value
+
 
 logger = logging.getLogger(__name__)
 
@@ -47,14 +59,19 @@ class FREDMacroGateway:
         series = client.get_series(series_id)  # type: ignore[attr-defined]
         if series is None or series.empty:
             return None
-        last_value = float(series.iloc[-1])
+        last_value = _clean_float(float(series.iloc[-1]))
+        if last_value is None:
+            return None
         observed_at = series.index[-1].to_pydatetime().replace(tzinfo=timezone.utc)
+        # FRED series can have NaN gaps (holidays, late releases). NaN is
+        # invalid JSON — left as-is it crashes JSON.parse on the frontend.
+        # Convert to None at the source so the boundary is clean.
         delta_1d: float | None = None
         delta_1w: float | None = None
         if len(series) >= 2:
-            delta_1d = last_value - float(series.iloc[-2])
+            delta_1d = _clean_float(last_value - float(series.iloc[-2]))
         if len(series) >= 6:
-            delta_1w = last_value - float(series.iloc[-6])
+            delta_1w = _clean_float(last_value - float(series.iloc[-6]))
         return MacroIndicator(
             series_id=series_id,
             value=last_value,
