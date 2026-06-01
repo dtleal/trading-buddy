@@ -1,7 +1,14 @@
 /**
  * HTTP client. Validates every response against the Zod schemas in `types.ts`.
  */
-import { BriefResponse, DashboardTick, VixHistoryResponse } from "@/lib/types";
+import {
+  BriefResponse,
+  DashboardTick,
+  QAEntry,
+  QAEntryInput,
+  QAEntryList,
+  VixHistoryResponse,
+} from "@/lib/types";
 
 /**
  * API base URL resolution:
@@ -52,6 +59,23 @@ async function fetchJson<T>(
   return schema.parse(json);
 }
 
+/** For mutations that return no body (e.g. 204 DELETE). Throws on !ok. */
+async function fetchVoid(path: string, init: RequestInit): Promise<void> {
+  const res = await fetch(`${BASE_URL}${path}`, { cache: "no-store", ...init });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const body = await res.json();
+      detail = body.detail ?? detail;
+    } catch {
+      /* ignore non-JSON error bodies */
+    }
+    throw new ApiError(res.status, `${path}: HTTP ${res.status} — ${detail}`);
+  }
+}
+
+const JSON_HEADERS = { "Content-Type": "application/json" };
+
 export const api = {
   getTick: () => fetchJson("/api/tick", DashboardTick),
   getVixHistory: (lookbackDays = 2, interval = "5m") =>
@@ -61,6 +85,22 @@ export const api = {
     ),
   generateBrief: () =>
     fetchJson("/api/brief", BriefResponse, { method: "POST" }),
+
+  // --- Q&A knowledge base ---
+  listQA: () => fetchJson("/api/qa", QAEntryList),
+  createQA: (input: QAEntryInput) =>
+    fetchJson("/api/qa", QAEntry, {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify(input),
+    }),
+  updateQA: (id: number, input: QAEntryInput) =>
+    fetchJson(`/api/qa/${id}`, QAEntry, {
+      method: "PUT",
+      headers: JSON_HEADERS,
+      body: JSON.stringify(input),
+    }),
+  deleteQA: (id: number) => fetchVoid(`/api/qa/${id}`, { method: "DELETE" }),
 };
 
 export { ApiError, BASE_URL };

@@ -119,6 +119,19 @@ positives**. The panel will be silent most of the day.
   slash command at `~/.claude/commands/dtb-brief.md`) for a free
   briefing equivalent to the paid `dtb brief`.
 
+### Q&A knowledge base (web app)
+
+A **Q&A tab** in the frontend (`/qa`) is a personal trading playbook: a
+searchable list of question/answer pairs you curate over time (e.g. *"vale a
+pena operar lateralidade na Bollinger?"*). Answers are stored as **markdown**
+and rendered the same way as the briefing. You can add, edit (inline), delete,
+filter by free-text or tag, and entries are sorted most-recently-updated first.
+
+Entries live in the `qa_entries` Postgres table and are served by a small CRUD
+API (`/api/qa`, see [Backend HTTP surface](#backend-http-surface-for-the-frontend)).
+The first entry — the Bollinger/lateralidade answer that started the feature —
+is seeded by migration `0002`, so a fresh database starts with it.
+
 ## Quickstart
 
 ```bash
@@ -178,9 +191,9 @@ trading-buddy/
 │   ├── container.py  Dependency injection (plain factory).
 │   └── settings.py   pydantic-settings (env-driven config).
 └── frontend/    Next.js 15 web app (TypeScript + Tailwind 4).
-    ├── app/          App Router pages + providers
-    ├── components/   ui/, shared/, vix/ — VixChart + VixAlertsPanel
-    ├── hooks/        useLiveTick, useVixAlerts
+    ├── app/          App Router pages (/ dashboard, /qa) + providers
+    ├── components/   ui/, shared/, vix/, qa/ — panels per feature
+    ├── hooks/        useLiveTick, useVixAlerts, useQA
     └── lib/          api.ts, ws.ts, types.ts, alerts/{store,engine,notify}
 ```
 
@@ -458,10 +471,15 @@ The backend runs FastAPI in the same process as the tick loop. Each new
 `DashboardTick` is fanned out to connected WebSocket clients.
 
 ```
-GET   /health                            liveness probe
-GET   /api/tick                          latest DashboardTick (503 until first)
-GET   /api/vix/history?lookback_days=N   5m VIX bars (1-60 day lookback)
-WS    /ws/ticks                          streams each new tick
+GET    /health                            liveness probe
+GET    /api/tick                          latest DashboardTick (503 until first)
+GET    /api/vix/history?lookback_days=N   5m VIX bars (1-60 day lookback)
+POST   /api/brief                         on-demand macro briefing (or raw snapshot)
+GET    /api/qa                            list saved Q&A entries (updated-first)
+POST   /api/qa                            create a Q&A entry (201)
+PUT    /api/qa/{id}                       update a Q&A entry (404 if missing)
+DELETE /api/qa/{id}                       delete a Q&A entry (204 / 404)
+WS     /ws/ticks                          streams each new tick
 ```
 
 CORS is open for `http://localhost:3000` and `http://127.0.0.1:3000` by

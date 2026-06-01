@@ -170,6 +170,26 @@ export const VixHistoryResponse = z.object({
 });
 export type VixHistoryResponse = z.infer<typeof VixHistoryResponse>;
 
+/** A saved Q&A entry from /api/qa. */
+export const QAEntry = z.object({
+  id: z.number(),
+  question: z.string(),
+  answer: z.string(), // markdown
+  tags: z.array(z.string()),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+export type QAEntry = z.infer<typeof QAEntry>;
+
+export const QAEntryList = z.array(QAEntry);
+
+/** Create/update payload for /api/qa. */
+export interface QAEntryInput {
+  question: string;
+  answer: string;
+  tags: string[];
+}
+
 /** Response from /api/brief. */
 export const BriefResponse = z.object({
   kind: z.enum(["briefing", "snapshot"]),

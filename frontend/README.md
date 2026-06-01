@@ -21,14 +21,17 @@ Next.js 15 + TypeScript + Tailwind 4 web UI for `trading-buddy`.
 frontend/
 ├── app/                       Next.js App Router
 │   ├── layout.tsx             Dark theme + providers
-│   ├── page.tsx               Dashboard
+│   ├── page.tsx               Dashboard (/)
+│   ├── qa/page.tsx            Q&A knowledge base (/qa)
 │   ├── providers.tsx          QueryClient + Toaster
 │   └── globals.css
 ├── components/
-│   ├── ui/                    Card, Button, Badge (shadcn-style)
-│   └── shared/                Header, ConnectionStatusIndicator
+│   ├── ui/                    Card, Button, Badge, Input, Textarea (shadcn-style)
+│   ├── shared/                Header (tab nav), ConnectionStatusIndicator
+│   └── qa/                    QAPanel, QAEntryCard, QAEditor
 ├── hooks/
-│   └── useLiveTick.ts         Subscribes to /ws/ticks
+│   ├── useLiveTick.ts         Subscribes to /ws/ticks
+│   └── useQA.ts               Q&A list + create/update/delete mutations
 ├── lib/
 │   ├── api.ts                 fetch + Zod validation
 │   ├── ws.ts                  Auto-reconnecting WebSocket client
@@ -55,5 +58,6 @@ NEXT_PUBLIC_API_URL=http://10.0.0.5:8000 npm run dev
 - `GET  /api/tick`          — latest DashboardTick
 - `GET  /api/vix/history`   — 5m VIX bars (1-60 day lookback)
 - `WS   /ws/ticks`          — pushes each new DashboardTick
+- `GET/POST/PUT/DELETE /api/qa` — Q&A knowledge base CRUD
 
 Run the backend stack with `make docker-up` from the repo root.

@@ -6,7 +6,7 @@ Tests inject these instead of hitting the network or a real database.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable
 
 from core.enums import LLMOutputKind, SentimentLabel
@@ -19,6 +19,7 @@ from core.models import (
     MarketSnapshot,
     NewsItem,
     PriceQuote,
+    QAEntry,
 )
 
 # -----------------------------------------------------------------------------
@@ -179,3 +180,63 @@ class FakeSnapshotRepository:
             if o.kind == LLMOutputKind.BRIEFING and o.created_at.date() == day
         ]
         return same_day[-1] if same_day else None
+
+
+# -----------------------------------------------------------------------------
+# Q&A repository
+# -----------------------------------------------------------------------------
+
+
+class FakeQARepository:
+    """In-memory QARepository. Mimics auto-increment ids and updated-first order."""
+
+    def __init__(self) -> None:
+        self._entries: dict[int, QAEntry] = {}
+        self._next_id = 1
+        # Monotonic clock so ordering by "updated" is deterministic in tests
+        # without depending on wall-clock resolution.
+        self._clock = datetime(2026, 6, 1, tzinfo=timezone.utc)
+
+    def _tick(self) -> datetime:
+        self._clock = self._clock + timedelta(microseconds=1)
+        return self._clock
+
+    async def list_entries(self) -> list[QAEntry]:
+        return sorted(self._entries.values(), key=lambda e: e.updated_at, reverse=True)
+
+    async def get_entry(self, entry_id: int) -> QAEntry | None:
+        return self._entries.get(entry_id)
+
+    async def create_entry(self, *, question: str, answer: str, tags: list[str]) -> QAEntry:
+        now = self._tick()
+        entry = QAEntry(
+            id=self._next_id,
+            question=question,
+            answer=answer,
+            tags=tags,
+            created_at=now,
+            updated_at=now,
+        )
+        self._entries[entry.id] = entry
+        self._next_id += 1
+        return entry
+
+    async def update_entry(
+        self, entry_id: int, *, question: str, answer: str, tags: list[str]
+    ) -> QAEntry | None:
+        existing = self._entries.get(entry_id)
+        if existing is None:
+            return None
+        updated = existing.model_copy(
+            update={
+                "question": question,
+                "answer": answer,
+                "tags": tags,
+                "updated_at": self._tick(),
+            }
+        )
+        self._entries[entry_id] = updated
+        return updated
+
+    async def delete_entry(self, entry_id: int) -> bool:
+        return self._entries.pop(entry_id, None) is not None

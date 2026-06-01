@@ -25,6 +25,7 @@ from core.models import (
     MarketSnapshot,
     NewsItem,
     PriceQuote,
+    QAEntry,
 )
 
 # -----------------------------------------------------------------------------
@@ -119,6 +120,29 @@ class SnapshotRepository(Protocol):
     async def latest_briefing_for(self, day: date) -> LLMOutput | None: ...
 
 
+@runtime_checkable
+class QARepository(Protocol):
+    """CRUD persistence for user-curated Q&A entries."""
+
+    async def list_entries(self) -> list[QAEntry]:
+        """Return every entry, most recently updated first."""
+        ...
+
+    async def get_entry(self, entry_id: int) -> QAEntry | None: ...
+
+    async def create_entry(self, *, question: str, answer: str, tags: list[str]) -> QAEntry: ...
+
+    async def update_entry(
+        self, entry_id: int, *, question: str, answer: str, tags: list[str]
+    ) -> QAEntry | None:
+        """Update an entry by id. Returns None if no such entry exists."""
+        ...
+
+    async def delete_entry(self, entry_id: int) -> bool:
+        """Delete an entry by id. Returns False if no such entry existed."""
+        ...
+
+
 __all__ = [
     "PricesGateway",
     "CalendarGateway",
@@ -128,6 +152,7 @@ __all__ = [
     "LLMGateway",
     "CacheStore",
     "SnapshotRepository",
+    "QARepository",
     "AssetSymbol",
     "VolatilityIndex",
 ]

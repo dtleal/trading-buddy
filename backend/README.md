@@ -21,7 +21,8 @@ backend/
 │   ├── detect_trade_setup.py        Pure heuristic: levels + bias → TradeSetup?
 │   ├── fetch_*.py                   I/O wrappers around adapters
 │   ├── generate_briefing.py         LLM: pre-market briefing
-│   └── explain_event.py             LLM: event explainer (pre/post)
+│   ├── explain_event.py             LLM: event explainer (pre/post)
+│   └── manage_qa.py                 Q&A CRUD: list/create/update/delete
 │
 ├── adapters/       External-world implementations.
 │   ├── prices_yfinance.py           yfinance: quote + MA200 + intraday bars
@@ -30,6 +31,7 @@ backend/
 │   ├── macro_fred.py + macro_fedwatch.py
 │   ├── sentiment_keyword.py         Default classifier (no ML deps)
 │   ├── cache_redis.py + db_postgres.py
+│   ├── db_qa.py                     Postgres CRUD for the Q&A knowledge base
 │   └── llm_anthropic.py             Claude API client
 │
 ├── cli/            Typer entry point + Rich renderers.

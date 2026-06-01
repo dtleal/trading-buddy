@@ -294,6 +294,27 @@ class TradeSetup(_Frozen):
 
 
 # -----------------------------------------------------------------------------
+# Q&A knowledge base (user-curated playbook entries)
+# -----------------------------------------------------------------------------
+
+
+class QAEntry(_Frozen):
+    """A saved question/answer pair the user keeps as a day-to-day reference.
+
+    The answer is stored as markdown so the frontend can render formatting
+    (headings, lists, bold) the same way the briefing panel does. `tags` are
+    free-form, normalised (lowercased, de-duped) labels used for filtering.
+    """
+
+    id: int
+    question: str
+    answer: str  # markdown
+    tags: list[str] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+# -----------------------------------------------------------------------------
 # LLM outputs
 # -----------------------------------------------------------------------------
 
@@ -345,6 +366,7 @@ __all__ = [
     "IntradayBiasReport",
     "TradeSetup",
     "Breakout",
+    "QAEntry",
     "LLMOutput",
     "DashboardTick",
     "VolatilityIndex",

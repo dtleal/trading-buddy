@@ -14,7 +14,9 @@ from typing import AsyncIterator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from adapters.db_qa import PostgresQARepository
 from api.routes import brief as brief_route
+from api.routes import qa as qa_route
 from api.routes import tick as tick_route
 from api.routes import vix as vix_route
 from api.routes import ws as ws_route
@@ -48,8 +50,15 @@ LAN_ORIGIN_REGEX = (
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("FastAPI starting (REST + WS)")
-    yield
-    logger.info("FastAPI shutting down")
+    # Q&A storage owns its own connection pool, opened for the app's lifetime
+    # and reused across requests via the `_qa_repository` dependency.
+    qa_repository = PostgresQARepository(dsn=get_settings().postgres_dsn)
+    app.state.qa_repository = qa_repository
+    try:
+        yield
+    finally:
+        await qa_repository.close()
+        logger.info("FastAPI shutting down")
 
 
 def create_app() -> FastAPI:
@@ -73,13 +82,14 @@ def create_app() -> FastAPI:
         allow_origins=allow_origins,
         allow_origin_regex=LAN_ORIGIN_REGEX,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["*"],
     )
 
     app.include_router(tick_route.router)
     app.include_router(vix_route.router)
     app.include_router(brief_route.router)
+    app.include_router(qa_route.router)
     app.include_router(ws_route.router)
 
     @app.get("/health", tags=["meta"])
