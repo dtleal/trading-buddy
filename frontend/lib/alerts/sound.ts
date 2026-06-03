@@ -29,14 +29,27 @@ export function unlockAudio(): void {
 }
 
 let unlockInstalled = false;
+const GESTURES = ["pointerdown", "keydown", "touchstart", "click"] as const;
 
-/** Arm one-time global listeners that unlock audio on the first user gesture. */
+/**
+ * Arm global listeners that unlock audio on user gestures.
+ *
+ * Not `once`: some browsers leave the context suspended on the very first
+ * `resume()` attempt, so we keep listening across gestures and only detach
+ * once the context is actually `running` — otherwise a flaky first try would
+ * silently disarm us forever.
+ */
 export function installAudioUnlock(): void {
   if (unlockInstalled || typeof window === "undefined") return;
   unlockInstalled = true;
-  const handler = () => unlockAudio();
-  for (const evt of ["pointerdown", "keydown", "touchstart"] as const) {
-    window.addEventListener(evt, handler, { once: true, passive: true });
+  const handler = () => {
+    unlockAudio();
+    if (ctx?.state === "running") {
+      for (const evt of GESTURES) window.removeEventListener(evt, handler);
+    }
+  };
+  for (const evt of GESTURES) {
+    window.addEventListener(evt, handler, { passive: true });
   }
 }
 
@@ -61,15 +74,7 @@ function beep(
   osc.stop(startAt + durationS + 0.02);
 }
 
-/** Play the chime for a given tone. No-op if audio isn't available/unlocked. */
-export function playAlertSound(tone: AlertTone): void {
-  const c = getCtx();
-  if (!c) return;
-  if (c.state === "suspended") {
-    // Not yet unlocked by a gesture — try, but don't block.
-    void c.resume();
-    if (c.state === "suspended") return;
-  }
+function emit(c: AudioContext, tone: AlertTone): void {
   const t = c.currentTime;
   if (tone === "danger") {
     beep(c, 988, t, 0.14, 0.28, "triangle");
@@ -78,5 +83,20 @@ export function playAlertSound(tone: AlertTone): void {
     beep(c, 880, t, 0.16, 0.24, "triangle");
   } else {
     beep(c, 660, t, 0.12, 0.18, "sine");
+  }
+}
+
+/** Play the chime for a given tone. No-op if audio is unavailable/locked. */
+export function playAlertSound(tone: AlertTone): void {
+  const c = getCtx();
+  if (!c) return;
+  if (c.state === "running") {
+    emit(c, tone);
+  } else {
+    // Suspended: a gesture may have just armed it — play once resume resolves.
+    // If no gesture ever happened, resume() never settles and we stay silent.
+    void c.resume().then(() => {
+      if (c.state === "running") emit(c, tone);
+    });
   }
 }
