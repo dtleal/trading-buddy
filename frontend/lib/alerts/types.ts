@@ -47,13 +47,15 @@ export type AlertRule =
   | VixTermFlipRule
   | VixDeltaRule;
 
+export type AlertTone = "info" | "warning" | "danger";
+
 export type AlertEvent = {
   id: string;
   ruleId: string;
   ruleKind: AlertRule["kind"];
   title: string;
   detail: string;
-  tone: "info" | "warning" | "danger";
+  tone: AlertTone;
   /** UNIX millis */
   firedAt: number;
 };

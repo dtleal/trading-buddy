@@ -6,11 +6,14 @@
  * granted AND the user toggled it on.
  */
 import { toast } from "sonner";
+import { playAlertSound } from "./sound";
 import type { AlertEvent } from "./types";
 
-export function notifyAlert(event: AlertEvent, desktopEnabled: boolean): void {
+export function notifyAlert(event: AlertEvent, desktopEnabled: boolean, soundEnabled: boolean): void {
   const fn = event.tone === "danger" ? toast.error : event.tone === "warning" ? toast.warning : toast.info;
   fn(event.title, { description: event.detail, duration: 8000 });
+
+  if (soundEnabled) playAlertSound(event.tone);
 
   if (
     desktopEnabled &&

@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { Bell, BellOff, Plus, Trash2 } from "lucide-react";
+import { Bell, BellOff, Plus, Trash2, Volume2, VolumeX } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAlertsStore } from "@/lib/alerts/store";
 import { requestNotificationPermission } from "@/lib/alerts/notify";
+import { playAlertSound, unlockAudio } from "@/lib/alerts/sound";
 import type { AlertRule } from "@/lib/alerts/types";
 import { cn } from "@/lib/utils";
 
@@ -19,6 +20,8 @@ export function VixAlertsPanel() {
   const clearHistory = useAlertsStore((s) => s.clearHistory);
   const desktopEnabled = useAlertsStore((s) => s.notificationsEnabled);
   const setDesktopEnabled = useAlertsStore((s) => s.setNotificationsEnabled);
+  const soundEnabled = useAlertsStore((s) => s.soundEnabled);
+  const setSoundEnabled = useAlertsStore((s) => s.setSoundEnabled);
 
   return (
     <Card>
@@ -31,17 +34,32 @@ export function VixAlertsPanel() {
               browser depende de permissão.
             </CardDescription>
           </div>
-          <DesktopToggle
-            enabled={desktopEnabled}
-            onToggle={async () => {
-              if (!desktopEnabled) {
-                const granted = await requestNotificationPermission();
-                setDesktopEnabled(granted);
-              } else {
-                setDesktopEnabled(false);
-              }
-            }}
-          />
+          <div className="flex items-center gap-2">
+            <SoundToggle
+              enabled={soundEnabled}
+              onToggle={() => {
+                const next = !soundEnabled;
+                setSoundEnabled(next);
+                // The click is the user gesture that unlocks Web Audio. Beep
+                // once on enable so the user confirms it's actually audible.
+                if (next) {
+                  unlockAudio();
+                  playAlertSound("info");
+                }
+              }}
+            />
+            <DesktopToggle
+              enabled={desktopEnabled}
+              onToggle={async () => {
+                if (!desktopEnabled) {
+                  const granted = await requestNotificationPermission();
+                  setDesktopEnabled(granted);
+                } else {
+                  setDesktopEnabled(false);
+                }
+              }}
+            />
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -106,6 +124,21 @@ function DesktopToggle({ enabled, onToggle }: { enabled: boolean; onToggle: () =
     <Button variant="outline" size="sm" onClick={onToggle}>
       {enabled ? <Bell className="mr-1.5 size-4" /> : <BellOff className="mr-1.5 size-4" />}
       {enabled ? "notificações ativas" : "ativar notificações"}
+    </Button>
+  );
+}
+
+function SoundToggle({ enabled, onToggle }: { enabled: boolean; onToggle: () => void }) {
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={onToggle}
+      aria-pressed={enabled}
+      title={enabled ? "som dos alertas ligado" : "som dos alertas desligado"}
+    >
+      {enabled ? <Volume2 className="mr-1.5 size-4" /> : <VolumeX className="mr-1.5 size-4" />}
+      {enabled ? "som ativo" : "som off"}
     </Button>
   );
 }

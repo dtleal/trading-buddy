@@ -49,6 +49,7 @@ interface AlertsState {
   rules: AlertRule[];
   history: AlertEvent[];
   notificationsEnabled: boolean;
+  soundEnabled: boolean;
 
   addRule: (rule: AlertRule) => void;
   updateRule: (id: string, patch: Partial<AlertRule>) => void;
@@ -59,6 +60,7 @@ interface AlertsState {
   clearHistory: () => void;
 
   setNotificationsEnabled: (enabled: boolean) => void;
+  setSoundEnabled: (enabled: boolean) => void;
 }
 
 export const useAlertsStore = create<AlertsState>()(
@@ -67,6 +69,7 @@ export const useAlertsStore = create<AlertsState>()(
       rules: DEFAULT_RULES,
       history: [],
       notificationsEnabled: false,
+      soundEnabled: true,
 
       addRule: (rule) => set((s) => ({ rules: [...s.rules, rule] })),
       updateRule: (id, patch) =>
@@ -91,6 +94,7 @@ export const useAlertsStore = create<AlertsState>()(
       clearHistory: () => set({ history: [] }),
 
       setNotificationsEnabled: (enabled) => set({ notificationsEnabled: enabled }),
+      setSoundEnabled: (enabled) => set({ soundEnabled: enabled }),
     }),
     {
       name: "trading-buddy-alerts",

@@ -17,6 +17,7 @@ export function useVixAlerts(tick: DashboardTick | null): void {
   const rules = useAlertsStore((s) => s.rules);
   const recordEvent = useAlertsStore((s) => s.recordEvent);
   const desktopEnabled = useAlertsStore((s) => s.notificationsEnabled);
+  const soundEnabled = useAlertsStore((s) => s.soundEnabled);
 
   const prevTickRef = useRef<DashboardTick | null>(null);
   const deltaStateRef = useRef<DeltaState>({});
@@ -38,7 +39,7 @@ export function useVixAlerts(tick: DashboardTick | null): void {
 
     for (const event of events) {
       recordEvent(event);
-      notifyAlert(event, desktopEnabled);
+      notifyAlert(event, desktopEnabled, soundEnabled);
     }
-  }, [tick, rules, recordEvent, desktopEnabled]);
+  }, [tick, rules, recordEvent, desktopEnabled, soundEnabled]);
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
+import { playAlertSound } from "@/lib/alerts/sound";
 import { useAlertsStore } from "@/lib/alerts/store";
 import type { Breakout, DashboardTick } from "@/lib/types";
 
@@ -26,6 +27,7 @@ export function useBreakoutAlerts(tick: DashboardTick | null): void {
   const primedRef = useRef(false);
   const recordEvent = useAlertsStore((s) => s.recordEvent);
   const desktopEnabled = useAlertsStore((s) => s.notificationsEnabled);
+  const soundEnabled = useAlertsStore((s) => s.soundEnabled);
 
   useEffect(() => {
     if (!tick) return;
@@ -49,7 +51,7 @@ export function useBreakoutAlerts(tick: DashboardTick | null): void {
     for (const b of breakouts) {
       if (seenRef.current.has(b.id)) continue;
       seenRef.current.add(b.id);
-      dispatchBreakoutAlert(b, desktopEnabled);
+      dispatchBreakoutAlert(b, desktopEnabled, soundEnabled);
       recordEvent({
         id: `breakout-${b.id}`,
         ruleId: "breakout",
@@ -60,7 +62,7 @@ export function useBreakoutAlerts(tick: DashboardTick | null): void {
         firedAt: Date.now(),
       });
     }
-  }, [tick, recordEvent, desktopEnabled]);
+  }, [tick, recordEvent, desktopEnabled, soundEnabled]);
 }
 
 function titleFor(b: Breakout): string {
@@ -79,10 +81,12 @@ function toneFor(b: Breakout): "info" | "warning" | "danger" {
   return "info";
 }
 
-function dispatchBreakoutAlert(b: Breakout, desktopEnabled: boolean): void {
+function dispatchBreakoutAlert(b: Breakout, desktopEnabled: boolean, soundEnabled: boolean): void {
   const tone = toneFor(b);
   const fn = tone === "danger" ? toast.error : tone === "warning" ? toast.warning : toast.info;
   fn(titleFor(b), { description: detailFor(b), duration: 10_000 });
+
+  if (soundEnabled) playAlertSound(tone);
 
   if (
     desktopEnabled &&
