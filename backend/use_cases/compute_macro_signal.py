@@ -45,7 +45,10 @@ class ComputeMacroSignalUseCase:
         for asset in AssetSymbol:
             score = 50.0
             rationale: list[str] = []
-            is_stock = asset in {AssetSymbol.USTEC, AssetSymbol.SPX}
+            # Bitcoin trades as a risk-on asset — it tracks the tech indices
+            # (rising yields / strong USD hurt it, rate cuts help it), so it
+            # rides the same rules as the stock indices here.
+            is_risk_on = asset in {AssetSymbol.USTEC, AssetSymbol.SPX, AssetSymbol.BITCOIN}
 
             if ten_year is not None:
                 sign = _delta_sign(ten_year.delta_1w, threshold=0.05)
@@ -65,20 +68,20 @@ class ComputeMacroSignalUseCase:
                     elif sign < 0:
                         score += 8
                         rationale.append("DXY falling (USD weakness)")
-                elif is_stock and sign > 0:
+                elif is_risk_on and sign > 0:
                     score -= 3
-                    rationale.append("DXY rising mildly bearish for stocks")
+                    rationale.append("DXY rising mildly bearish for risk assets")
 
             fw = snapshot.fedwatch
             if fw is not None:
                 cut_weight = fw.cut_50 + fw.cut_25
                 hike_weight = fw.hike_25 + fw.hike_50
                 if cut_weight > hike_weight + 0.2:
-                    bonus = 10 if is_stock else 5
+                    bonus = 10 if is_risk_on else 5
                     score += bonus
                     rationale.append("FedWatch leans toward rate cuts")
                 elif hike_weight > cut_weight + 0.2:
-                    penalty = 10 if is_stock else 3
+                    penalty = 10 if is_risk_on else 3
                     score -= penalty
                     rationale.append("FedWatch leans toward rate hikes")
 

@@ -11,12 +11,12 @@ export function PricesPanel({ tick }: { tick: DashboardTick | null }) {
       <CardHeader>
         <CardTitle>Ativos</CardTitle>
         <CardDescription>
-          USTEC · SPX · GOLD — preço atual, variação do dia e distância da MM 200 (daily)
+          USTEC · SPX · GOLD · BITCOIN — preço atual, variação do dia e distância da MM 200 (daily)
         </CardDescription>
       </CardHeader>
       <CardContent>
         {tick ? (
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {Object.entries(tick.market.assets).map(([sym, quote]) => (
               <AssetCard key={sym} symbol={sym} quote={quote} />
             ))}

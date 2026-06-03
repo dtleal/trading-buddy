@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "trading-buddy",
-  description: "Macro context co-pilot for day trading USTEC, SPX and Gold.",
+  description: "Macro context co-pilot for day trading USTEC, SPX, Gold and Bitcoin.",
 };
 
 export default function RootLayout({

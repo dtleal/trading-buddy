@@ -14,7 +14,7 @@ import type {
 import { cn } from "@/lib/utils";
 
 const TIMEFRAMES: TimeframeType[] = ["5m", "15m", "30m", "60m", "4h"];
-const ASSETS: AssetSymbolType[] = ["USTEC", "SPX", "GOLD"];
+const ASSETS: AssetSymbolType[] = ["USTEC", "SPX", "GOLD", "BITCOIN"];
 
 // Breakouts older than this are stale for a day-trader — they don't open a new
 // decision window. Hidden by default; revealed via the "histórico" toggle.

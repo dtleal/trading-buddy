@@ -32,6 +32,7 @@ DEFAULT_CONTRACT_MULTIPLIER: dict[str, float] = {
     "USTEC": 20.0,  # NQ E-mini = $20/pt
     "SPX": 50.0,  # ES E-mini = $50/pt
     "GOLD": 100.0,  # GC full = $100/pt; MGC mini = $10
+    "BITCOIN": 1.0,  # BTC CFD = $1/pt (1 contract = 1 BTC); MBT future = 0.1
 }
 
 app = typer.Typer(add_completion=False, help="day-trading-buddy CLI")
@@ -225,7 +226,7 @@ async def _snapshot(include_prompt: bool) -> None:
 
 @app.command()
 def signal(
-    asset: str = typer.Option(..., "--asset", "-a", help="Asset: USTEC | SPX | GOLD"),
+    asset: str = typer.Option(..., "--asset", "-a", help="Asset: USTEC | SPX | GOLD | BITCOIN"),
     interval: str = typer.Option("5m", "--interval", "-i", help="Bar interval (5m default)"),
     lookback_days: int = typer.Option(
         5,

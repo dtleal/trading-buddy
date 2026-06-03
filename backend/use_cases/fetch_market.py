@@ -14,7 +14,12 @@ from core.models import MarketSnapshot, PriceQuote, VixSnapshot
 logger = logging.getLogger(__name__)
 
 CACHE_TTL_SECONDS = 60
-ASSETS: tuple[AssetSymbol, ...] = (AssetSymbol.USTEC, AssetSymbol.SPX, AssetSymbol.GOLD)
+ASSETS: tuple[AssetSymbol, ...] = (
+    AssetSymbol.USTEC,
+    AssetSymbol.SPX,
+    AssetSymbol.GOLD,
+    AssetSymbol.BITCOIN,
+)
 
 
 def _classify_vix_regime(value: float) -> VixRegime:

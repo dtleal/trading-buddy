@@ -23,6 +23,7 @@ YAHOO_TICKERS: dict[str, str] = {
     "USTEC": "^NDX",
     "SPX": "^GSPC",
     "GOLD": "GC=F",
+    "BITCOIN": "BTC-USD",
     "VIX": "^VIX",
     "VIX9D": "^VIX9D",
     "VIX3M": "^VIX3M",

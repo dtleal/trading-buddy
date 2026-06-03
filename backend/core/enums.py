@@ -11,6 +11,7 @@ class AssetSymbol(str, Enum):
     USTEC = "USTEC"  # Nasdaq 100 (Yahoo: ^NDX)
     SPX = "SPX"  # S&P 500 (Yahoo: ^GSPC)
     GOLD = "GOLD"  # Gold futures (Yahoo: GC=F)
+    BITCOIN = "BITCOIN"  # Bitcoin spot (Yahoo: BTC-USD) — risk-on, tracks tech
 
 
 class VolatilityIndex(str, Enum):

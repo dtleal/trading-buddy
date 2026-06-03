@@ -82,6 +82,7 @@ class RunDashboardTickUseCase:
             AssetSymbol.USTEC,
             AssetSymbol.SPX,
             AssetSymbol.GOLD,
+            AssetSymbol.BITCOIN,
         ),
     ) -> None:
         self._fetch_market = fetch_market

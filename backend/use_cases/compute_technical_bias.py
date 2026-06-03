@@ -45,16 +45,19 @@ class ComputeTechnicalBiasUseCase:
             else:
                 rationale.append(f"price {distance_pct:+.1f}% below MA200 daily")
 
-        is_stock = asset in {AssetSymbol.USTEC, AssetSymbol.SPX}
+        # Risk-on assets (stock indices + Bitcoin) move together vs the VIX:
+        # they rally in calm regimes and get hit when fear spikes. Gold is the
+        # odd one out — it tends to catch a bid when stress rises.
+        is_risk_on = asset in {AssetSymbol.USTEC, AssetSymbol.SPX, AssetSymbol.BITCOIN}
 
         if snapshot.vix.regime == VixRegime.LOW:
-            if is_stock:
+            if is_risk_on:
                 score += 5
                 rationale.append("VIX low regime (risk-on)")
             else:
                 rationale.append("VIX low regime")
         elif snapshot.vix.regime == VixRegime.HIGH:
-            if is_stock:
+            if is_risk_on:
                 score -= 10
                 rationale.append("VIX high regime (risk-off)")
             else:
@@ -62,13 +65,13 @@ class ComputeTechnicalBiasUseCase:
                 rationale.append("VIX high regime helps Gold")
 
         if snapshot.vix.term_structure == TermStructure.BACKWARDATION:
-            if is_stock:
+            if is_risk_on:
                 score -= 5
                 rationale.append("VIX backwardation (stress)")
             else:
                 score += 3
                 rationale.append("VIX backwardation lifts Gold")
-        elif snapshot.vix.term_structure == TermStructure.CONTANGO and is_stock:
+        elif snapshot.vix.term_structure == TermStructure.CONTANGO and is_risk_on:
             score += 2
             rationale.append("VIX contango (calm)")
 

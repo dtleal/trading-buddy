@@ -7,7 +7,7 @@
  */
 import { z } from "zod";
 
-export const AssetSymbol = z.enum(["USTEC", "SPX", "GOLD"]);
+export const AssetSymbol = z.enum(["USTEC", "SPX", "GOLD", "BITCOIN"]);
 export type AssetSymbol = z.infer<typeof AssetSymbol>;
 
 export const VixRegime = z.enum(["low", "mid", "high"]);

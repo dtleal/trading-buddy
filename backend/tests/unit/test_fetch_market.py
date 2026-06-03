@@ -18,6 +18,7 @@ async def test_fetch_market_returns_all_assets_and_vix() -> None:
             "USTEC": PriceQuote(symbol="USTEC", price=20_000.0, timestamp=now),
             "SPX": PriceQuote(symbol="SPX", price=5_900.0, timestamp=now),
             "GOLD": PriceQuote(symbol="GOLD", price=2_600.0, timestamp=now),
+            "BITCOIN": PriceQuote(symbol="BITCOIN", price=68_000.0, timestamp=now),
             "VIX": PriceQuote(symbol="VIX", price=14.0, timestamp=now),
             "VIX9D": PriceQuote(symbol="VIX9D", price=13.0, timestamp=now),
             "VIX3M": PriceQuote(symbol="VIX3M", price=15.0, timestamp=now),
@@ -29,13 +30,20 @@ async def test_fetch_market_returns_all_assets_and_vix() -> None:
             ("SPX", "1h"): 5_700.0,
             ("GOLD", "1d"): 2_500.0,
             ("GOLD", "1h"): 2_550.0,
+            ("BITCOIN", "1d"): 60_000.0,
+            ("BITCOIN", "1h"): 65_000.0,
         },
     )
 
     uc = FetchMarketSnapshotUseCase(prices=prices, cache=InMemoryCache())
     snapshot = await uc.execute()
 
-    assert set(snapshot.assets) == {AssetSymbol.USTEC, AssetSymbol.SPX, AssetSymbol.GOLD}
+    assert set(snapshot.assets) == {
+        AssetSymbol.USTEC,
+        AssetSymbol.SPX,
+        AssetSymbol.GOLD,
+        AssetSymbol.BITCOIN,
+    }
     assert snapshot.vix.regime == VixRegime.LOW
     assert snapshot.vix.term_structure == TermStructure.CONTANGO
     assert snapshot.assets[AssetSymbol.USTEC].ma200_d == 19_000.0
