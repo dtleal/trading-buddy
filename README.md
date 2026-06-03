@@ -34,6 +34,12 @@ favorable.
 ### Intraday layer (`dtb signal`, also feeds the dashboard)
 
 - Pulls 5-minute OHLCV bars from yfinance (~15-min delay on free tier).
+  Intraday bars for **USTEC/SPX** come from the continuous **futures**
+  (`NQ=F`/`ES=F`), not the cash index (`^NDX`/`^GSPC`). The cash indices only
+  print during RTH (~77 bars/day), so a 200-bar 5m MA reaches back ~2.5 trading
+  days and won't match the near-24h instrument a trader actually watches
+  (futures: ~213 bars/day → 200 bars ≈ 0.7 day). Spot quotes and the daily
+  MA200 still use the cash index; see `INTRADAY_TICKERS` in `prices_yfinance.py`.
 - Computes deterministic levels: **HOD/LOD**, **VWAP**, **Opening Range**,
   **previous-day OHLC**, **EMA 9/20/50/200**, **SMA 200**, **ATR(14)**, plus
   **5-bar swing pivots** (last swing high and low).

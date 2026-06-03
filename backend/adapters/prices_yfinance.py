@@ -29,6 +29,18 @@ YAHOO_TICKERS: dict[str, str] = {
     "VIX3M": "^VIX3M",
 }
 
+# Intraday (5m) overrides. The cash indices (^NDX, ^GSPC) only print during the
+# RTH session (~77 bars/day), so a 200-bar 5m MA stretches back ~2.5 trading
+# days — a window that doesn't match what a trader sees on the near-24h
+# instrument they actually trade (Nasdaq/S&P futures, ~213 bars/day → 200 bars
+# ≈ 0.7 day). That mismatch flips the price-vs-200s read. For intraday bars we
+# therefore use the continuous futures so EMA200/SMA200 line up with the
+# trader's chart. Spot quotes and daily MA200 stay on the cash index.
+INTRADAY_TICKERS: dict[str, str] = {
+    "USTEC": "NQ=F",  # Nasdaq 100 future (~24h) instead of ^NDX cash
+    "SPX": "ES=F",  # S&P 500 future (~24h) instead of ^GSPC cash
+}
+
 
 class YFinancePricesGateway:
     """Implements `core.interfaces.PricesGateway`."""
@@ -36,8 +48,9 @@ class YFinancePricesGateway:
     def __init__(self) -> None:
         self._ticker_cache: dict[str, Any] = {}
 
-    def _ticker(self, symbol: str) -> Any:
-        yahoo = YAHOO_TICKERS.get(symbol, symbol)
+    def _ticker(self, symbol: str, *, intraday: bool = False) -> Any:
+        yahoo = INTRADAY_TICKERS.get(symbol) if intraday else None
+        yahoo = yahoo or YAHOO_TICKERS.get(symbol, symbol)
         if yahoo not in self._ticker_cache:
             self._ticker_cache[yahoo] = yf.Ticker(yahoo)
         return self._ticker_cache[yahoo]
@@ -87,7 +100,7 @@ class YFinancePricesGateway:
         interval: str,
         lookback_days: int,
     ) -> list[IntradayBar]:
-        ticker = self._ticker(symbol)
+        ticker = self._ticker(symbol, intraday=True)
         period = f"{lookback_days}d"
         hist = ticker.history(period=period, interval=interval, auto_adjust=False)
         if hist is None or hist.empty:
