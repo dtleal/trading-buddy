@@ -39,6 +39,10 @@ favorable.
   **5-bar swing pivots** (last swing high and low).
 - Suggests **structure-based stops**: stop below the last swing low (LONG) or
   above the last swing high (SHORT), with a 0.5×ATR buffer.
+- **Standard 5m read** surfaced per asset in the UI ("Níveis 5m" panel): price
+  vs **VWAP**, **EMA 200** and **SMA 200**. When the two 200s converge (gap
+  < 0.1×ATR) they flag **lateral/range**; price clearly above/below both flags
+  trend. Computed for every tracked asset (USTEC, SPX, GOLD, Bitcoin).
 - Position sizing helper when `ACCOUNT_SIZE_USD > 0` (uses NQ/ES/GC contract
   multipliers by default; override with `--multiplier`).
 

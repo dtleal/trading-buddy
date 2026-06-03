@@ -118,6 +118,32 @@ export const IntradayBiasReport = z.object({
 });
 export type IntradayBiasReport = z.infer<typeof IntradayBiasReport>;
 
+/** Per-asset intraday reference levels computed on the 5m timeframe. */
+export const IntradayLevels = z.object({
+  symbol: z.string(),
+  asof: z.string(),
+  last_price: z.number(),
+  hod: z.number(),
+  lod: z.number(),
+  vwap: z.number().nullable(),
+  orh: z.number().nullable(),
+  orl: z.number().nullable(),
+  pdc: z.number().nullable(),
+  pdh: z.number().nullable(),
+  pdl: z.number().nullable(),
+  ema_9: z.number().nullable(),
+  ema_20: z.number().nullable(),
+  ema_50: z.number().nullable(),
+  ema_200: z.number().nullable(),
+  sma_200: z.number().nullable(),
+  atr_14: z.number().nullable(),
+  last_swing_high: z.number().nullable(),
+  last_swing_high_at: z.string().nullable(),
+  last_swing_low: z.number().nullable(),
+  last_swing_low_at: z.string().nullable(),
+});
+export type IntradayLevels = z.infer<typeof IntradayLevels>;
+
 export const TradeSetup = z.object({
   asset: AssetSymbol,
   direction: z.enum(["LONG", "SHORT"]),
@@ -156,7 +182,7 @@ export const DashboardTick = z.object({
   recent_news: z.array(NewsItem),
   bias: z.record(AssetSymbol, BiasReport),
   setups: z.array(TradeSetup),
-  intraday_levels: z.record(AssetSymbol, z.unknown()),
+  intraday_levels: z.record(AssetSymbol, IntradayLevels).default({}),
   intraday_bias: z.record(AssetSymbol, IntradayBiasReport).default({}),
   breakouts_recent: z.array(Breakout).default([]),
 });

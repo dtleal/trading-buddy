@@ -4,6 +4,7 @@ import { Header } from "@/components/shared/Header";
 import { VixChart } from "@/components/vix/VixChart";
 import { VixAlertsPanel } from "@/components/vix/VixAlertsPanel";
 import { PricesPanel } from "@/components/market/PricesPanel";
+import { IntradayLevelsPanel } from "@/components/market/IntradayLevelsPanel";
 import { BiasPanel } from "@/components/bias/BiasPanel";
 import { SetupsPanel } from "@/components/setups/SetupsPanel";
 import { EventsPanel } from "@/components/events/EventsPanel";
@@ -67,8 +68,9 @@ export default function Home() {
           <VixAlertsPanel />
         </div>
 
-        {/* Row 2: prices (3 cards inside) */}
+        {/* Row 2: prices (cards inside) + 5m reference levels */}
         <PricesPanel tick={tick} />
+        <IntradayLevelsPanel tick={tick} />
 
         {/* Row 3: bias + setups side by side on desktop */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
