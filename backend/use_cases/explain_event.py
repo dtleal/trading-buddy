@@ -35,7 +35,10 @@ A US release just printed. Reply in Brazilian Portuguese, in 4-6 short bullets:
 - Impacto no VIX e na curva de juros.
 - Uma frase: o trader deve operar normal, reduzir risco ou aguardar?
 
-Sem recomendar entradas, stops ou take-profits.
+Se o trader pedir explicitamente uma entrada e houver um setup de boa
+probabilidade no contexto pós-release, forneça a entrada completa (direção,
+gatilho, stop, alvo, R:R, confiança 0-100 e risco que invalida). Caso contrário,
+fique no contexto e não force trade.
 """
 
 SYSTEM_PROMPT_EN_PRE = """\
@@ -61,7 +64,10 @@ A US release just printed. Reply in English in 4-6 short bullets:
 - Impact on VIX and the rate curve.
 - One sentence: should the trader trade normally, reduce risk, or wait?
 
-Do not recommend entries, stops, or take-profits.
+If the trader explicitly asks for an entry and a high-probability setup exists in
+the post-release context, give the full entry (direction, trigger, stop, target,
+R:R, confidence 0-100 and the invalidating risk). Otherwise, stay on context and
+do not force a trade.
 """
 
 
