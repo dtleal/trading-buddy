@@ -96,6 +96,26 @@ class Settings(BaseSettings):
     # Override only if self-hosting an ntfy server.
     ntfy_server: str = "https://ntfy.sh"
 
+    # --- Order flow (live MT5 DOM / footprint / tape) ----------------------
+
+    # Master switch. When False the ingest WebSocket rejects connections and
+    # the frontend simply shows the panel empty. Turn on once the Windows
+    # collector is configured.
+    orderflow_enabled: bool = False
+    # Shared secret the collector must present to push data to the ingest
+    # socket. Treat like a password (long random string). If empty while
+    # orderflow_enabled is True, the ingest socket refuses every connection.
+    orderflow_ingest_token: SecretStr | None = None
+    # Symbols that carry order flow. Subset of AssetSymbol — BITCOIN excluded
+    # on purpose (the user trades flow on indices + gold only).
+    orderflow_symbols: str = "USTEC,SPX,GOLD"
+    # Footprint bar width in seconds (60 = 1-minute footprint bars).
+    orderflow_footprint_interval_seconds: int = 60
+    # How many footprint bars to retain / broadcast per symbol.
+    orderflow_footprint_bars: int = 30
+    # How many recent trades to keep on the tape per symbol.
+    orderflow_tape_maxlen: int = 200
+
     # --- Breakout detector tuning -----------------------------------------
 
     # If True, the detector only emits signals when ATR(14) was below its
@@ -136,6 +156,12 @@ class Settings(BaseSettings):
     @property
     def redis_url(self) -> str:
         return f"redis://{self.redis_host}:{self.redis_port}/0"
+
+    @property
+    def orderflow_symbol_list(self) -> list[str]:
+        """Parsed, upper-cased order-flow symbols (validated against AssetSymbol
+        at the call site to avoid importing enums into settings)."""
+        return [s.strip().upper() for s in self.orderflow_symbols.split(",") if s.strip()]
 
     # --- Validation --------------------------------------------------------
 

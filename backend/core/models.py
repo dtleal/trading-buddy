@@ -331,6 +331,96 @@ class LLMOutput(_Frozen):
 
 
 # -----------------------------------------------------------------------------
+# Order flow (live DOM / footprint / tape — fed by the MT5 collector)
+# -----------------------------------------------------------------------------
+#
+# This layer is NOT produced by the 5m tick loop. It is pushed in real time by
+# an external collector (see `collector/`) that runs next to a MetaTrader 5
+# terminal on Windows, reads the broker's depth-of-market + trade ticks, and
+# streams them to the backend ingest WebSocket. The backend aggregates the raw
+# stream into the three flow-trader views below and fans them out to browsers
+# over `/ws/orderflow`. Only USTEC / SPX / GOLD carry order flow (no BITCOIN).
+
+
+TradeSide = Literal["buy", "sell", "unknown"]
+
+
+class OrderBookLevel(_Frozen):
+    """A single price rung in the depth-of-market ladder."""
+
+    price: float
+    volume: float  # resting size at this price (broker units / lots)
+
+
+class OrderBookSnapshot(_Frozen):
+    """Top-N depth of market for one symbol at a point in time.
+
+    `bids` are sorted best (highest price) first; `asks` best (lowest price)
+    first. Sizes are resting limit liquidity — NOT executed volume.
+    """
+
+    symbol: AssetSymbol
+    asof: datetime
+    bids: list[OrderBookLevel] = Field(default_factory=list)
+    asks: list[OrderBookLevel] = Field(default_factory=list)
+
+
+class TapeTrade(_Frozen):
+    """A single executed trade on the time & sales tape.
+
+    `side` is the aggressor: `buy` = lifted the ask, `sell` = hit the bid.
+    For CFD feeds that don't tag aggressor, the collector falls back to
+    comparing last vs bid/ask, and may emit `unknown`.
+    """
+
+    symbol: AssetSymbol
+    at: datetime
+    price: float
+    volume: float
+    side: TradeSide
+
+
+class FootprintCell(_Frozen):
+    """Executed volume at one price within a footprint bar, split by aggressor.
+
+    `delta` (ask_volume - bid_volume) is computed by the frontend; we keep the
+    raw split here so the client can render bid×ask and color the imbalance.
+    """
+
+    price: float
+    bid_volume: float  # volume that hit the bid (sell aggressor)
+    ask_volume: float  # volume that lifted the ask (buy aggressor)
+
+
+class FootprintBar(_Frozen):
+    """One time-bucketed footprint bar: per-price aggressor split + totals."""
+
+    symbol: AssetSymbol
+    bar_open: datetime  # bucket start (UTC), aligned to interval_seconds
+    interval_seconds: int
+    cells: list[FootprintCell] = Field(default_factory=list)  # sorted high→low price
+    bid_volume: float = 0.0  # bar total hitting the bid
+    ask_volume: float = 0.0  # bar total lifting the ask
+    delta: float = 0.0  # ask_volume - bid_volume
+    poc_price: float | None = None  # point of control (max total-volume price)
+
+
+class OrderFlowSnapshot(_Frozen):
+    """Per-symbol order-flow state broadcast to the frontend.
+
+    One message per symbol. The book is the latest DOM; `recent_trades` is the
+    tail of the tape (newest last); `footprint` is the last few completed +
+    in-progress bars (newest last).
+    """
+
+    symbol: AssetSymbol
+    asof: datetime
+    book: OrderBookSnapshot | None = None
+    recent_trades: list[TapeTrade] = Field(default_factory=list)
+    footprint: list[FootprintBar] = Field(default_factory=list)
+
+
+# -----------------------------------------------------------------------------
 # Tick aggregate
 # -----------------------------------------------------------------------------
 
@@ -370,4 +460,11 @@ __all__ = [
     "LLMOutput",
     "DashboardTick",
     "VolatilityIndex",
+    "TradeSide",
+    "OrderBookLevel",
+    "OrderBookSnapshot",
+    "TapeTrade",
+    "FootprintCell",
+    "FootprintBar",
+    "OrderFlowSnapshot",
 ]

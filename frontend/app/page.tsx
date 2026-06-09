@@ -10,6 +10,7 @@ import { SetupsPanel } from "@/components/setups/SetupsPanel";
 import { EventsPanel } from "@/components/events/EventsPanel";
 import { NewsPanel } from "@/components/news/NewsPanel";
 import { BreakoutsPanel } from "@/components/breakouts/BreakoutsPanel";
+import { OrderFlowSection } from "@/components/orderflow/OrderFlowSection";
 import { BriefingPanel } from "@/components/briefing/BriefingPanel";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -80,6 +81,9 @@ export default function Home() {
 
         {/* Row 4: breakouts (full width — most relevant for day trading) */}
         <BreakoutsPanel tick={tick} />
+
+        {/* Row 4b: live order flow (DOM · footprint · tape) via MT5 collector */}
+        <OrderFlowSection />
 
         {/* Row 5: calendar + news side by side */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">

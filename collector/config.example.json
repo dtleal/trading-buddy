@@ -1,0 +1,17 @@
+{
+  "backend_ws_url": "ws://72.62.15.111:8057/ws/ingest/orderflow",
+  "token": "CHANGE_ME_to_match_ORDERFLOW_INGEST_TOKEN_on_the_backend",
+  "poll_interval_ms": 250,
+  "book_depth": 10,
+  "symbols": [
+    { "backend": "USTEC", "mt5": "USTEC" },
+    { "backend": "SPX",   "mt5": "USA500" },
+    { "backend": "GOLD",  "mt5": "GOLD" }
+  ],
+  "mt5": {
+    "path": null,
+    "login": null,
+    "password": null,
+    "server": null
+  }
+}

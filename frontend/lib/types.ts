@@ -188,6 +188,68 @@ export const DashboardTick = z.object({
 });
 export type DashboardTick = z.infer<typeof DashboardTick>;
 
+// -----------------------------------------------------------------------------
+// Order flow (live DOM / footprint / tape — fed by the MT5 collector)
+// -----------------------------------------------------------------------------
+
+export const TradeSide = z.enum(["buy", "sell", "unknown"]);
+export type TradeSide = z.infer<typeof TradeSide>;
+
+export const OrderBookLevel = z.object({
+  price: z.number(),
+  volume: z.number(),
+});
+export type OrderBookLevel = z.infer<typeof OrderBookLevel>;
+
+export const OrderBookSnapshot = z.object({
+  symbol: AssetSymbol,
+  asof: z.string(),
+  bids: z.array(OrderBookLevel), // best (highest) first
+  asks: z.array(OrderBookLevel), // best (lowest) first
+});
+export type OrderBookSnapshot = z.infer<typeof OrderBookSnapshot>;
+
+export const TapeTrade = z.object({
+  symbol: AssetSymbol,
+  at: z.string(),
+  price: z.number(),
+  volume: z.number(),
+  side: TradeSide,
+});
+export type TapeTrade = z.infer<typeof TapeTrade>;
+
+export const FootprintCell = z.object({
+  price: z.number(),
+  bid_volume: z.number(),
+  ask_volume: z.number(),
+});
+export type FootprintCell = z.infer<typeof FootprintCell>;
+
+export const FootprintBar = z.object({
+  symbol: AssetSymbol,
+  bar_open: z.string(),
+  interval_seconds: z.number(),
+  cells: z.array(FootprintCell), // sorted high→low price
+  bid_volume: z.number(),
+  ask_volume: z.number(),
+  delta: z.number(),
+  poc_price: z.number().nullable(),
+});
+export type FootprintBar = z.infer<typeof FootprintBar>;
+
+/** One per-symbol order-flow message from /ws/orderflow. */
+export const OrderFlowSnapshot = z.object({
+  symbol: AssetSymbol,
+  asof: z.string(),
+  book: OrderBookSnapshot.nullable().default(null),
+  recent_trades: z.array(TapeTrade).default([]),
+  footprint: z.array(FootprintBar).default([]),
+});
+export type OrderFlowSnapshot = z.infer<typeof OrderFlowSnapshot>;
+
+/** Response from GET /api/orderflow. */
+export const OrderFlowList = z.array(OrderFlowSnapshot);
+
 /** Response from /api/vix/history. */
 export const VixHistoryResponse = z.object({
   symbol: z.string(),
