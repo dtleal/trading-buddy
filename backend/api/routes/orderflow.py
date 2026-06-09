@@ -159,7 +159,13 @@ async def ingest_ws(websocket: WebSocket) -> None:
     try:
         while True:
             msg = await websocket.receive_json()
-            touched = await _handle_message(msg)
+            try:
+                touched = await _handle_message(msg)
+            except (KeyError, ValueError, TypeError):
+                # A single malformed message must not drop the whole stream —
+                # log and keep consuming so the collector stays connected.
+                logger.warning("Skipping malformed order-flow message: %r", msg)
+                continue
             for symbol in touched:
                 await orderflow_broadcaster.publish(aggregator.snapshot(symbol))
     except WebSocketDisconnect:

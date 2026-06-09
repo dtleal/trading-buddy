@@ -209,7 +209,12 @@ def run(cfg: dict[str, Any]) -> None:
     token = str(cfg.get("token", ""))
     poll_s = max(cfg["poll_interval_ms"], 50) / 1000.0
     depth = int(cfg["book_depth"])
-    since: dict[str, int] = {m["mt5"]: 0 for m in cfg["symbols"]}
+    # Start the tape from "now" — otherwise copy_ticks_from(0) reaches back to
+    # 1970 and replays ancient history on the first poll. We only want trades
+    # that print after the collector starts.
+    start_msc = int(time.time() * 1000)
+    since: dict[str, int] = {m["mt5"]: start_msc for m in cfg["symbols"]}
+    last_book: dict[str, str] = {}  # broker -> last sent book payload (dedup)
 
     ws = None
     while True:
@@ -220,7 +225,12 @@ def run(cfg: dict[str, Any]) -> None:
                 backend, broker = m["backend"], m["mt5"]
                 book = _read_book(backend, broker, depth)
                 if book:
-                    ws.send(json.dumps(book))
+                    # Skip unchanged books so we don't flood the backend with a
+                    # full snapshot broadcast every poll when nothing moved.
+                    sig = json.dumps([book["bids"], book["asks"]])
+                    if sig != last_book.get(broker):
+                        last_book[broker] = sig
+                        ws.send(json.dumps(book))
                 trades, since[broker] = _read_trades(backend, broker, since[broker])
                 if trades:
                     ws.send(json.dumps({"type": "trades", "symbol": backend, "trades": trades}))
