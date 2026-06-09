@@ -244,6 +244,7 @@ export const OrderFlowSnapshot = z.object({
   book: OrderBookSnapshot.nullable().default(null),
   recent_trades: z.array(TapeTrade).default([]),
   footprint: z.array(FootprintBar).default([]),
+  source: z.string().nullable().default(null),
 });
 export type OrderFlowSnapshot = z.infer<typeof OrderFlowSnapshot>;
 

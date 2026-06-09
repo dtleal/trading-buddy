@@ -418,6 +418,10 @@ class OrderFlowSnapshot(_Frozen):
     book: OrderBookSnapshot | None = None
     recent_trades: list[TapeTrade] = Field(default_factory=list)
     footprint: list[FootprintBar] = Field(default_factory=list)
+    # Which broker terminal is feeding this symbol's flow (FTMO, ActivTrades,
+    # …). Set by the collector via a `hello` message on connect; carried on
+    # every snapshot so the UI can label each column.
+    source: str | None = None
 
 
 # -----------------------------------------------------------------------------

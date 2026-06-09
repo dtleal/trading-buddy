@@ -9,10 +9,8 @@ import { FootprintPanel } from "./FootprintPanel";
 import { TapePanel } from "./TapePanel";
 import { useOrderFlow } from "@/hooks/useOrderFlow";
 import { cn } from "@/lib/utils";
-import type { AssetSymbol } from "@/lib/types";
+import type { AssetSymbol, OrderFlowSnapshot } from "@/lib/types";
 
-// Order flow only covers indices + gold. Display labels follow the trader's
-// MT5 naming (S&P is "USA500"); the backend key stays SPX.
 const FLOW_ASSETS: { key: AssetSymbol; label: string }[] = [
   { key: "USTEC", label: "USTEC" },
   { key: "SPX", label: "USA500" },
@@ -20,30 +18,38 @@ const FLOW_ASSETS: { key: AssetSymbol; label: string }[] = [
 ];
 
 /**
- * Live order-flow section: DOM ladder + footprint + tape for the selected
- * asset. Streams from /ws/orderflow (separate channel from the 5m tick),
- * which the Windows MT5 collector feeds. Empty until the collector connects.
+ * Live order-flow strip. Renders the 3 assets simultaneously, each as its own
+ * column (DOM ladder on top, footprint in the middle, tape at the bottom).
+ * Designed to sit above the VIX hero so it is the first thing on screen.
  */
 export function OrderFlowSection() {
   const { flows, status } = useOrderFlow();
-  const [selected, setSelected] = useState<AssetSymbol>("USTEC");
-  const flow = flows[selected];
 
-  // Ticking clock so staleness recomputes from state (pure render), not from
-  // Date.now() called during render.
+  // Ticking clock so per-symbol staleness is reactive without calling Date.now()
+  // during render.
   const [now, setNow] = useState(0);
   useEffect(() => {
     const tick = () => setNow(Date.now());
-    const first = setTimeout(tick, 0); // async — avoids setState-in-effect-body
-    const id = setInterval(tick, 5_000);
+    const first = setTimeout(tick, 0);
+    const id = setInterval(tick, 1_000);
     return () => {
       clearTimeout(first);
       clearInterval(id);
     };
   }, []);
 
-  const asof = flow?.asof ? new Date(flow.asof).getTime() : null;
-  const stale = asof === null || now === 0 || now - asof > 15_000;
+  // Aggregate "is anything fresh?" for the header badge.
+  const anyFresh = FLOW_ASSETS.some((a) => {
+    const f = flows[a.key];
+    if (!f) return false;
+    const asof = new Date(f.asof).getTime();
+    return now > 0 && now - asof <= 5_000;
+  });
+
+  // Whichever symbol has a source string wins — in practice all symbols share
+  // it (one collector per backend today) but we don't enforce that.
+  const source =
+    FLOW_ASSETS.map((a) => flows[a.key]?.source).find((s): s is string => !!s) ?? null;
 
   return (
     <Card>
@@ -54,62 +60,109 @@ export function OrderFlowSection() {
             <div>
               <CardTitle>Fluxo · DOM · Footprint · Tape</CardTitle>
               <CardDescription>
-                Order book, volume executado por preço e fita — ao vivo via MT5
+                USTEC · USA500 · GOLD em tempo real (MT5)
               </CardDescription>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Badge tone={status === "open" ? (stale ? "warning" : "positive") : "negative"}>
-              {status === "open" ? (stale ? "sem dados" : "ao vivo") : "desconectado"}
+            {source && (
+              <Badge tone="neutral">
+                <span className="text-zinc-500">fonte:</span>{" "}
+                <span className="text-zinc-200">{source}</span>
+              </Badge>
+            )}
+            <Badge tone={status === "open" ? (anyFresh ? "positive" : "warning") : "negative"}>
+              {status === "open" ? (anyFresh ? "ao vivo" : "sem dados") : "desconectado"}
             </Badge>
-            <div className="flex gap-1">
-              {FLOW_ASSETS.map((a) => (
-                <button
-                  key={a.key}
-                  onClick={() => setSelected(a.key)}
-                  className={cn(
-                    "rounded-md px-3 py-1 text-xs font-semibold uppercase tracking-wider transition-colors",
-                    selected === a.key
-                      ? "bg-violet-500/20 text-violet-200 ring-1 ring-violet-500/40"
-                      : "text-zinc-400 hover:bg-zinc-800/60",
-                  )}
-                >
-                  {a.label}
-                </button>
-              ))}
-            </div>
           </div>
         </div>
       </CardHeader>
       <CardContent>
-        {!flow ? (
-          <p className="text-sm text-zinc-500">
-            Aguardando o coletor MT5… inicie o collector no Windows e confirme
-            <code className="mx-1 rounded bg-zinc-800 px-1">ORDERFLOW_ENABLED=true</code>
-            no backend.
-          </p>
-        ) : (
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <FlowColumn title="DOM (liquidez em repouso)">
-              <DomLadder book={flow.book} />
-            </FlowColumn>
-            <FlowColumn title="Footprint (volume executado)">
-              <FootprintPanel bars={flow.footprint} />
-            </FlowColumn>
-            <FlowColumn title="Tape (time & sales)">
-              <TapePanel trades={flow.recent_trades} />
-            </FlowColumn>
-          </div>
-        )}
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+          {FLOW_ASSETS.map((a) => (
+            <SymbolColumn
+              key={a.key}
+              label={a.label}
+              flow={flows[a.key]}
+              now={now}
+              status={status}
+            />
+          ))}
+        </div>
       </CardContent>
     </Card>
   );
 }
 
-function FlowColumn({ title, children }: { title: string; children: React.ReactNode }) {
+function SymbolColumn({
+  label,
+  flow,
+  now,
+  status,
+}: {
+  label: string;
+  flow: OrderFlowSnapshot | undefined;
+  now: number;
+  status: "connecting" | "open" | "reconnecting" | "closed";
+}) {
+  const asof = flow?.asof ? new Date(flow.asof).getTime() : null;
+  const ageMs = asof != null && now > 0 ? now - asof : null;
+  const fresh = ageMs != null && ageMs <= 5_000;
+
   return (
-    <div className="rounded-md border border-zinc-800 bg-zinc-900/40 p-3">
-      <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
+    <div className="flex flex-col gap-3 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-semibold uppercase tracking-wider text-zinc-200">
+          {label}
+        </div>
+        <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider">
+          <span
+            className={cn(
+              "inline-block size-2 rounded-full",
+              status !== "open"
+                ? "bg-zinc-600"
+                : fresh
+                  ? "animate-pulse bg-emerald-400"
+                  : "bg-amber-500",
+            )}
+          />
+          <span className="text-zinc-500">
+            {!flow
+              ? "sem feed"
+              : fresh
+                ? `${ageMs}ms`
+                : ageMs != null
+                  ? `${Math.round(ageMs / 1000)}s atrás`
+                  : "—"}
+          </span>
+        </div>
+      </div>
+
+      {!flow ? (
+        <p className="text-xs text-zinc-500">
+          Aguardando o coletor MT5… inicie o collector no Windows.
+        </p>
+      ) : (
+        <>
+          <FlowBlock title="DOM (liquidez em repouso)">
+            <DomLadder book={flow.book} />
+          </FlowBlock>
+          <FlowBlock title="Footprint (volume executado)">
+            <FootprintPanel bars={flow.footprint} />
+          </FlowBlock>
+          <FlowBlock title="Tape (time & sales)">
+            <TapePanel trades={flow.recent_trades} />
+          </FlowBlock>
+        </>
+      )}
+    </div>
+  );
+}
+
+function FlowBlock({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-md border border-zinc-800 bg-zinc-900/40 p-2">
+      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
         {title}
       </div>
       {children}

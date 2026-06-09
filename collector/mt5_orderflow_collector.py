@@ -72,31 +72,74 @@ def _load_config(path: str) -> dict[str, Any]:
 # --- MT5 session -------------------------------------------------------------
 
 
-def _init_mt5(cfg: dict[str, Any]) -> None:
+def _init_mt5(cfg: dict[str, Any]) -> str:
+    """Attach to the first MT5 terminal in the configured priority list.
+
+    Supports two config shapes:
+
+      "mt5": { "sources": [
+          {"name": "FTMO",        "path": "...\\FTMO MetaTrader 5\\terminal64.exe"},
+          {"name": "ActivTrades", "path": "...\\ActivTrades MT5\\terminal64.exe"}
+      ]}
+
+      "mt5": { "path": "...", "login": ..., "password": "...", "server": "..." }
+
+    The list form is the new preferred shape: each entry is tried in order until
+    one succeeds (terminal must be open and logged in). Returns the resolved
+    source name so the backend / UI can show which broker is feeding flow.
+    """
     if mt5 is None:
         raise SystemExit(
             "MetaTrader5 package not importable. This collector only runs on "
             "Windows with the MT5 terminal installed. `pip install MetaTrader5`."
         )
     mt5_cfg = cfg.get("mt5") or {}
-    kwargs: dict[str, Any] = {}
-    if mt5_cfg.get("path"):
-        kwargs["path"] = mt5_cfg["path"]
-    if mt5_cfg.get("login"):
-        kwargs.update(
-            login=int(mt5_cfg["login"]),
-            password=mt5_cfg.get("password", ""),
-            server=mt5_cfg.get("server", ""),
-        )
-    if not mt5.initialize(**kwargs):
-        raise SystemExit(f"mt5.initialize() failed: {mt5.last_error()}")
-    term = mt5.terminal_info()
-    acct = mt5.account_info()
-    logger.info(
-        "MT5 attached: terminal=%s connected=%s account=%s",
-        getattr(term, "name", "?"),
-        getattr(term, "connected", "?"),
-        getattr(acct, "login", "?"),
+    sources = mt5_cfg.get("sources")
+    if not sources:
+        # Back-compat: treat single-source config as a length-1 list.
+        sources = [
+            {
+                "name": mt5_cfg.get("name") or "MT5",
+                "path": mt5_cfg.get("path"),
+                "login": mt5_cfg.get("login"),
+                "password": mt5_cfg.get("password"),
+                "server": mt5_cfg.get("server"),
+            }
+        ]
+
+    errors: list[str] = []
+    for src in sources:
+        name = src.get("name") or "MT5"
+        kwargs: dict[str, Any] = {}
+        if src.get("path"):
+            kwargs["path"] = src["path"]
+        if src.get("login"):
+            kwargs.update(
+                login=int(src["login"]),
+                password=src.get("password", ""),
+                server=src.get("server", ""),
+            )
+        if mt5.initialize(**kwargs):
+            term = mt5.terminal_info()
+            acct = mt5.account_info()
+            logger.info(
+                "MT5 attached: source=%s terminal=%s connected=%s account=%s",
+                name,
+                getattr(term, "name", "?"),
+                getattr(term, "connected", "?"),
+                getattr(acct, "login", "?"),
+            )
+            return name
+        errors.append(f"{name}: {mt5.last_error()}")
+        # Clean shutdown before trying the next candidate so init state is fresh.
+        try:
+            mt5.shutdown()
+        except Exception:  # pragma: no cover - best-effort cleanup
+            pass
+
+    raise SystemExit(
+        "mt5.initialize() failed for every configured source:\n  - "
+        + "\n  - ".join(errors)
     )
 
 
@@ -202,7 +245,7 @@ def _connect_backend(url: str, token: str):
 def run(cfg: dict[str, Any]) -> None:
     if create_connection is None:
         raise SystemExit("websocket-client not installed. `pip install websocket-client`.")
-    _init_mt5(cfg)
+    source_name = _init_mt5(cfg)
     _subscribe_symbols(cfg["symbols"])
 
     url = cfg["backend_ws_url"]
@@ -221,6 +264,10 @@ def run(cfg: dict[str, Any]) -> None:
         try:
             if ws is None:
                 ws = _connect_backend(url, token)
+                # Identify which broker is feeding this stream — the backend
+                # stamps every subsequent snapshot with this name so the UI can
+                # label each column. Re-sent on every reconnect.
+                ws.send(json.dumps({"type": "hello", "source": source_name}))
             for m in cfg["symbols"]:
                 backend, broker = m["backend"], m["mt5"]
                 book = _read_book(backend, broker, depth)

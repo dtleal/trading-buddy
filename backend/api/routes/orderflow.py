@@ -110,9 +110,25 @@ def _parse_trade(msg: dict[str, Any], symbol: AssetSymbol) -> TapeTrade:
     )
 
 
+# Connection-level state set by the collector's `hello` message. One collector
+# per backend process today, so a module-level slot is enough; if we ever
+# multiplex collectors per-symbol we'd promote this into the aggregator.
+_current_source: str | None = None
+
+
 async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
     """Feed one ingest message into the aggregator. Returns symbols touched."""
+    global _current_source
     mtype = msg.get("type")
+
+    if mtype == "hello":
+        # Identifies which MT5 terminal (FTMO, ActivTrades, …) is feeding flow.
+        src = msg.get("source")
+        if isinstance(src, str) and src:
+            _current_source = src
+            logger.info("Order-flow source set: %s", src)
+        return set()
+
     symbol = _parse_symbol(msg.get("symbol"))
     if symbol is None or not aggregator.tracks(symbol):
         return set()
@@ -129,6 +145,13 @@ async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
         return {symbol}
     logger.debug("Ignoring unknown order-flow message type: %r", mtype)
     return set()
+
+
+def _stamp_source(snapshot: "OrderFlowSnapshot") -> "OrderFlowSnapshot":
+    """Return the snapshot with the current broker source baked in."""
+    if _current_source is None:
+        return snapshot
+    return snapshot.model_copy(update={"source": _current_source})
 
 
 # --- ingest (collector → backend) -------------------------------------------
@@ -167,7 +190,7 @@ async def ingest_ws(websocket: WebSocket) -> None:
                 logger.warning("Skipping malformed order-flow message: %r", msg)
                 continue
             for symbol in touched:
-                await orderflow_broadcaster.publish(aggregator.snapshot(symbol))
+                await orderflow_broadcaster.publish(_stamp_source(aggregator.snapshot(symbol)))
     except WebSocketDisconnect:
         logger.info("Order-flow collector disconnected: %s", websocket.client)
     except Exception:
@@ -209,4 +232,4 @@ async def get_orderflow() -> list[OrderFlowSnapshot]:
     cached = orderflow_broadcaster.latest_all()
     if cached:
         return cached
-    return aggregator.all_snapshots()
+    return [_stamp_source(s) for s in aggregator.all_snapshots()]

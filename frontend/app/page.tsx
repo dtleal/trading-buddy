@@ -29,8 +29,11 @@ export default function Home() {
     <>
       <Header status={status} lastTickAt={tick?.timestamp ?? null} />
 
-      <main className="mx-auto w-full max-w-7xl flex-1 px-6 py-6 space-y-6">
-        {/* Briefing panel — collapsed by default, full-width on top */}
+      <main className="mx-auto w-full max-w-[1600px] flex-1 px-6 py-6 space-y-6">
+        {/* Row 0: live order flow — the trader's first read on entering the page */}
+        <OrderFlowSection />
+
+        {/* Briefing panel — collapsed by default, full-width */}
         <BriefingPanel />
 
         {/* Row 1: VIX hero — chart on the left, summary stat on the right */}
@@ -81,9 +84,6 @@ export default function Home() {
 
         {/* Row 4: breakouts (full width — most relevant for day trading) */}
         <BreakoutsPanel tick={tick} />
-
-        {/* Row 4b: live order flow (DOM · footprint · tape) via MT5 collector */}
-        <OrderFlowSection />
 
         {/* Row 5: calendar + news side by side */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
