@@ -1,0 +1,7 @@
+# Force LF for files consumed by Linux tooling. With core.autocrlf=true (the
+# default on Windows clones), shell scripts and Dockerfiles would otherwise be
+# checked out with CRLF and break the backend container: the entrypoint dies
+# with `env: 'bash\r': No such file or directory`.
+*.sh                 text eol=lf
+Dockerfile*          text eol=lf
+docker/entrypoint.sh text eol=lf
