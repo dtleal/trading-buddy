@@ -140,8 +140,9 @@ async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
         aggregator.ingest_trade(_parse_trade(msg, symbol))
         return {symbol}
     if mtype == "trades":
-        for raw in msg.get("trades", ()):
-            aggregator.ingest_trade(_parse_trade({**raw, "symbol": symbol}, symbol))
+        trades = [_parse_trade({**raw, "symbol": symbol}, symbol) for raw in msg.get("trades", ())]
+        if trades:
+            aggregator.ingest_trades(symbol, trades)
         return {symbol}
     logger.debug("Ignoring unknown order-flow message type: %r", mtype)
     return set()

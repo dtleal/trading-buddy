@@ -40,8 +40,10 @@ except ImportError:  # pragma: no cover - only importable on Windows w/ MT5
     mt5 = None  # resolved at runtime; main() errors clearly if still None
 
 try:
-    from websocket import create_connection  # websocket-client
+    import websocket  # websocket-client
+    from websocket import create_connection
 except ImportError:  # pragma: no cover
+    websocket = None  # type: ignore
     create_connection = None  # type: ignore
 
 logger = logging.getLogger("mt5_collector")
@@ -143,6 +145,22 @@ def _init_mt5(cfg: dict[str, Any]) -> str:
     )
 
 
+def _broker_tick(broker: str) -> float | None:
+    """Best-effort tick size for a symbol, used to group footprint rows when the
+    config doesn't pin one. Falls back to None (no grouping) if unavailable."""
+    try:
+        info = mt5.symbol_info(broker)
+    except Exception:  # pragma: no cover - defensive
+        return None
+    if info is None:
+        return None
+    size = float(getattr(info, "trade_tick_size", 0.0) or 0.0)
+    if size > 0:
+        return size
+    point = float(getattr(info, "point", 0.0) or 0.0)
+    return point or None
+
+
 def _subscribe_symbols(symbols: list[dict[str, str]]) -> None:
     for m in symbols:
         broker = m["mt5"]
@@ -232,14 +250,88 @@ def _read_trades(
     return out, high
 
 
+def _quantize(price: float, tick: float | None) -> float:
+    """Snap a price to the footprint row grid so a continuous quote feed doesn't
+    fragment into thousands of distinct footprint cells. No tick → unchanged."""
+    if not tick or tick <= 0:
+        return price
+    return round(round(price / tick) * tick, 10)
+
+
+def _read_quote_flow(
+    backend: str, broker: str, since_msc: int, last_mid: float | None, tick: float | None
+) -> tuple[list[dict[str, Any]], int, float | None]:
+    """Synthesize a buy/sell tape from quote ticks when the broker has no
+    times&trades (the common CFD case: COPY_TICKS_TRADE is empty).
+
+    Aggressor is inferred by the tick rule on the mid price: an uptick means
+    buyers are lifting the offer (side=buy at the ask), a downtick means sellers
+    are hitting the bid (side=sell at the bid). Volume is unknown on these feeds,
+    so each directional tick counts as 1 — the *count* of up vs down ticks is the
+    pressure signal (delta), not a traded contract count. Returns
+    (trades, new high-water time_msc, new last_mid).
+    """
+    from_dt = datetime.fromtimestamp(max(since_msc, 0) / 1000.0, tz=timezone.utc)
+    ticks = mt5.copy_ticks_from(broker, from_dt, 100000, mt5.COPY_TICKS_ALL)
+    if ticks is None or len(ticks) == 0:
+        return [], since_msc, last_mid
+    out: list[dict[str, Any]] = []
+    high = since_msc
+    prev = last_mid
+    for t in ticks:
+        tmsc = int(t["time_msc"])
+        if tmsc <= since_msc:
+            continue
+        high = max(high, tmsc)
+        bid = float(t["bid"])
+        ask = float(t["ask"])
+        if bid <= 0.0 or ask <= 0.0:
+            continue
+        mid = (bid + ask) / 2.0
+        if prev is not None and mid != prev:
+            if mid > prev:
+                side, price = "buy", _quantize(ask, tick)
+            else:
+                side, price = "sell", _quantize(bid, tick)
+            out.append(
+                {
+                    "at": datetime.fromtimestamp(tmsc / 1000.0, tz=timezone.utc).isoformat(),
+                    "price": price,
+                    "volume": 1.0,
+                    "side": side,
+                }
+            )
+        prev = mid
+    return out, high, prev
+
+
 # --- main loop ---------------------------------------------------------------
 
 
 def _connect_backend(url: str, token: str):
     full = f"{url}?token={token}" if "token=" not in url else url
     ws = create_connection(full, timeout=10)
+    # Short read timeout so the poll loop can drain server keepalive pings
+    # without blocking; sends of our tiny JSON frames still complete instantly.
+    ws.settimeout(0.2)
     logger.info("Connected to backend ingest: %s", url)
     return ws
+
+
+def _drain_control(ws) -> None:
+    """Answer the backend's keepalive pings.
+
+    The collector is send-only, but websocket-client only emits the protocol
+    PONG for a server PING while inside recv(). Without this periodic drain the
+    backend sees an unresponsive peer and drops the ingest socket as idle every
+    ~30-50s (WinError 10053), causing visible gaps in the dashboard. A timeout
+    here just means "no frame waiting" — anything else (e.g. a real close) is
+    re-raised so the outer loop reconnects.
+    """
+    try:
+        ws.recv()
+    except websocket.WebSocketTimeoutException:
+        pass
 
 
 def run(cfg: dict[str, Any]) -> None:
@@ -258,6 +350,21 @@ def run(cfg: dict[str, Any]) -> None:
     start_msc = int(time.time() * 1000)
     since: dict[str, int] = {m["mt5"]: start_msc for m in cfg["symbols"]}
     last_book: dict[str, str] = {}  # broker -> last sent book payload (dedup)
+    # When the broker publishes no times&trades, build the tape from quote-tick
+    # direction instead (see _read_quote_flow). `mid` holds the last mid price
+    # per symbol so we can classify the next tick as an up/down move.
+    quote_mode = bool(cfg.get("synthesize_trades_from_quotes", False))
+    mid: dict[str, float | None] = {m["mt5"]: None for m in cfg["symbols"]}
+    # Optional per-symbol footprint row size; falls back to the broker tick size.
+    ftick: dict[str, float | None] = {
+        m["mt5"]: (m.get("footprint_tick") or _broker_tick(m["mt5"])) for m in cfg["symbols"]
+    }
+    if quote_mode:
+        logger.info(
+            "tape source: quote-tick flow (no real times&trades on this feed); "
+            "footprint ticks: %s",
+            {k: v for k, v in ftick.items()},
+        )
 
     ws = None
     while True:
@@ -268,6 +375,8 @@ def run(cfg: dict[str, Any]) -> None:
                 # stamps every subsequent snapshot with this name so the UI can
                 # label each column. Re-sent on every reconnect.
                 ws.send(json.dumps({"type": "hello", "source": source_name}))
+            # Keep the socket alive by replying to server pings before polling.
+            _drain_control(ws)
             for m in cfg["symbols"]:
                 backend, broker = m["backend"], m["mt5"]
                 book = _read_book(backend, broker, depth)
@@ -278,7 +387,12 @@ def run(cfg: dict[str, Any]) -> None:
                     if sig != last_book.get(broker):
                         last_book[broker] = sig
                         ws.send(json.dumps(book))
-                trades, since[broker] = _read_trades(backend, broker, since[broker])
+                if quote_mode:
+                    trades, since[broker], mid[broker] = _read_quote_flow(
+                        backend, broker, since[broker], mid[broker], ftick[broker]
+                    )
+                else:
+                    trades, since[broker] = _read_trades(backend, broker, since[broker])
                 if trades:
                     ws.send(json.dumps({"type": "trades", "symbol": backend, "trades": trades}))
             time.sleep(poll_s)

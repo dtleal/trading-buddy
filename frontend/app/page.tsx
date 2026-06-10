@@ -11,6 +11,7 @@ import { EventsPanel } from "@/components/events/EventsPanel";
 import { NewsPanel } from "@/components/news/NewsPanel";
 import { BreakoutsPanel } from "@/components/breakouts/BreakoutsPanel";
 import { OrderFlowSection } from "@/components/orderflow/OrderFlowSection";
+import { PressureBar } from "@/components/orderflow/PressureBar";
 import { BriefingPanel } from "@/components/briefing/BriefingPanel";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -30,7 +31,10 @@ export default function Home() {
       <Header status={status} lastTickAt={tick?.timestamp ?? null} />
 
       <main className="mx-auto w-full max-w-[1600px] flex-1 px-6 py-6 space-y-6">
-        {/* Row 0: live order flow — the trader's first read on entering the page */}
+        {/* Row 0: buying/selling pressure — the trader's first read */}
+        <PressureBar />
+
+        {/* Row 0b: live order flow (DOM · footprint · tape) */}
         <OrderFlowSection />
 
         {/* Briefing panel — collapsed by default, full-width */}

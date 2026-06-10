@@ -46,7 +46,11 @@ Thumbs.db
 
 # Logs
 *.log
+*.err
 logs/
+
+# Collector runtime config (holds the ingest token; use config.example.json)
+collector/config.json
 
 # Local data
 data/

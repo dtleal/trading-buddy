@@ -131,3 +131,39 @@ def test_all_snapshots_only_includes_symbols_with_data() -> None:
     agg.ingest_trade(_trade(100.0, 1.0, "buy", 1))
     snaps = agg.all_snapshots()
     assert {s.symbol for s in snaps} == {AssetSymbol.USTEC}
+
+
+def test_ingest_trades_batch_matches_per_trade() -> None:
+    batch = _agg()
+    snap = batch.ingest_trades(
+        AssetSymbol.USTEC,
+        [
+            _trade(100.0, 2.0, "buy", 1),
+            _trade(100.0, 3.0, "sell", 2),
+            _trade(100.0, 1.0, "buy", 3),
+        ],
+    )
+    bar = snap.footprint[0]
+    assert bar.ask_volume == 3.0  # 2 + 1 buy
+    assert bar.bid_volume == 3.0  # 3 sell
+    assert bar.delta == 0.0
+    assert len(snap.recent_trades) == 3
+
+
+def test_footprint_cells_capped_but_totals_exact() -> None:
+    from use_cases.aggregate_orderflow import _MAX_CELLS_PER_BAR
+
+    agg = _agg()
+    # Far more distinct prices than the cell budget, all in one bar, all buys.
+    n = _MAX_CELLS_PER_BAR + 50
+    agg.ingest_trades(
+        AssetSymbol.USTEC,
+        [_trade(100.0 + i * 0.01, 1.0, "buy", 0) for i in range(n)],
+    )
+    bar = agg.snapshot(AssetSymbol.USTEC).footprint[0]
+    # Visual cells are bounded …
+    assert len(bar.cells) == _MAX_CELLS_PER_BAR
+    # … but the bar-level totals / delta still count every trade.
+    assert bar.ask_volume == float(n)
+    assert bar.bid_volume == 0.0
+    assert bar.delta == float(n)

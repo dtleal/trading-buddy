@@ -1,13 +1,13 @@
 # MT5 Order-Flow Collector (Windows)
 
-Streams live **DOM / footprint / tape** from your MetaTrader 5 terminal to the
-trading-buddy backend on the KVM, which renders it on the dashboard for
+Streams live **DOM / footprint / tape / pressure** from your MetaTrader 5
+terminal to the trading-buddy backend, which renders it on the dashboard for
 **USTEC, USA500 (→ SPX) and GOLD**.
 
 This bridge **only reads market data** — it never places orders.
 
 ```
-[ Your Windows PC ]                         [ KVM Linux ]
+[ Your Windows PC ]                         [ Backend (Docker / WSL or KVM) ]
   MT5 terminal (logged in)                    tb-backend (FastAPI)
         │  MetaTrader5 lib                          │
   mt5_orderflow_collector.py  ──WS push──▶  /ws/ingest/orderflow
@@ -18,49 +18,132 @@ This bridge **only reads market data** — it never places orders.
 ## Why it must run on Windows, with MT5 open
 
 The `MetaTrader5` Python package is Windows-only and talks to the **running
-terminal** over IPC. Keep both the terminal (logged into your broker) and this
-script running while you want live order flow. Close either → the flow panels
-go stale (the rest of the dashboard keeps working).
+terminal** over IPC — it cannot run inside the Docker/Linux backend. Keep both
+the terminal (logged into your broker) **and** this script running while you
+want live order flow. Close either → the flow panels go stale (the rest of the
+dashboard keeps working).
 
-## One-time check: does your broker publish DOM?
+---
 
-1. In MT5, right-click the symbol (e.g. `USTEC`) → **Depth of Market**
-   (shortcut **Alt+B**).
-2. A ladder with **bid/ask sizes** → ✅ your broker publishes depth; the DOM
-   panel will fill.
-3. Empty / price only → ❌ no depth from this broker. Footprint + tape can
-   still work *if* the broker sends trade ticks (see caveats below).
+## Quick start (local backend in Docker/WSL)
 
-## Setup
+> This is the exact recipe that works against the local stack. Follow it in
+> order; the [Troubleshooting](#troubleshooting) table maps every common failure
+> back to a step here.
 
-Requires Python 3.10+ on Windows.
+1. **Open MT5 and log in** to the broker you want to read. Confirm the
+   bottom-right shows *connected* (a ping/load value, not "No connection").
+   Use a terminal that actually publishes data — see
+   [Pick the right terminal](#pick-the-right-terminal).
 
-```powershell
-cd collector
-pip install -r requirements.txt
-copy config.example.json config.json
-notepad config.json          # edit token + symbol mapping (see below)
-python mt5_orderflow_collector.py --config config.json
-```
+2. **Install the Python deps into the same Windows Python you will run.** The
+   collector dies immediately at startup if `MetaTrader5` is missing.
+
+   ```powershell
+   python -m pip install -r requirements.txt
+   python -c "import MetaTrader5, websocket; print('deps OK')"
+   ```
+
+3. **Make sure the backend is up** (Docker): `docker ps` should show
+   `…-backend-1`. From the repo root: `make docker-up`.
+
+4. **Create `config.json`** from the example and edit it (details
+   [below](#configure-configjson)):
+
+   ```powershell
+   copy config.example.json config.json
+   notepad config.json
+   ```
+
+   For the **local** backend, `backend_ws_url` **must** use `127.0.0.1`, not
+   `localhost` (see the gotcha in Troubleshooting):
+
+   ```
+   ws://127.0.0.1:8000/ws/ingest/orderflow
+   ```
+
+5. **Run it** (and leave the window open):
+
+   ```powershell
+   python mt5_orderflow_collector.py --config config.json
+   ```
+
+   Or just double-click **`start_collector.bat`**.
+
+6. **Verify.** The console should print, in order:
+
+   ```
+   MT5 attached: source=FTMO terminal=... connected=True account=...
+   tape source: quote-tick flow ...        (only if synthesize_trades_from_quotes=true)
+   Connected to backend ingest: ws://127.0.0.1:8000/ws/ingest/orderflow
+   ```
+
+   Then `curl http://localhost:8000/api/orderflow` returns data (not `[]`), and
+   the dashboard's pressure bar + flow panels go live within seconds.
+
+---
+
+## Pick the right terminal
+
+Not every broker publishes the data the panels need. Before anything else, check
+what your symbol actually provides:
+
+- **DOM (book):** in MT5 right-click the symbol → **Depth of Market** (Alt+B). A
+  ladder with sizes → the DOM panel will fill. Empty / price only → no depth.
+- **Times & Trades (real volume):** if `copy_ticks_from(..., COPY_TICKS_TRADE)`
+  returns nothing, the broker sends **no real traded volume** — common for CFD
+  brokers. In that case enable quote-tick synthesis (next section) so the tape /
+  footprint / pressure are derived from price movement instead.
+
+If you run multiple terminals, point `mt5.sources[].path` at the specific
+`terminal64.exe` so you attach to the one that has the data — attaching to the
+wrong broker is the difference between a full flow and an empty dashboard.
+
+---
+
+## What is real vs derived (important)
+
+Most retail CFD feeds (incl. FTMO demo) do **not** send real order flow. Know
+what you are looking at:
+
+| Panel | Source | Trustworthy? |
+|---|---|---|
+| **Bid/Ask price** | broker quote stream | ✅ real |
+| **DOM ladder** | broker book | ⚠️ on demo accounts it is often **mirrored** (bid size = ask size at every level) → imbalance is always 0, do not read it as real liquidity |
+| **Tape / Footprint / Pressure** | **derived** from quote-tick direction when there are no real trade ticks | ⚠️ direction is sound; **"volume" is a tick count, not contracts** |
+
+With quote-tick synthesis the aggressor is inferred by the **tick rule** on the
+mid price: an up-tick is a buy (at the ask), a down-tick is a sell (at the bid),
+each counting as 1. That makes footprint **delta** and the **pressure bar** a
+proxy for aggression, not exchange-grade volume.
+
+For exchange-grade footprint/delta you'd switch the backend to a real CME feed
+(e.g. Databento) — this collector is the zero-cost MT5 path.
+
+---
 
 ## Configure `config.json`
 
 | Field | What |
 |---|---|
-| `backend_ws_url` | KVM backend ingest socket. Default port is **8057**: `ws://72.62.15.111:8057/ws/ingest/orderflow` |
-| `token` | Must match `ORDERFLOW_INGEST_TOKEN` in the backend `.env` (see below). |
+| `backend_ws_url` | Backend ingest socket. **Local Docker/WSL:** `ws://127.0.0.1:8000/ws/ingest/orderflow` (use `127.0.0.1`, never `localhost`). **KVM:** `ws://72.62.15.111:8057/ws/ingest/orderflow`. |
+| `token` | Must match `ORDERFLOW_INGEST_TOKEN` in the backend `.env`. |
 | `poll_interval_ms` | How often to poll MT5 (250 ms is a good start). |
 | `book_depth` | Max DOM rungs per side to send (10). |
-| `symbols[]` | Map each backend symbol to **your broker's exact MT5 name**. `backend` must be one of `USTEC` / `SPX` / `GOLD`. `mt5` is whatever your broker calls it (`USA500`, `US500`, `XAUUSD`, `GOLD`, …). |
-| `mt5.*` | Leave `null` to attach to the already-running, logged-in terminal. Set `login`/`password`/`server` only to drive a specific account, or `path` to launch a specific terminal exe. |
+| `synthesize_trades_from_quotes` | `true` for feeds with **no** times&trades: builds tape/footprint/pressure from quote-tick direction. `false` only if your broker sends real trade ticks. |
+| `symbols[]` | Map each backend symbol to **your broker's exact MT5 name**. `backend` must be one of `USTEC` / `SPX` / `GOLD`. `mt5` is whatever your broker calls it (`US100.cash`, `Usa500`, `XAUUSD`, …). |
+| `symbols[].footprint_tick` | Optional price step used to group footprint rows (e.g. `1.0` for an index ~28000, `0.1` for gold). Omit to auto-derive from the broker tick size. Keeps a continuous quote feed from fragmenting into thousands of cells. |
+| `mt5.sources[]` | Priority list of terminals; each `{name, path}` is tried in order until one attaches. `path` is the `terminal64.exe`. Add `login`/`password`/`server` only to drive a specific account. |
 
 > ⚠️ The backend tracks **SPX** (not "USA500"). Map your broker's S&P symbol to
-> `"backend": "SPX"`. Same idea if your gold symbol is `XAUUSD`: map it to
-> `"backend": "GOLD"`.
+> `"backend": "SPX"`. Same for gold → `"backend": "GOLD"`.
 
-## Enable on the backend (KVM)
+`config.json` holds your ingest token and is **git-ignored** — never commit it.
+`config.example.json` is the committed template.
 
-In `/root/trading-buddy/.env`:
+## Enable on the backend
+
+In the backend `.env`:
 
 ```
 ORDERFLOW_ENABLED=true
@@ -70,18 +153,25 @@ ORDERFLOW_INGEST_TOKEN=<long-random-string-same-as-collector-token>
 # ORDERFLOW_FOOTPRINT_INTERVAL_SECONDS=60
 ```
 
-Then redeploy the backend (`/update-kvm-trading-buddy-prod`). The collector
-connects from your PC; the dashboard's **Fluxo (DOM · Footprint · Tape)**
-section lights up.
+Local: restart the backend container. KVM: redeploy.
 
-## CFD data-quality caveats
+---
 
-- **DOM** depends entirely on your broker. No depth published → empty ladder.
-- **Volume** on CFDs is *tick volume* (number of ticks), not real contracts.
-- **Aggressor side** uses MT5 trade flags when present, else infers from
-  last-vs-bid/ask. So footprint **delta is a proxy**, not exchange-grade.
-- If `copy_ticks_from(..., COPY_TICKS_TRADE)` returns nothing, your broker
-  isn't sending trade ticks → footprint/tape stay empty (DOM may still work).
+## Troubleshooting
 
-For exchange-grade footprint/delta you'd switch the backend to a real CME feed
-(e.g. Databento) — this collector is the zero-cost MT5 path.
+| Symptom | Cause | Fix |
+|---|---|---|
+| Console exits instantly, `ModuleNotFoundError: MetaTrader5` | Deps not installed in the Python you ran | `python -m pip install -r requirements.txt` into that exact interpreter (step 2) |
+| `mt5.initialize() failed for every configured source` | MT5 closed, not logged in, or wrong `path` | Open MT5, log in, confirm "connected"; fix `mt5.sources[].path` |
+| `Stream error: timed out` and no `Connected to backend ingest` line | `backend_ws_url` uses `localhost` → resolves to IPv6 `::1`, which does not reach the Docker port from Windows | Use `ws://127.0.0.1:8000/...` |
+| Connects, but `/api/orderflow` is `[]` | Wrong broker symbols, or attached to a terminal with no data | Map `symbols[].mt5` to your broker's exact names; point `mt5.sources[].path` at the terminal that has the data |
+| `Order-flow ingest refused` on the backend | `ORDERFLOW_ENABLED=false` or token mismatch | Set the env and make `token` match `ORDERFLOW_INGEST_TOKEN` |
+| DOM fills but tape/footprint/pressure stay empty | Broker sends no real trade ticks | Set `synthesize_trades_from_quotes: true` |
+| Flow appears then drops every ~50s | (already fixed) collector now answers backend keepalive pings | Pull latest `mt5_orderflow_collector.py` |
+| Backend hangs / `/api/orderflow` times out under quote synthesis | (already fixed) per-trade snapshot + unbounded footprint cells | Pull latest backend; ensure `footprint_tick` is set per symbol |
+
+Quick health check from the backend host:
+
+```
+curl -s http://localhost:8000/api/orderflow      # [] means nothing is feeding
+```

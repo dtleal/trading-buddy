@@ -3,6 +3,8 @@
   "token": "CHANGE_ME_to_match_ORDERFLOW_INGEST_TOKEN_on_the_backend",
   "poll_interval_ms": 100,
   "book_depth": 10,
+  "_comment_synthesize": "Set true for CFD feeds with no times&trades: builds the tape/footprint/pressure from quote-tick direction (uptick=buy, downtick=sell, vol=1/tick). Leave false on feeds with real trade ticks.",
+  "synthesize_trades_from_quotes": false,
   "symbols": [
     { "backend": "USTEC", "mt5": "USTEC" },
     { "backend": "SPX",   "mt5": "USA500" },
