@@ -23,7 +23,13 @@ const REGIME_HIGH = 25;  // above = "stress"
  * `liveVix` prop (the latest VIX read from the WS) and appends/updates the
  * most recent point as it changes.
  */
-export function VixChart({ liveVix }: { liveVix: number | null }) {
+export function VixChart({
+  liveVix,
+  height = 360,
+}: {
+  liveVix: number | null;
+  height?: number;
+}) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Line"> | null>(null);
@@ -111,7 +117,7 @@ export function VixChart({ liveVix }: { liveVix: number | null }) {
   }
 
   return (
-    <div className="relative h-[360px] w-full">
+    <div className="relative w-full" style={{ height }}>
       <div ref={containerRef} className="absolute inset-0" />
       {isLoading && (
         <div className="absolute inset-0 grid place-items-center text-xs text-zinc-500">

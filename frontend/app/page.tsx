@@ -11,7 +11,6 @@ import { EventsPanel } from "@/components/events/EventsPanel";
 import { NewsPanel } from "@/components/news/NewsPanel";
 import { BreakoutsPanel } from "@/components/breakouts/BreakoutsPanel";
 import { OrderFlowSection } from "@/components/orderflow/OrderFlowSection";
-import { PressureBar } from "@/components/orderflow/PressureBar";
 import { BriefingPanel } from "@/components/briefing/BriefingPanel";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -31,11 +30,8 @@ export default function Home() {
       <Header status={status} lastTickAt={tick?.timestamp ?? null} />
 
       <main className="mx-auto w-full max-w-[1600px] flex-1 px-6 py-6 space-y-6">
-        {/* Row 0: buying/selling pressure (narrow) beside the VIX chart */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_2fr]">
-          <PressureBar />
-
-          <Card>
+        {/* Row 0: VIX chart on its own (pressure now lives per-column in the flow) */}
+        <Card>
             <CardHeader>
               <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                 <div>
@@ -61,13 +57,12 @@ export default function Home() {
                 )}
               </div>
             </CardHeader>
-            <CardContent>
-              <VixChart liveVix={vix} />
-            </CardContent>
-          </Card>
-        </div>
+          <CardContent>
+            <VixChart liveVix={vix} height={200} />
+          </CardContent>
+        </Card>
 
-        {/* Row 0b: live order flow (bid/ask · footprint · tape) */}
+        {/* Row 0b: live order flow — each column carries its pressure marker on top */}
         <OrderFlowSection />
 
         {/* Briefing panel — collapsed by default, full-width */}
