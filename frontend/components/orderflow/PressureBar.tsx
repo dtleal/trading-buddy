@@ -50,7 +50,9 @@ export function PressureBar() {
             {status === "open" ? "ao vivo" : "desconectado"}
           </Badge>
         </div>
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        {/* Stacked vertically: this card now sits in a narrow column beside the
+            VIX chart, so a vertical list reads better than 3 cramped columns. */}
+        <div className="grid grid-cols-1 gap-2">
           {FLOW_ASSETS.map((a) => (
             <PressureGauge key={a.key} label={a.label} flow={flows[a.key]} now={now} />
           ))}

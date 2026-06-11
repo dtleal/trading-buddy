@@ -31,17 +31,10 @@ export default function Home() {
       <Header status={status} lastTickAt={tick?.timestamp ?? null} />
 
       <main className="mx-auto w-full max-w-[1600px] flex-1 px-6 py-6 space-y-6">
-        {/* Row 0: buying/selling pressure — the trader's first read */}
-        <PressureBar />
+        {/* Row 0: buying/selling pressure (narrow) beside the VIX chart */}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_2fr]">
+          <PressureBar />
 
-        {/* Row 0b: live order flow (DOM · footprint · tape) */}
-        <OrderFlowSection />
-
-        {/* Briefing panel — collapsed by default, full-width */}
-        <BriefingPanel />
-
-        {/* Row 1: VIX hero — chart on the left, summary stat on the right */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[2fr_1fr]">
           <Card>
             <CardHeader>
               <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
@@ -72,9 +65,16 @@ export default function Home() {
               <VixChart liveVix={vix} />
             </CardContent>
           </Card>
-
-          <VixAlertsPanel />
         </div>
+
+        {/* Row 0b: live order flow (bid/ask · footprint · tape) */}
+        <OrderFlowSection />
+
+        {/* Briefing panel — collapsed by default, full-width */}
+        <BriefingPanel />
+
+        {/* VIX alerts (moved out of the hero row) */}
+        <VixAlertsPanel />
 
         {/* Row 2: prices (cards inside) + 5m reference levels */}
         <PricesPanel tick={tick} />
