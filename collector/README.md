@@ -1,8 +1,10 @@
 # MT5 Order-Flow Collector (Windows)
 
-Streams live **DOM / footprint / tape / pressure** from your MetaTrader 5
+Streams live **bid/ask · footprint · tape · pressure** from your MetaTrader 5
 terminal to the trading-buddy backend, which renders it on the dashboard for
-**USTEC, USA500 (→ SPX) and GOLD**.
+**USTEC, USA500 (→ SPX) and GOLD**. The dashboard's top-of-book panel is a
+real-time bid/ask tick chart (the demo DOM book is mirrored, so the ladder was
+dropped in favour of the genuinely-real top-of-book quote).
 
 This bridge **only reads market data** — it never places orders.
 
@@ -108,8 +110,8 @@ what you are looking at:
 
 | Panel | Source | Trustworthy? |
 |---|---|---|
-| **Bid/Ask price** | broker quote stream | ✅ real |
-| **DOM ladder** | broker book | ⚠️ on demo accounts it is often **mirrored** (bid size = ask size at every level) → imbalance is always 0, do not read it as real liquidity |
+| **Bid/Ask tick chart** | broker top-of-book quote | ✅ real (price movement) |
+| **DOM depth (sizes)** | broker book | ⚠️ on demo accounts it is often **mirrored** (bid size = ask size at every level) → imbalance is always 0; we ingest the book only for the top-of-book quote, the ladder isn't shown |
 | **Tape / Footprint / Pressure** | **derived** from quote-tick direction when there are no real trade ticks | ⚠️ direction is sound; **"volume" is a tick count, not contracts** |
 
 With quote-tick synthesis the aggressor is inferred by the **tick rule** on the

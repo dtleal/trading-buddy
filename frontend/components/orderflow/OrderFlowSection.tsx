@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { LayoutGrid } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { DomLadder } from "./DomLadder";
+import { BidAskChart } from "./BidAskChart";
 import { FootprintPanel } from "./FootprintPanel";
 import { TapePanel } from "./TapePanel";
 import { useOrderFlow } from "@/hooks/useOrderFlow";
@@ -58,7 +58,7 @@ export function OrderFlowSection() {
           <div className="flex items-center gap-2">
             <LayoutGrid className="size-4 text-violet-400" />
             <div>
-              <CardTitle>Fluxo · DOM · Footprint · Tape</CardTitle>
+              <CardTitle>Fluxo · Bid/Ask · Footprint · Tape</CardTitle>
               <CardDescription>
                 USTEC · USA500 · GOLD em tempo real (MT5)
               </CardDescription>
@@ -144,8 +144,8 @@ function SymbolColumn({
         </p>
       ) : (
         <>
-          <FlowBlock title="DOM (liquidez em repouso)">
-            <DomLadder book={flow.book} />
+          <FlowBlock title="Bid · Ask (tempo real)">
+            <BidAskChart flow={flow} />
           </FlowBlock>
           <FlowBlock title="Footprint (volume executado)">
             <FootprintPanel bars={flow.footprint} />
