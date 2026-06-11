@@ -85,6 +85,68 @@ dashboard keeps working).
 
 ---
 
+## Keep it running automatically (watchdog)
+
+The collector is a console process: if its window is closed, the PC reboots, or
+it crashes, the flow goes stale until someone restarts it. To make it
+self-healing, register the scheduled task **once** (elevation prompt):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File install_watchdog_task.ps1
+```
+
+What it sets up:
+
+- **`watchdog.ps1`** runs every minute. If no `mt5_orderflow_collector` python
+  process is alive, it relaunches one via `run_supervised.bat`. Idempotent — does
+  nothing when the collector is already up.
+- **`run_supervised.bat`** is the unattended launcher (no `pause`): when python
+  exits, the window closes cleanly and the next watchdog tick brings it back.
+- The task **`MT5OrderflowCollector`** fires the watchdog every minute in the
+  interactive session, so after a reboot the collector is back within ~1 minute.
+
+MT5 must still be open and logged in — if it isn't, the collector exits and the
+watchdog keeps retrying until MT5 is available again. Manage the task with
+`Get-ScheduledTask MT5OrderflowCollector`, test it on demand with
+`Start-ScheduledTask MT5OrderflowCollector`, or remove it with
+`Unregister-ScheduledTask MT5OrderflowCollector`.
+
+> Running these scripts from a `\\wsl.localhost\...` path while elevated can fail
+> (the UNC share isn't mounted in the elevated context). If that happens, copy
+> the script to a local path like `C:\Users\<you>\` and run it from there.
+
+---
+
+## Access the dashboard from another device (same LAN)
+
+The stack binds `0.0.0.0` (frontend `:3000`, backend `:8000`), and `~/.wslconfig`
+uses `networkingMode=mirrored`, so WSL shares the Windows host's network
+interfaces — no portproxy needed. Two things make it reachable from a phone or
+laptop on the same network:
+
+1. **Open the firewall** (host + the WSL Hyper-V firewall, which blocks inbound
+   by default). Run once, elevated, from the repo root:
+
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\open_lan_ports.ps1
+   ```
+
+   The rules are scoped to `RemoteAddress=LocalSubnet`, so the ports are reachable
+   only from the local network, never the open internet.
+
+2. **Browse to the host's LAN IP** from the other device, e.g.
+   `http://192.168.15.5:3000` (use whichever host IP is on the device's network;
+   `ipconfig` on Windows lists them). The device must be on the **same subnet**.
+
+Verify the bind from inside WSL with `curl http://<lan-ip>:3000` (200 = good). A
+`Test-NetConnection` from the Windows host to its *own* mirrored LAN IP returns
+`False` even when it works — test from the actual external device instead.
+
+For access from **outside** the LAN (internet), don't expose these ports — use a
+tunnel (Tailscale, Cloudflare Tunnel) or a router port-forward.
+
+---
+
 ## Pick the right terminal
 
 Not every broker publishes the data the panels need. Before anything else, check
@@ -167,6 +229,7 @@ Local: restart the backend container. KVM: redeploy.
 | `mt5.initialize() failed for every configured source` | MT5 closed, not logged in, or wrong `path` | Open MT5, log in, confirm "connected"; fix `mt5.sources[].path` |
 | `Stream error: timed out` and no `Connected to backend ingest` line | `backend_ws_url` uses `localhost` → resolves to IPv6 `::1`, which does not reach the Docker port from Windows | Use `ws://127.0.0.1:8000/...` |
 | Connects, but `/api/orderflow` is `[]` | Wrong broker symbols, or attached to a terminal with no data | Map `symbols[].mt5` to your broker's exact names; point `mt5.sources[].path` at the terminal that has the data |
+| Backend up but `/api/orderflow` is `[]` after a restart, no collector in the backend logs | Collector window was closed when the stack restarted (MT5 still up, but no python process) | Relaunch `start_collector.bat`, or install the [watchdog](#keep-it-running-automatically-watchdog) so it comes back on its own |
 | `Order-flow ingest refused` on the backend | `ORDERFLOW_ENABLED=false` or token mismatch | Set the env and make `token` match `ORDERFLOW_INGEST_TOKEN` |
 | DOM fills but tape/footprint/pressure stay empty | Broker sends no real trade ticks | Set `synthesize_trades_from_quotes: true` |
 | Flow appears then drops every ~50s | (already fixed) collector now answers backend keepalive pings | Pull latest `mt5_orderflow_collector.py` |

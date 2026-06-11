@@ -9,7 +9,7 @@ REM  Keep this window OPEN while you want live flow on the dashboard.
 REM  See README.md -> Troubleshooting if it exits or the dashboard stays empty.
 REM ----------------------------------------------------------------------
 pushd "%~dp0"
-echo Starting MT5 -> backend order-flow collector ...
+echo Starting MT5 order-flow collector (MT5 to backend) ...
 python mt5_orderflow_collector.py --config config.json
 echo.
 echo Collector stopped. Read the message above (e.g. MT5 closed / not logged in).

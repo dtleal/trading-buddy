@@ -423,6 +423,14 @@ def main() -> None:
     parser.add_argument("--config", default="config.json", help="Path to config.json")
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args()
+    # The Windows console defaults to cp1252, which can't encode the arrows/
+    # em-dashes used in our log lines (raises UnicodeEncodeError on every emit).
+    # Force UTF-8 so logging never trips over a non-ASCII char.
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+        except (AttributeError, ValueError):  # pragma: no cover - non-reconfigurable stream
+            pass
     logging.basicConfig(
         level=args.log_level.upper(),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
