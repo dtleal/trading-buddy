@@ -40,8 +40,10 @@ from use_cases.fetch_calendar import FetchEconomicCalendarUseCase
 from use_cases.fetch_macro import FetchMacroIndicatorsUseCase
 from use_cases.fetch_market import FetchMarketSnapshotUseCase
 from use_cases.fetch_news import FetchNewsHeadlinesUseCase
+from use_cases.assess_day_outlook import AssessDayOutlookUseCase
 from use_cases.generate_briefing import GenerateBriefingUseCase
 from use_cases.push_breakout_alerts import PushBreakoutAlertsUseCase
+from use_cases.push_day_outlook_alerts import PushDayOutlookAlertsUseCase
 from use_cases.run_dashboard_tick import RunDashboardTickUseCase
 
 logger = logging.getLogger(__name__)
@@ -155,6 +157,14 @@ async def build_container(settings: Settings) -> Container:
     )
     push_breakout_alerts = PushBreakoutAlertsUseCase(notifier=ntfy, cache=cache)
 
+    assess_day_outlook = AssessDayOutlookUseCase()
+    push_day_outlook_alerts = PushDayOutlookAlertsUseCase(notifier=ntfy, cache=cache)
+    # The MT5 collector pushes liquidity readings into the order-flow route's
+    # in-process store; the tick loop reads the latest snapshot from there.
+    # Imported lazily to keep the composition root free of an api→container
+    # import cycle.
+    from api.routes.orderflow import latest_liquidity
+
     run_tick = RunDashboardTickUseCase(
         fetch_market=fetch_market,
         fetch_calendar=fetch_calendar,
@@ -171,6 +181,9 @@ async def build_container(settings: Settings) -> Container:
         detect_setup=detect_setup,
         detect_breakouts=detect_breakouts,
         push_breakout_alerts=push_breakout_alerts,
+        assess_day_outlook=assess_day_outlook,
+        push_day_outlook_alerts=push_day_outlook_alerts,
+        liquidity_provider=latest_liquidity,
     )
 
     generate_briefing = GenerateBriefingUseCase(

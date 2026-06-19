@@ -195,6 +195,8 @@ For exchange-grade footprint/delta you'd switch the backend to a real CME feed
 | `poll_interval_ms` | How often to poll MT5 (250 ms is a good start). |
 | `book_depth` | Max DOM rungs per side to send (10). |
 | `synthesize_trades_from_quotes` | `true` for feeds with **no** times&trades: builds tape/footprint/pressure from quote-tick direction. `false` only if your broker sends real trade ticks. |
+| `liquidity_baseline_days` | Sessions used for the **day-outlook liquidity gauge** baseline (default `20`). The collector compares today's cumulative tick volume to the median of the prior N sessions at the same time-of-day and pushes the ratio to the backend, which folds it into the "Perfil do Dia" banner/alert. `0` disables. |
+| `liquidity_poll_seconds` | How often (s) to recompute + push that ratio (default `60`). It reads ~3 weeks of M5 bars, so it is throttled well below the tick poll. `0` disables. |
 | `symbols[]` | Map each backend symbol to **your broker's exact MT5 name**. `backend` must be one of `USTEC` / `SPX` / `GOLD`. `mt5` is whatever your broker calls it (`US100.cash`, `Usa500`, `XAUUSD`, …). |
 | `symbols[].footprint_tick` | Optional price step used to group footprint rows (e.g. `1.0` for an index ~28000, `0.1` for gold). Omit to auto-derive from the broker tick size. Keeps a continuous quote feed from fragmenting into thousands of cells. |
 | `mt5.sources[]` | Priority list of terminals; each `{name, path}` is tried in order until one attaches. `path` is the `terminal64.exe`. Add `login`/`password`/`server` only to drive a specific account. |

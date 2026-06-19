@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
+from typing import Callable
 
 from adapters.prices_yfinance import YFinancePricesGateway
 from core.enums import AssetSymbol, Timeframe
@@ -17,11 +18,15 @@ from core.models import (
     BiasReport,
     Breakout,
     DashboardTick,
+    DayOutlook,
     IntradayBiasReport,
     IntradayLevels,
     NewsItem,
+    SessionLiquidity,
     TradeSetup,
 )
+from use_cases.assess_day_outlook import AssessDayOutlookUseCase
+from use_cases.push_day_outlook_alerts import PushDayOutlookAlertsUseCase
 from use_cases.compute_combined_bias import ComputeCombinedBiasUseCase
 from use_cases.compute_intraday_bias import ComputeIntradayBiasUseCase
 from use_cases.compute_intraday_levels import ComputeIntradayLevelsUseCase
@@ -78,6 +83,9 @@ class RunDashboardTickUseCase:
         detect_setup: DetectTradeSetupUseCase | None = None,
         detect_breakouts: DetectBreakoutsUseCase | None = None,
         push_breakout_alerts: PushBreakoutAlertsUseCase | None = None,
+        assess_day_outlook: AssessDayOutlookUseCase | None = None,
+        push_day_outlook_alerts: PushDayOutlookAlertsUseCase | None = None,
+        liquidity_provider: Callable[[], dict[AssetSymbol, SessionLiquidity]] | None = None,
         intraday_assets: tuple[AssetSymbol, ...] = (
             AssetSymbol.USTEC,
             AssetSymbol.SPX,
@@ -102,6 +110,9 @@ class RunDashboardTickUseCase:
         self._detect_setup = detect_setup
         self._detect_breakouts = detect_breakouts
         self._push_breakout_alerts = push_breakout_alerts
+        self._assess_day_outlook = assess_day_outlook
+        self._push_day_outlook_alerts = push_day_outlook_alerts
+        self._liquidity_provider = liquidity_provider
         self._intraday_assets = intraday_assets
 
     async def execute(self) -> DashboardTick:
@@ -146,6 +157,15 @@ class RunDashboardTickUseCase:
             except Exception:
                 logger.exception("Push notification dispatch failed (tick continues)")
 
+        # Day-outlook gate: combine the structural signals just computed with
+        # the live MT5 liquidity readings (if a collector is feeding them).
+        day_outlook = self._assess_outlook(market, calendar_events, intraday_levels)
+        if day_outlook is not None and self._push_day_outlook_alerts is not None:
+            try:
+                await self._push_day_outlook_alerts.execute(day_outlook)
+            except Exception:
+                logger.exception("Day-outlook push dispatch failed (tick continues)")
+
         tick = DashboardTick(
             timestamp=datetime.now(timezone.utc),
             market=market,
@@ -157,6 +177,7 @@ class RunDashboardTickUseCase:
             intraday_levels=intraday_levels,
             intraday_bias=intraday_bias_map,
             breakouts_recent=breakouts,
+            day_outlook=day_outlook,
         )
 
         await asyncio.gather(
@@ -167,6 +188,29 @@ class RunDashboardTickUseCase:
         )
 
         return tick
+
+    def _assess_outlook(
+        self,
+        market,
+        calendar_events,
+        intraday_levels: dict[AssetSymbol, IntradayLevels],
+    ) -> DayOutlook | None:
+        """Run the day-outlook gate. Returns None when the assessor isn't wired
+        (older tests) so the tick stays backward-compatible."""
+        if self._assess_day_outlook is None:
+            return None
+        liquidity = self._liquidity_provider() if self._liquidity_provider else {}
+        try:
+            return self._assess_day_outlook.execute(
+                now=datetime.now(timezone.utc),
+                events_today=calendar_events,
+                vix=market.vix,
+                levels=intraday_levels,
+                liquidity=liquidity,
+            )
+        except Exception:
+            logger.exception("Day-outlook assessment failed (tick continues)")
+            return None
 
     async def _compute_intraday_setups_breakouts(
         self,

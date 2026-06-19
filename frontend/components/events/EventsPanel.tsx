@@ -81,5 +81,6 @@ function EventRow({ event, now }: { event: EconomicEvent; now: number }) {
 function ImpactBadge({ impact }: { impact: ImpactLevel }) {
   if (impact === "high") return <Badge tone="negative">HIGH</Badge>;
   if (impact === "medium") return <Badge tone="warning">MEDIUM</Badge>;
+  if (impact === "holiday") return <Badge tone="warning">FERIADO</Badge>;
   return <Badge tone="neutral">LOW</Badge>;
 }

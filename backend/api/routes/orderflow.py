@@ -24,7 +24,13 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
 from api.orderflow_broadcaster import orderflow_broadcaster
 from core.enums import AssetSymbol
-from core.models import OrderBookLevel, OrderBookSnapshot, OrderFlowSnapshot, TapeTrade
+from core.models import (
+    OrderBookLevel,
+    OrderBookSnapshot,
+    OrderFlowSnapshot,
+    SessionLiquidity,
+    TapeTrade,
+)
 from settings import get_settings
 from use_cases.aggregate_orderflow import OrderFlowAggregator
 
@@ -51,6 +57,20 @@ def _build_aggregator() -> OrderFlowAggregator:
 
 # Process-wide singleton. The ingest handler mutates it; the REST route reads it.
 aggregator = _build_aggregator()
+
+# Latest per-symbol session-liquidity reading pushed by the collector. Lives in
+# the same process as the tick loop (API + loop share a process), so the
+# day-outlook assessor reads it directly — no DB / cache round-trip needed.
+_liquidity_store: dict[AssetSymbol, SessionLiquidity] = {}
+
+
+def latest_liquidity() -> dict[AssetSymbol, SessionLiquidity]:
+    """Snapshot of the most recent MT5 liquidity reading per symbol.
+
+    Read by `RunDashboardTickUseCase` to feed the day-outlook gate. Returns a
+    shallow copy so the caller can iterate without racing the ingest handler.
+    """
+    return dict(_liquidity_store)
 
 
 # --- wire-format parsing -----------------------------------------------------
@@ -94,6 +114,30 @@ def _parse_book(msg: dict[str, Any], symbol: AssetSymbol) -> OrderBookSnapshot:
         asof=_parse_dt(msg.get("asof") or msg.get("at")),
         bids=_parse_levels(msg.get("bids")),
         asks=_parse_levels(msg.get("asks")),
+    )
+
+
+def _parse_liquidity(msg: dict[str, Any], symbol: AssetSymbol) -> SessionLiquidity:
+    realized = float(msg["realized_volume"])
+    baseline = float(msg["baseline_volume"])
+    # Prefer the collector's own ratio, but recompute defensively when absent.
+    ratio = msg.get("ratio")
+    ratio = float(ratio) if ratio is not None else (realized / baseline if baseline > 0 else 0.0)
+    realized_range = msg.get("realized_range")
+    baseline_range = msg.get("baseline_range")
+    range_ratio = msg.get("range_ratio")
+    if range_ratio is None and realized_range is not None and baseline_range:
+        range_ratio = float(realized_range) / float(baseline_range)
+    return SessionLiquidity(
+        symbol=symbol,
+        asof=_parse_dt(msg.get("asof") or msg.get("at")),
+        realized_volume=realized,
+        baseline_volume=baseline,
+        ratio=ratio,
+        sample_days=int(msg.get("sample_days", 0)),
+        realized_range=float(realized_range) if realized_range is not None else None,
+        baseline_range=float(baseline_range) if baseline_range is not None else None,
+        range_ratio=float(range_ratio) if range_ratio is not None else None,
     )
 
 
@@ -144,15 +188,25 @@ async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
         if trades:
             aggregator.ingest_trades(symbol, trades)
         return {symbol}
+    if mtype == "liquidity":
+        # Session-liquidity reading. Stored for the day-outlook gate AND stamped
+        # onto the symbol's snapshot, so the flow column can show it above the
+        # pressure bar. Touch the symbol so the snapshot is re-broadcast now.
+        _liquidity_store[symbol] = _parse_liquidity(msg, symbol)
+        return {symbol}
     logger.debug("Ignoring unknown order-flow message type: %r", mtype)
     return set()
 
 
-def _stamp_source(snapshot: "OrderFlowSnapshot") -> "OrderFlowSnapshot":
-    """Return the snapshot with the current broker source baked in."""
-    if _current_source is None:
-        return snapshot
-    return snapshot.model_copy(update={"source": _current_source})
+def _stamp_snapshot(snapshot: "OrderFlowSnapshot") -> "OrderFlowSnapshot":
+    """Return the snapshot with the broker source + latest liquidity baked in."""
+    update: dict[str, Any] = {}
+    if _current_source is not None:
+        update["source"] = _current_source
+    liq = _liquidity_store.get(snapshot.symbol)
+    if liq is not None:
+        update["liquidity"] = liq
+    return snapshot.model_copy(update=update) if update else snapshot
 
 
 # --- ingest (collector → backend) -------------------------------------------
@@ -191,7 +245,7 @@ async def ingest_ws(websocket: WebSocket) -> None:
                 logger.warning("Skipping malformed order-flow message: %r", msg)
                 continue
             for symbol in touched:
-                await orderflow_broadcaster.publish(_stamp_source(aggregator.snapshot(symbol)))
+                await orderflow_broadcaster.publish(_stamp_snapshot(aggregator.snapshot(symbol)))
     except WebSocketDisconnect:
         logger.info("Order-flow collector disconnected: %s", websocket.client)
     except Exception:
@@ -233,4 +287,4 @@ async def get_orderflow() -> list[OrderFlowSnapshot]:
     cached = orderflow_broadcaster.latest_all()
     if cached:
         return cached
-    return [_stamp_source(s) for s in aggregator.all_snapshots()]
+    return [_stamp_snapshot(s) for s in aggregator.all_snapshots()]

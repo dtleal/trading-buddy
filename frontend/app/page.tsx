@@ -10,6 +10,7 @@ import { SetupsPanel } from "@/components/setups/SetupsPanel";
 import { EventsPanel } from "@/components/events/EventsPanel";
 import { NewsPanel } from "@/components/news/NewsPanel";
 import { BreakoutsPanel } from "@/components/breakouts/BreakoutsPanel";
+import { DayOutlookBanner } from "@/components/dayoutlook/DayOutlookBanner";
 import { OrderFlowSection } from "@/components/orderflow/OrderFlowSection";
 import { BriefingPanel } from "@/components/briefing/BriefingPanel";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -30,6 +31,9 @@ export default function Home() {
       <Header status={status} lastTickAt={tick?.timestamp ?? null} />
 
       <main className="mx-auto w-full max-w-[1600px] flex-1 px-6 py-6 space-y-6">
+        {/* Perfil do Dia — movement-potential / liquidity gate, top of the fold */}
+        <DayOutlookBanner tick={tick} />
+
         {/* Row 0: VIX chart on its own (pressure now lives per-column in the flow) */}
         <Card>
             <CardHeader>

@@ -19,8 +19,11 @@ export type TermStructure = z.infer<typeof TermStructure>;
 export const BiasLevel = z.enum(["bullish", "neutral", "bearish"]);
 export type BiasLevel = z.infer<typeof BiasLevel>;
 
-export const ImpactLevel = z.enum(["low", "medium", "high"]);
+export const ImpactLevel = z.enum(["low", "medium", "high", "holiday"]);
 export type ImpactLevel = z.infer<typeof ImpactLevel>;
+
+export const DayRegime = z.enum(["expansion", "normal", "thin"]);
+export type DayRegime = z.infer<typeof DayRegime>;
 
 export const PriceQuote = z.object({
   symbol: z.string(),
@@ -169,6 +172,19 @@ export const NewsItem = z.object({
 });
 export type NewsItem = z.infer<typeof NewsItem>;
 
+/** The "Perfil do Dia" movement-potential gate. */
+export const DayOutlook = z.object({
+  asof: z.string(),
+  score: z.number(), // 0-100 movement potential
+  regime: DayRegime,
+  headline: z.string(),
+  rationale: z.array(z.string()).default([]),
+  is_us_holiday: z.boolean().default(false),
+  high_impact_count: z.number().default(0),
+  liquidity_ratio: z.number().nullable().default(null),
+});
+export type DayOutlook = z.infer<typeof DayOutlook>;
+
 /** Latest DashboardTick from /api/tick or /ws/ticks. */
 export const DashboardTick = z.object({
   timestamp: z.string(),
@@ -185,6 +201,7 @@ export const DashboardTick = z.object({
   intraday_levels: z.record(AssetSymbol, IntradayLevels).default({}),
   intraday_bias: z.record(AssetSymbol, IntradayBiasReport).default({}),
   breakouts_recent: z.array(Breakout).default([]),
+  day_outlook: DayOutlook.nullable().default(null),
 });
 export type DashboardTick = z.infer<typeof DashboardTick>;
 
@@ -237,6 +254,29 @@ export const FootprintBar = z.object({
 });
 export type FootprintBar = z.infer<typeof FootprintBar>;
 
+/** Today's tick-volume vs the same-time-of-day baseline (from the MT5 collector). */
+export const SessionLiquidity = z.object({
+  symbol: AssetSymbol,
+  asof: z.string(),
+  realized_volume: z.number(),
+  baseline_volume: z.number(),
+  ratio: z.number(), // volume: 1.0 = normal participation
+  sample_days: z.number(),
+  realized_range: z.number().nullable().default(null),
+  baseline_range: z.number().nullable().default(null),
+  range_ratio: z.number().nullable().default(null), // candle travel vs normal
+});
+export type SessionLiquidity = z.infer<typeof SessionLiquidity>;
+
+/** Real-time candle/volume read from the live footprint (no baseline needed). */
+export const LiveActivity = z.object({
+  range_per_bar: z.number(),
+  volume_per_bar: z.number(),
+  interval_seconds: z.number(),
+  sampled_bars: z.number(),
+});
+export type LiveActivity = z.infer<typeof LiveActivity>;
+
 /** One per-symbol order-flow message from /ws/orderflow. */
 export const OrderFlowSnapshot = z.object({
   symbol: AssetSymbol,
@@ -245,6 +285,8 @@ export const OrderFlowSnapshot = z.object({
   recent_trades: z.array(TapeTrade).default([]),
   footprint: z.array(FootprintBar).default([]),
   source: z.string().nullable().default(null),
+  liquidity: SessionLiquidity.nullable().default(null),
+  live_activity: LiveActivity.nullable().default(null),
 });
 export type OrderFlowSnapshot = z.infer<typeof OrderFlowSnapshot>;
 

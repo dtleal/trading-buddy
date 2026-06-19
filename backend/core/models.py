@@ -11,6 +11,7 @@ from core.enums import (
     AssetSymbol,
     BiasLevel,
     BreakoutDirection,
+    DayRegime,
     ImpactLevel,
     LLMOutputKind,
     SentimentLabel,
@@ -405,6 +406,48 @@ class FootprintBar(_Frozen):
     poc_price: float | None = None  # point of control (max total-volume price)
 
 
+class SessionLiquidity(_Frozen):
+    """Today's realized participation vs the same-time-of-day baseline.
+
+    Pushed by the MT5 collector (`type:"liquidity"`), which reads historical
+    OHLCV via `copy_rates_*` and compares today's cumulative *tick volume* up
+    to the current time of day against the median of the trailing N sessions at
+    the same point in their day. `ratio` < 1 means the session is running
+    thinner than usual — the empirical core of the thin/chop warning. Tick
+    volume (count of price changes) is the only "volume" CFD feeds expose, but
+    its *shape over the day* is a stable participation proxy.
+    """
+
+    symbol: AssetSymbol
+    asof: datetime
+    realized_volume: float  # cumulative tick volume so far today
+    baseline_volume: float  # median cumulative tick volume at same time-of-day
+    ratio: float  # volume realized / baseline (1.0 = normal participation)
+    sample_days: int  # how many past sessions fed the baseline
+    # Session travel (max high − min low so far) vs same-time-of-day baseline.
+    # The "candles minúsculos, preço não anda" signal. Optional — present only
+    # when the collector had enough history to compute a range baseline.
+    realized_range: float | None = None
+    baseline_range: float | None = None
+    range_ratio: float | None = None  # range realized / baseline
+
+
+class LiveActivity(_Frozen):
+    """Real-time activity read derived from the live footprint the backend
+    already receives — NO historical baseline needed, so it fills the instant
+    flow arrives (unlike `SessionLiquidity`, which waits on the collector's
+    `copy_rates` baseline). It answers "how big are the candles and how much is
+    trading *right now*", which is the immediate read of the "preço não anda"
+    feeling. The `SessionLiquidity` ratio, when present, layers the "vs normal"
+    judgement on top.
+    """
+
+    range_per_bar: float  # median high−low of recent completed bars (price units)
+    volume_per_bar: float  # median total volume of recent completed bars
+    interval_seconds: int  # bar width, so the UI can normalise to per-minute
+    sampled_bars: int  # completed bars that fed the medians
+
+
 class OrderFlowSnapshot(_Frozen):
     """Per-symbol order-flow state broadcast to the frontend.
 
@@ -422,6 +465,40 @@ class OrderFlowSnapshot(_Frozen):
     # …). Set by the collector via a `hello` message on connect; carried on
     # every snapshot so the UI can label each column.
     source: str | None = None
+    # Latest session-liquidity reading for this symbol (today's tick volume vs
+    # the same-time-of-day baseline). Stamped onto every broadcast so each flow
+    # column can show "X% do volume normal" right above its pressure bar.
+    liquidity: SessionLiquidity | None = None
+    # Real-time candle-size + volume read from the live footprint. Always present
+    # once any bar exists (no baseline needed), so the UI shows activity the
+    # instant flow arrives.
+    live_activity: LiveActivity | None = None
+
+
+# -----------------------------------------------------------------------------
+# Day outlook (movement-potential / liquidity gate)
+# -----------------------------------------------------------------------------
+
+
+class DayOutlook(_Frozen):
+    """Whether the session promises real movement or is a thin/chop trap.
+
+    Produced once per tick by `AssessDayOutlookUseCase` by combining structural
+    signals known at/near the open (bank holiday, scheduled high-impact
+    catalysts, VIX regime, opening-range compression vs ATR) with the live MT5
+    tick-volume `ratio` when a collector is feeding it. `score` is 0-100
+    movement potential anchored at 50; `regime` is the discrete go/no-go gate;
+    `rationale` explains the drivers for the dashboard tooltip and the push.
+    """
+
+    asof: datetime
+    score: float = Field(ge=0.0, le=100.0)
+    regime: DayRegime
+    headline: str  # one-line PT verdict for the banner / push title
+    rationale: list[str] = Field(default_factory=list)
+    is_us_holiday: bool = False
+    high_impact_count: int = 0  # scheduled HIGH-impact USD events today
+    liquidity_ratio: float | None = None  # blended MT5 ratio across symbols, if any
 
 
 # -----------------------------------------------------------------------------
@@ -442,6 +519,7 @@ class DashboardTick(_Frozen):
     intraday_levels: dict[AssetSymbol, "IntradayLevels"] = Field(default_factory=dict)
     intraday_bias: dict[AssetSymbol, IntradayBiasReport] = Field(default_factory=dict)
     breakouts_recent: list[Breakout] = Field(default_factory=list)
+    day_outlook: DayOutlook | None = None
 
 
 __all__ = [
@@ -471,4 +549,7 @@ __all__ = [
     "FootprintCell",
     "FootprintBar",
     "OrderFlowSnapshot",
+    "SessionLiquidity",
+    "LiveActivity",
+    "DayOutlook",
 ]

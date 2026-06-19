@@ -10,7 +10,7 @@ import { FootprintPanel } from "./FootprintPanel";
 import { TapePanel } from "./TapePanel";
 import { useOrderFlow } from "@/hooks/useOrderFlow";
 import { cn } from "@/lib/utils";
-import type { AssetSymbol, OrderFlowSnapshot } from "@/lib/types";
+import type { AssetSymbol, LiveActivity, OrderFlowSnapshot, SessionLiquidity } from "@/lib/types";
 
 const FLOW_ASSETS: { key: AssetSymbol; label: string }[] = [
   { key: "USTEC", label: "USTEC" },
@@ -145,6 +145,7 @@ function SymbolColumn({
         </p>
       ) : (
         <>
+          <LiquidityChip liquidity={flow.liquidity} live={flow.live_activity} />
           <FlowBlock title="Pressão (compra · venda)">
             <PressureGauge flow={flow} />
           </FlowBlock>
@@ -159,6 +160,110 @@ function SymbolColumn({
           </FlowBlock>
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * Per-asset activity gauge. Two layers:
+ *  - **Live** (always, the instant footprint arrives): current candle size +
+ *    volume per bar, read straight off the live flow — answers "is the market
+ *    moving right now". No baseline needed.
+ *  - **vs normal** (when the collector's baseline is in): tick volume + session
+ *    range as a % of the same-time-of-day median; the worse of the two drives
+ *    the color/label so a dead session lights up red.
+ */
+function LiquidityChip({
+  liquidity,
+  live,
+}: {
+  liquidity: SessionLiquidity | null;
+  live: LiveActivity | null;
+}) {
+  const hasBaseline = !!liquidity && liquidity.baseline_volume > 0;
+
+  // No baseline yet → show the live read if we have footprint, else waiting.
+  if (!hasBaseline) {
+    if (!live || live.sampled_bars === 0) {
+      return (
+        <div className="rounded-md border border-zinc-800 bg-zinc-900/40 px-2 py-1.5 text-[11px] text-zinc-500">
+          Atividade: <span className="text-zinc-400">aguardando fluxo do MT5…</span>
+        </div>
+      );
+    }
+    const perMin = live.volume_per_bar * (60 / Math.max(1, live.interval_seconds));
+    return (
+      <div className="rounded-md border border-zinc-700/60 bg-zinc-900/50 px-2 py-1.5 text-zinc-200">
+        <div className="mb-0.5 flex items-center justify-between text-[11px] font-semibold">
+          <span className="uppercase tracking-wider">Atividade · tempo real</span>
+          <span className="text-[10px] font-normal text-zinc-500">{live.sampled_bars} barras</span>
+        </div>
+        <div className="flex items-center justify-between text-[11px] tabular-nums text-zinc-300">
+          <span>Candle ~{live.range_per_bar.toFixed(1)} pts</span>
+          <span>~{Math.round(perMin)} vol/min</span>
+        </div>
+        <div className="mt-0.5 text-[10px] text-zinc-500">
+          baseline “% do normal” aparece quando o collector novo subir
+        </div>
+      </div>
+    );
+  }
+
+  const vol = liquidity!.ratio;
+  const rng = liquidity!.range_ratio; // may be null until baseline exists
+  const worst = rng != null ? Math.min(vol, rng) : vol;
+  const thin = worst < 0.75;
+  const high = worst > 1.25;
+  const tone = thin
+    ? "border-rose-700/60 bg-rose-950/30 text-rose-200"
+    : high
+      ? "border-emerald-700/60 bg-emerald-950/30 text-emerald-200"
+      : "border-zinc-700/60 bg-zinc-900/50 text-zinc-200";
+  const label = thin ? "DIA FRACO" : high ? "ATIVO" : "normal";
+
+  return (
+    <div className={cn("rounded-md border px-2 py-1.5", tone)}>
+      <div className="mb-1 flex items-center justify-between text-[11px] font-semibold">
+        <span className="uppercase tracking-wider">Atividade · {label}</span>
+      </div>
+      <ActivityBar caption="Volume" ratio={vol} thin={thin} high={high} />
+      {rng != null && (
+        <div className="mt-1">
+          <ActivityBar caption="Candles" ratio={rng} thin={thin} high={high} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One labelled bar: fills proportional to ratio (100% mark = normal session). */
+function ActivityBar({
+  caption,
+  ratio,
+  thin,
+  high,
+}: {
+  caption: string;
+  ratio: number;
+  thin: boolean;
+  high: boolean;
+}) {
+  // Cap at 200% so a spike doesn't blow out the bar.
+  const fillPct = Math.min(100, (ratio / 2) * 100);
+  const barColor = thin ? "bg-rose-500/80" : high ? "bg-emerald-500/80" : "bg-zinc-500/80";
+  return (
+    <div>
+      <div className="flex items-center justify-between text-[10px] tabular-nums text-zinc-400">
+        <span>{caption}</span>
+        <span>{Math.round(ratio * 100)}% do normal</span>
+      </div>
+      <div className="relative mt-0.5 h-1.5 w-full overflow-hidden rounded bg-zinc-800">
+        <div
+          className={cn("h-full transition-[width] duration-500", barColor)}
+          style={{ width: `${fillPct}%` }}
+        />
+        <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-zinc-950/70" />
+      </div>
     </div>
   );
 }

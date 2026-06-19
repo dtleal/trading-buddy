@@ -23,7 +23,10 @@ IMPACT_MAP: dict[str, ImpactLevel] = {
     "high": ImpactLevel.HIGH,
     "medium": ImpactLevel.MEDIUM,
     "low": ImpactLevel.LOW,
-    "holiday": ImpactLevel.LOW,
+    # Keep holidays as their own tier — a bank holiday is the single strongest
+    # "thin session" signal for index/gold CFDs. Squashing it to LOW (the feed's
+    # own taxonomy) threw that signal away. The day-outlook assessor reads it.
+    "holiday": ImpactLevel.HOLIDAY,
 }
 
 
@@ -92,11 +95,20 @@ class ForexFactoryCalendarGateway:
             if not (title and date_node and time_node and impact_node):
                 continue
 
+            impact = IMPACT_MAP.get(impact_node.text.strip().lower(), ImpactLevel.LOW)
+
             scheduled = _parse_event_datetime(date_node.text.strip(), time_node.text.strip())
+            if scheduled is None and impact is ImpactLevel.HOLIDAY:
+                # Holidays are often published as "All Day" (no clock time). They
+                # are the most important event to surface, so anchor them to the
+                # feed date at 00:00 UTC instead of dropping them.
+                try:
+                    holiday_date = datetime.strptime(date_node.text.strip(), "%m-%d-%Y")
+                    scheduled = holiday_date.replace(tzinfo=timezone.utc)
+                except ValueError:
+                    scheduled = None
             if scheduled is None or scheduled.date() != day:
                 continue
-
-            impact = IMPACT_MAP.get(impact_node.text.strip().lower(), ImpactLevel.LOW)
             events.append(
                 EconomicEvent(
                     name=title.text.strip(),

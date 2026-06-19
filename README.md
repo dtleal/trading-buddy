@@ -109,6 +109,33 @@ SHORT mirrors that. LATERAL bias (40 < score < 60) is hard-rejected.
 The heuristic is conservative by design — **false negatives over false
 positives**. The panel will be silent most of the day.
 
+### Perfil do Dia — movement-potential / liquidity gate (dashboard + push)
+
+A banner at the top of the dashboard answers one question: **does today promise
+real movement, or is it a thin/chop trap** (the kind of day where a few opening
+candles move, then participation collapses and offsetting candles bleed the
+account). It produces a 0-100 **movement-potential** score and a discrete regime
+— `EXPANSÃO` / `NORMAL` / `FRACO` — recomputed **every 5-minute tick**, so it is
+dynamic and can change through the session.
+
+Inputs combine structural signals (known at/near the open) with live MT5 data:
+- **Bank holiday** in USD (ForexFactory) — the strongest thin-session signal;
+  index cash markets are closed so CFD liquidity craters.
+- **Scheduled high-impact catalysts** today (and whether any is still upcoming).
+- **VIX regime** (compressed vol → smaller ranges; high vol → bigger).
+- **Opening-range compression** vs ATR (skipped on holidays — index bars stale).
+- **MT5 activity** (when the collector feeds it): today's tick **volume** and
+  session **range** vs the same-time-of-day median of the trailing ~20 sessions.
+  The *worse* of the two drives the verdict.
+
+Each flow column also carries a per-asset **activity gauge** above its pressure
+bar: a real-time candle-size + volume read straight off the live footprint (no
+baseline needed, fills the instant flow arrives), with the "% do normal" layer
+added once the collector's baseline is in. See `collector/README.md`.
+
+The verdict is pushed to your phone once per day (and again if the regime
+genuinely changes mid-session) — see [phone push](#phone-push-notifications-ntfysh).
+
 ### LLM features (need `CLAUDE_API_KEY`)
 
 - `dtb brief` — pre-market briefing in PT-BR via Claude Opus 4.7.
@@ -221,6 +248,8 @@ Protocol interfaces in `core/interfaces.py`.
 | `compute_combined_bias` | Weighted sum → final bias score + ALTA/BAIXA/LATERAL label. |
 | `compute_intraday_levels` | Pure function: bars → HOD/LOD/VWAP/OR/PDH/EMAs/ATR/swings. |
 | `detect_trade_setup` | Pure heuristic: levels + bias → `TradeSetup` or `None`. |
+| `assess_day_outlook` | Pure gate: calendar + VIX + opening range + MT5 activity → `DayOutlook` (score/regime). |
+| `aggregate_orderflow` | Rolling DOM/footprint/tape state + real-time `LiveActivity` per symbol. |
 | `generate_briefing` / `explain_event` | LLM use cases (Claude). |
 
 ## Make targets
@@ -441,6 +470,10 @@ Title: `↑ USTEC 15m @ 29654.30` (or `↓` for breakdowns)
 Body: `Nivel rompido: 29635.24 | Expansao: 1.34x ATR | Strength: 74/100 | Bar: 18:35 UTC`
 Tags: arrow + asset name (emoji rendering on iOS / Android)
 Priority: 2-5 based on strength (5 = urgent on iOS, bypasses Do Not Disturb)
+
+You also get a **Perfil do Dia** push (see above) when the day is unusually thin
+or expansive: e.g. `⚠️ Dia FRACO · potencial 5/100` with the reasons in the body.
+Sent at most once per day per regime — silent on ordinary (`NORMAL`) days.
 
 ### Dedup
 

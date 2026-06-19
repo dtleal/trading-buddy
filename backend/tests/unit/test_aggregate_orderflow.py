@@ -30,6 +30,42 @@ def _trade(price: float, volume: float, side: str, second: int) -> TapeTrade:
     )
 
 
+def _trade_at(minute: int, second: int, price: float, volume: float, side: str) -> TapeTrade:
+    return TapeTrade(
+        symbol=AssetSymbol.USTEC,
+        at=datetime(2026, 6, 9, 14, minute, second, tzinfo=timezone.utc),
+        price=price,
+        volume=volume,
+        side=side,  # type: ignore[arg-type]
+    )
+
+
+def test_live_activity_from_footprint() -> None:
+    """Live activity samples completed bars: range = traded high−low, volume =
+    bar total. The in-progress (latest) bar is excluded when others exist."""
+    agg = _agg()
+    # Bar 14:00 — traded 100..102 (range 2), total vol 3+0=3 (two sells).
+    agg.ingest_trade(_trade_at(0, 1, 100.0, 1.0, "sell"))
+    agg.ingest_trade(_trade_at(0, 2, 102.0, 2.0, "sell"))
+    # Bar 14:01 — traded 100..101 (range 1), total vol 4.
+    agg.ingest_trade(_trade_at(1, 1, 100.0, 1.0, "buy"))
+    agg.ingest_trade(_trade_at(1, 2, 101.0, 3.0, "buy"))
+    # Bar 14:02 — in-progress, should be EXCLUDED from the sample.
+    snap = agg.ingest_trade(_trade_at(2, 1, 100.0, 99.0, "buy"))
+
+    la = snap.live_activity
+    assert la is not None
+    assert la.sampled_bars == 2  # the two completed bars, not the in-progress one
+    assert la.range_per_bar == 1.5  # median of [2.0, 1.0]
+    assert la.volume_per_bar == 3.5  # median of [3.0, 4.0]
+    assert la.interval_seconds == 60
+
+
+def test_live_activity_none_without_data() -> None:
+    agg = _agg()
+    assert agg.snapshot(AssetSymbol.USTEC).live_activity is None
+
+
 def test_tracks_only_configured_symbols() -> None:
     agg = _agg(symbols=[AssetSymbol.GOLD])
     assert agg.tracks(AssetSymbol.GOLD)

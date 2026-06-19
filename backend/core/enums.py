@@ -23,11 +23,33 @@ class VolatilityIndex(str, Enum):
 
 
 class ImpactLevel(str, Enum):
-    """Economic-event impact tier (matches ForexFactory taxonomy)."""
+    """Economic-event impact tier (matches ForexFactory taxonomy).
+
+    `HOLIDAY` is a distinct tier (not a low-impact release): a bank holiday in
+    the event's currency means the underlying cash market is closed or on a
+    half-day, so index/gold CFD liquidity craters. The day-outlook assessor
+    treats it as the strongest "thin session" signal, so we must NOT squash it
+    into LOW the way the feed's own taxonomy implies.
+    """
 
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
+    HOLIDAY = "holiday"
+
+
+class DayRegime(str, Enum):
+    """How much movement the session is expected to offer.
+
+    Derived by `AssessDayOutlookUseCase` from a 0-100 movement-potential score.
+    The trader uses it as a go/no-go gate: `THIN` days (holiday, no catalyst,
+    collapsing volume) are the chop sessions where offsetting candles eat
+    accounts; `EXPANSION` days carry a catalyst and live participation.
+    """
+
+    EXPANSION = "expansion"  # high movement potential — catalyst + liquidity
+    NORMAL = "normal"  # ordinary session
+    THIN = "thin"  # low participation / chop risk — trade small or stay out
 
 
 class BiasLevel(str, Enum):

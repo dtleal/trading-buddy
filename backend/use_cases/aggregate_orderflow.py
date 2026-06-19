@@ -23,11 +23,13 @@ from __future__ import annotations
 
 from collections import OrderedDict, deque
 from datetime import datetime, timezone
+from statistics import median
 
 from core.enums import AssetSymbol
 from core.models import (
     FootprintBar,
     FootprintCell,
+    LiveActivity,
     OrderBookSnapshot,
     OrderFlowSnapshot,
     TapeTrade,
@@ -64,11 +66,14 @@ class OrderFlowAggregator:
         footprint_interval_seconds: int = 60,
         footprint_bars: int = 30,
         tape_maxlen: int = 200,
+        activity_window: int = 5,
     ) -> None:
         self._symbols = set(symbols)
         self._interval = footprint_interval_seconds
         self._max_bars = footprint_bars
         self._tape_maxlen = tape_maxlen
+        # How many recent *completed* bars feed the live-activity medians.
+        self._activity_window = activity_window
 
         self._books: dict[AssetSymbol, OrderBookSnapshot] = {}
         self._tapes: dict[AssetSymbol, deque[TapeTrade]] = {
@@ -167,6 +172,7 @@ class OrderFlowAggregator:
             book=book,
             recent_trades=tape,
             footprint=footprint,
+            live_activity=self._build_live_activity(symbol),
         )
 
     def all_snapshots(self) -> list[OrderFlowSnapshot]:
@@ -176,6 +182,41 @@ class OrderFlowAggregator:
             if symbol in self._books or self._tapes.get(symbol):
                 out.append(self.snapshot(symbol))
         return out
+
+    def _build_live_activity(self, symbol: AssetSymbol) -> LiveActivity | None:
+        """Real-time candle-size + volume read from the live footprint.
+
+        Samples the last `_activity_window` *completed* bars (the most recent
+        bucket is still in progress, so its range/volume is partial — exclude it
+        when there's more than one). Range is the bar's traded high−low (top
+        minus bottom price cell); volume is the exact bar total. No baseline
+        needed, so this fills the instant flow arrives; the collector's
+        `SessionLiquidity` ratio layers "vs normal" on top when available.
+        """
+        bars = self._footprints.get(symbol)
+        if not bars:
+            return None
+        items = list(bars.values())
+        completed = items[:-1] if len(items) > 1 else items
+        sample = completed[-self._activity_window :]
+        if not sample:
+            return None
+        ranges: list[float] = []
+        volumes: list[float] = []
+        for bar in sample:
+            cells = bar["cells"]
+            if cells:
+                prices = cells.keys()
+                ranges.append(max(prices) - min(prices))
+            else:
+                ranges.append(0.0)
+            volumes.append(bar["bid"] + bar["ask"])
+        return LiveActivity(
+            range_per_bar=float(median(ranges)),
+            volume_per_bar=float(median(volumes)),
+            interval_seconds=self._interval,
+            sampled_bars=len(sample),
+        )
 
     def _build_footprint(self, symbol: AssetSymbol) -> list[FootprintBar]:
         bars = self._footprints.get(symbol)

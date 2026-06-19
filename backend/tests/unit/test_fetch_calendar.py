@@ -23,6 +23,26 @@ async def test_filters_by_minimum_impact(economic_events, now) -> None:
 
 
 @pytest.mark.asyncio
+async def test_holiday_always_survives_impact_filter(now) -> None:
+    """A bank holiday must reach the day-outlook gate even at a HIGH floor —
+    it is the strongest thin-session signal, not a low-impact release."""
+    from core.models import EconomicEvent
+
+    today = now.date()
+    holiday = EconomicEvent(
+        name="Bank Holiday",
+        currency="USD",
+        impact=ImpactLevel.HOLIDAY,
+        scheduled_at=now,
+    )
+    gw = FakeCalendarGateway(events_by_day={today: [holiday]})
+    uc = FetchEconomicCalendarUseCase(calendar=gw, cache=InMemoryCache())
+
+    result = await uc.execute(day=today, min_impact=ImpactLevel.HIGH)
+    assert [e.name for e in result] == ["Bank Holiday"]
+
+
+@pytest.mark.asyncio
 async def test_sorts_by_scheduled_at(economic_events, now) -> None:
     today = now.date()
     reversed_events = list(reversed(economic_events))

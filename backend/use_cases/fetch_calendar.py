@@ -55,5 +55,10 @@ class FetchEconomicCalendarUseCase:
 
 
 def _impact_at_least(actual: ImpactLevel, minimum: ImpactLevel) -> bool:
+    # Holidays are not a low-impact release — they are the day-outlook gate's
+    # strongest "thin session" signal, so they always pass the impact floor
+    # regardless of `minimum` (and would otherwise KeyError below).
+    if actual is ImpactLevel.HOLIDAY:
+        return True
     order = {ImpactLevel.LOW: 0, ImpactLevel.MEDIUM: 1, ImpactLevel.HIGH: 2}
     return order[actual] >= order[minimum]

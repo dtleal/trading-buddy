@@ -31,7 +31,7 @@ import json
 import logging
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 try:
@@ -64,6 +64,10 @@ def _load_config(path: str) -> dict[str, Any]:
         cfg = json.load(fh)
     cfg.setdefault("poll_interval_ms", 250)
     cfg.setdefault("book_depth", 10)
+    # Day-outlook liquidity gauge: how many prior sessions feed the baseline,
+    # and how often (seconds) we recompute + push the reading. 0 disables it.
+    cfg.setdefault("liquidity_baseline_days", 20)
+    cfg.setdefault("liquidity_poll_seconds", 60)
     if not cfg.get("backend_ws_url"):
         raise SystemExit("config: 'backend_ws_url' is required")
     if not cfg.get("symbols"):
@@ -250,6 +254,102 @@ def _read_trades(
     return out, high
 
 
+def _median(values: list[float]) -> float | None:
+    """Median of a non-empty list, else None."""
+    if not values:
+        return None
+    s = sorted(values)
+    mid = len(s) // 2
+    return s[mid] if len(s) % 2 else (s[mid - 1] + s[mid]) / 2.0
+
+
+def _read_session_liquidity(
+    backend: str, broker: str, baseline_days: int
+) -> dict[str, Any] | None:
+    """Compare today's session activity to the same-time-of-day baseline.
+
+    Pulls M5 candles covering the last `baseline_days`+ sessions via
+    `copy_rates_range`, buckets them by calendar date, and for each date measures
+    activity up to the *same point in the session* as today's latest bar:
+
+      - **volume**: cumulative tick volume (participation).
+      - **range** : session travel so far (max high − min low) — this is the
+        "candles minúsculos, preço não anda" signal; it reads tiny when the
+        market is locked up even if a few ticks still print.
+
+    Each is divided by the median of the prior sessions' same-cutoff value, so a
+    ratio < 1 means today is thinner / quieter than usual. Both come from the MT5
+    candles the collector already fetches — no yfinance, works on holidays when
+    the cash index is closed but the CFD still prints.
+
+    NOTE ON TIMEZONES: MT5 returns bar times in the broker's *server* clock, not
+    UTC. We never convert — the date/minute-of-day bucketing is internally
+    consistent across today and the baseline days, which is all the ratio needs.
+    Returns None when there isn't enough history yet.
+    """
+    if mt5 is None:
+        return None
+    # ~ (baseline_days + 4) calendar days back to absorb weekends/holidays and
+    # still land `baseline_days` sessions with data.
+    span = timedelta(days=baseline_days + 4)
+    to_dt = datetime.now(timezone.utc)
+    from_dt = to_dt - span
+    rates = mt5.copy_rates_range(broker, mt5.TIMEFRAME_M5, from_dt, to_dt)
+    if rates is None or len(rates) == 0:
+        return None
+
+    # Bucket bars by (server-clock) date. Each entry: (minute_of_day, vol, high, low).
+    by_date: dict[Any, list[tuple[int, float, float, float]]] = {}
+    for r in rates:
+        bar_dt = datetime.fromtimestamp(int(r["time"]), tz=timezone.utc)
+        minute_of_day = bar_dt.hour * 60 + bar_dt.minute
+        by_date.setdefault(bar_dt.date(), []).append(
+            (minute_of_day, float(r["tick_volume"]), float(r["high"]), float(r["low"]))
+        )
+    if len(by_date) < 2:
+        return None
+
+    dates = sorted(by_date.keys())
+    today = dates[-1]
+    # Cut every day off at the same point as today's most-recent bar.
+    cutoff = max(m for m, _, _, _ in by_date[today])
+
+    def _vol(day: Any) -> float:
+        return sum(v for m, v, _, _ in by_date[day] if m <= cutoff)
+
+    def _range(day: Any) -> float:
+        bars = [(hi, lo) for m, _, hi, lo in by_date[day] if m <= cutoff]
+        if not bars:
+            return 0.0
+        return max(hi for hi, _ in bars) - min(lo for _, lo in bars)
+
+    realized_vol = _vol(today)
+    realized_range = _range(today)
+    prior_days = dates[:-1][-baseline_days:]
+    vol_samples = [v for v in (_vol(d) for d in prior_days) if v > 0]
+    range_samples = [r for r in (_range(d) for d in prior_days) if r > 0]
+    base_vol = _median(vol_samples)
+    base_range = _median(range_samples)
+    # Volume baseline is mandatory (it's the primary signal); range is a bonus.
+    if not base_vol:
+        return None
+
+    msg: dict[str, Any] = {
+        "type": "liquidity",
+        "symbol": backend,
+        "asof": _now_iso(),
+        "realized_volume": realized_vol,
+        "baseline_volume": base_vol,
+        "ratio": realized_vol / base_vol,
+        "sample_days": len(vol_samples),  # days that actually fed the baseline
+    }
+    if base_range:
+        msg["realized_range"] = realized_range
+        msg["baseline_range"] = base_range
+        msg["range_ratio"] = realized_range / base_range
+    return msg
+
+
 def _quantize(price: float, tick: float | None) -> float:
     """Snap a price to the footprint row grid so a continuous quote feed doesn't
     fragment into thousands of distinct footprint cells. No tick → unchanged."""
@@ -355,6 +455,11 @@ def run(cfg: dict[str, Any]) -> None:
     # per symbol so we can classify the next tick as an up/down move.
     quote_mode = bool(cfg.get("synthesize_trades_from_quotes", False))
     mid: dict[str, float | None] = {m["mt5"]: None for m in cfg["symbols"]}
+    # Liquidity gauge cadence (see _read_session_liquidity). `next_liq_at = 0`
+    # forces a reading on the first poll so the dashboard has a baseline fast.
+    liq_days = int(cfg.get("liquidity_baseline_days", 20))
+    liq_period = float(cfg.get("liquidity_poll_seconds", 60))
+    next_liq_at = 0.0
     # Optional per-symbol footprint row size; falls back to the broker tick size.
     ftick: dict[str, float | None] = {
         m["mt5"]: (m.get("footprint_tick") or _broker_tick(m["mt5"])) for m in cfg["symbols"]
@@ -395,6 +500,22 @@ def run(cfg: dict[str, Any]) -> None:
                     trades, since[broker] = _read_trades(backend, broker, since[broker])
                 if trades:
                     ws.send(json.dumps({"type": "trades", "symbol": backend, "trades": trades}))
+            # Periodically recompute + push the session-liquidity reading that
+            # feeds the backend's day-outlook gate. Throttled (default 60s) —
+            # copy_rates_range over ~3 weeks of M5 bars is heavier than a poll.
+            now_mono = time.monotonic()
+            if liq_period > 0 and liq_days > 0 and now_mono >= next_liq_at:
+                next_liq_at = now_mono + liq_period
+                for liq_sym in cfg["symbols"]:
+                    try:
+                        liq = _read_session_liquidity(
+                            liq_sym["backend"], liq_sym["mt5"], liq_days
+                        )
+                    except Exception as exc:  # never let the gauge break the stream
+                        logger.debug("liquidity read failed for %s: %s", liq_sym["mt5"], exc)
+                        liq = None
+                    if liq:
+                        ws.send(json.dumps(liq))
             time.sleep(poll_s)
         except KeyboardInterrupt:
             logger.info("Stopping (Ctrl-C).")
