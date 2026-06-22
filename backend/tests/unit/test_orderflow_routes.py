@@ -378,6 +378,19 @@ def test_bot_opens_on_explosion(client: TestClient, monkeypatch: pytest.MonkeyPa
     assert cmd["symbol"] == "USTEC" and cmd["side"] == "buy" and cmd["lots"] == 2.0
 
 
+def test_bot_reverses_on_flow_flip(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Holding a buy on USTEC; force a reversal signal → closes that symbol and
+    # stays armed (it re-enters the new side via the normal path once flat).
+    monkeypatch.setattr(of, "should_reverse", lambda snap, side: True)
+    of._bot.enabled = True
+    of._bot.armed = True
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json(_positions_msg(side="buy"))  # held long on USTEC
+        cmd = ws.receive_json()
+    assert cmd["type"] == "close_symbol" and cmd["symbol"] == "USTEC"
+    assert of._bot.armed is True
+
+
 def test_bot_banks_and_rearms_on_profit_target(client: TestClient) -> None:
     of._bot.enabled = True
     of._bot.armed = True

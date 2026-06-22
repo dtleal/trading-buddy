@@ -43,6 +43,10 @@ EXPANSION_MULT = 1.8
 # Continuation-add conviction: a lower bar than the initial burst — we only need
 # the flow to still lean in the held direction (lean = fraction − 0.5) to add.
 ADD_LEAN = 0.10
+# Reversal conviction: how hard the flow must lean AGAINST the held side before
+# we stop-and-reverse (close the losing side). Higher than ADD_LEAN so ordinary
+# chop around neutral doesn't whipsaw us in and out.
+REVERSE_LEAN = 0.20
 
 
 def _buy_fraction(trades: Sequence[TapeTrade]) -> tuple[float, int]:
@@ -116,6 +120,18 @@ def decide_entry(
     return current_side if lean >= ADD_LEAN else None
 
 
+def should_reverse(snapshot: OrderFlowSnapshot, current_side: Direction) -> bool:
+    """True when the flow has flipped strongly AGAINST the held side — the signal
+    to close that side (stop & reverse). Uses REVERSE_LEAN (> ADD_LEAN) so noise
+    around neutral doesn't whipsaw; needs a minimum sample of directional prints.
+    """
+    buy_frac, count = _buy_fraction(snapshot.recent_trades)
+    if count < MIN_PRINTS:
+        return False
+    against = (0.5 - buy_frac) if current_side == "buy" else (buy_frac - 0.5)
+    return against >= REVERSE_LEAN
+
+
 def should_open(
     *,
     direction: Direction | None,
@@ -144,4 +160,4 @@ def should_open(
     return True
 
 
-__all__ = ["detect_explosion", "decide_entry", "should_open", "Direction"]
+__all__ = ["detect_explosion", "decide_entry", "should_reverse", "should_open", "Direction"]

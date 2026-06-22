@@ -267,6 +267,11 @@ so it's gated hardest:
   (tunable thresholds in `use_cases/scalper.py` — noisy on synthesized feeds,
   expect to tune on demo). **Thin sessions are skipped** (no entries when the
   day-outlook liquidity ratio is below ~0.75) to avoid false bursts overnight.
+- **One direction per symbol**: it scales in on the same side while the flow keeps
+  leaning that way (no fresh explosion needed), up to 6 — never opening the
+  opposite side of an open position (no hedge).
+- **Stop & reverse**: when the flow flips hard against the held side, it closes
+  that symbol and re-enters the new direction on the next burst.
 - **Exit** = whole-account close at **+profit_target** (banks the win, then
   **re-arms** to keep scalping — 24h mode) and a hard daily stop at **−loss_stop**
   on the *session* P&L (realized + floating), which closes all and stops for good.

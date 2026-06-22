@@ -41,7 +41,7 @@ from settings import get_settings
 from use_cases.aggregate_orderflow import OrderFlowAggregator
 from use_cases.assess_trade_signals import assess_trade_signals
 from use_cases.autoclose import should_autoclose
-from use_cases.scalper import Direction, decide_entry, should_open
+from use_cases.scalper import Direction, decide_entry, should_open, should_reverse
 
 logger = logging.getLogger(__name__)
 
@@ -316,8 +316,12 @@ class _BotState:
         self.lots: dict[AssetSymbol, float] = {}  # per-symbol size; defaults below
         self.cooldown_until: dict[AssetSymbol, float] = {}
         self.realized: float = 0.0  # banked P&L this session
-        self.flattening: bool = False  # a close-all is settling; pause
+        self.flattening: bool = False  # an account close-all is settling; pause
         self.resume_at: float = 0.0  # monotonic time to resume after flatten
+        # Per-symbol stop-and-reverse in progress → captured P&L to bank once that
+        # symbol is confirmed flat (banked on flat, not at issue, to avoid double
+        # counting against the still-open floating during the close lag).
+        self.closing: dict[AssetSymbol, float] = {}
         self.last_result: str | None = None
 
 
@@ -388,18 +392,42 @@ async def _run_bot(touched: set[AssetSymbol]) -> None:
         await _send_to_collector({"type": "close_all", "reason": _bot.last_result})
         return
 
-    # Entries: only the symbols whose flow just moved, and not in a thin session.
+    # Entries / reversals: only the symbols whose flow just moved.
     for symbol in touched:
         if symbol not in _bot.lots:
             continue
         positions = _positions_store.get(symbol, [])
+
+        # Settling a stop-and-reverse close on this symbol: wait until it's flat,
+        # then bank the captured P&L. Re-entry happens on a later tick.
+        if symbol in _bot.closing:
+            if not positions:
+                _bot.realized += _bot.closing.pop(symbol)
+            continue
+
+        snap = aggregator.snapshot(symbol)
+        current_side = _symbol_side(positions)
+
+        # Stop & reverse: flow flipped hard against the held side → close it now.
+        # Banked on flat (above); re-entry into the new side comes via the normal
+        # explosion path once flat + cooldown.
+        if current_side is not None and should_reverse(snap, current_side):
+            _bot.closing[symbol] = sum(p.profit for p in positions)
+            _bot.cooldown_until[symbol] = now + _bot.cooldown_s
+            _bot.last_result = (
+                f"reversão {symbol.value}: fluxo virou contra {current_side} — fechando"
+            )
+            logger.info("Bot reverse: %s", _bot.last_result)
+            await _send_to_collector({"type": "close_symbol", "symbol": symbol.value})
+            continue
+
         liq = _liquidity_store.get(symbol)
         liquidity_ok = liq is None or liq.ratio >= _THIN_RATIO
         # Direction matching what we already hold (or an explosion when flat);
         # never the opposite side of an open position.
         direction = decide_entry(
-            aggregator.snapshot(symbol),
-            current_side=_symbol_side(positions),
+            snap,
+            current_side=current_side,
             open_on_symbol=len(positions),
         )
         cooldown_ok = now >= _bot.cooldown_until.get(symbol, 0.0)
@@ -717,6 +745,7 @@ async def set_bot(body: BotRequest) -> BotStatus:
             _bot.loss_stop = body.loss_stop
         # Fresh session: clear cooldowns, banked P&L and any settling state.
         _bot.cooldown_until.clear()
+        _bot.closing.clear()
         _bot.realized = 0.0
         _bot.flattening = False
         _bot.resume_at = 0.0

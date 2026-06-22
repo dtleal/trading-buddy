@@ -14,10 +14,12 @@ from use_cases.scalper import (
     ADD_LEAN,
     EXPANSION_MULT,
     MIN_PRINTS,
+    REVERSE_LEAN,
     STRONG_FRACTION,
     decide_entry,
     detect_explosion,
     should_open,
+    should_reverse,
 )
 
 _AT = datetime(2026, 6, 9, 14, 0, 0, tzinfo=timezone.utc)
@@ -120,6 +122,23 @@ def test_decide_entry_stops_adding_when_lean_fades() -> None:
 
 def test_decide_entry_ambiguous_hold_does_not_add() -> None:
     assert decide_entry(_snap(20, 3), current_side=None, open_on_symbol=4) is None
+
+
+def test_should_reverse_on_strong_opposite_flow() -> None:
+    assert REVERSE_LEAN == 0.20  # guard the table
+    # Holding buys, flow flipped hard to sell (against = 0.35) → reverse.
+    assert should_reverse(_snap(3, 17), "buy") is True
+    # Holding sells, flow flipped hard to buy → reverse.
+    assert should_reverse(_snap(17, 3), "sell") is True
+
+
+def test_should_not_reverse_when_flow_still_favors_or_weak() -> None:
+    # Flow still favours the held side → no reverse.
+    assert should_reverse(_snap(17, 3), "buy") is False
+    # Only mildly against (against = 0.05 < REVERSE_LEAN) → no reverse (anti-whipsaw).
+    assert should_reverse(_snap(9, 11), "buy") is False
+    # Too few prints → no reverse.
+    assert should_reverse(_snap(2, 3), "buy") is False
 
 
 def test_should_open_gates() -> None:
