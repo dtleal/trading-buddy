@@ -34,6 +34,7 @@ from core.models import (
 )
 from settings import get_settings
 from use_cases.aggregate_orderflow import OrderFlowAggregator
+from use_cases.assess_trade_signals import assess_trade_signals
 
 logger = logging.getLogger(__name__)
 
@@ -249,6 +250,10 @@ def _stamp_snapshot(snapshot: "OrderFlowSnapshot") -> "OrderFlowSnapshot":
     positions = _positions_store.get(snapshot.symbol)
     if positions:
         update["positions"] = positions
+        # Deterministic in-trade alerts from the current flow lean + positions.
+        signals = assess_trade_signals(snapshot, positions)
+        if signals:
+            update["signals"] = signals
     return snapshot.model_copy(update=update) if update else snapshot
 
 

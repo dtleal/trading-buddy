@@ -471,6 +471,27 @@ class Position(_Frozen):
     seconds_open: float  # time-in-trade at read time (broker-clock delta)
 
 
+class TradeSignal(_Frozen):
+    """A deterministic, in-trade alert about one open position.
+
+    Computed live on each snapshot from the order flow + the position — NO LLM
+    (a model round-trip is far too slow for a scalp that lasts seconds). It is
+    decision support, not advice, and inherits the uncertainty of the flow it
+    reads (synthesized tick-direction on CFD feeds, not real volume).
+
+    - `code` identifies the rule. `severity` drives the UI emphasis. `stance` is
+      the signal's relation to the position (against it / take-profit caution).
+    - `ticket` ties the signal to its position so the UI can place it.
+    """
+
+    symbol: AssetSymbol
+    ticket: int
+    code: Literal["pressure_against", "take_profit"]
+    severity: Literal["info", "warn", "urgent"]
+    stance: Literal["against", "caution", "favor"]
+    message: str
+
+
 class OrderFlowSnapshot(_Frozen):
     """Per-symbol order-flow state broadcast to the frontend.
 
@@ -500,6 +521,9 @@ class OrderFlowSnapshot(_Frozen):
     # when flat. Stamped onto every broadcast so the UI can overlay live P&L and
     # time-in-trade next to the flow.
     positions: list[Position] = Field(default_factory=list)
+    # Deterministic in-trade alerts about the open positions (pressure turning
+    # against you, profit + momentum stalling). Recomputed on every broadcast.
+    signals: list[TradeSignal] = Field(default_factory=list)
 
 
 # -----------------------------------------------------------------------------

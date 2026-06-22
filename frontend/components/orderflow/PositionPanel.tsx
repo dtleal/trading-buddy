@@ -2,7 +2,7 @@
 
 import { fmtPrice } from "@/lib/utils";
 import { cn } from "@/lib/utils";
-import type { Position } from "@/lib/types";
+import type { Position, TradeSignal } from "@/lib/types";
 
 /**
  * Live open-position overlay for one symbol (read-only mirror of MT5). Shows
@@ -15,19 +15,29 @@ import type { Position } from "@/lib/types";
  * if the feed pauses the timer pauses too, which the column's staleness dot
  * already signals.
  */
-export function PositionPanel({ positions }: { positions: Position[] }) {
+export function PositionPanel({
+  positions,
+  signals = [],
+}: {
+  positions: Position[];
+  signals?: TradeSignal[];
+}) {
   if (positions.length === 0) return null;
 
   return (
     <div className="flex flex-col gap-2">
       {positions.map((p) => (
-        <PositionRow key={p.ticket} position={p} />
+        <PositionRow
+          key={p.ticket}
+          position={p}
+          signals={signals.filter((s) => s.ticket === p.ticket)}
+        />
       ))}
     </div>
   );
 }
 
-function PositionRow({ position: p }: { position: Position }) {
+function PositionRow({ position: p, signals }: { position: Position; signals: TradeSignal[] }) {
   const secs = p.seconds_open;
   const long = p.side === "buy";
   const win = p.profit > 0;
@@ -90,6 +100,28 @@ function PositionRow({ position: p }: { position: Position }) {
           )}
         </div>
       )}
+
+      {signals.map((s) => (
+        <SignalChip key={s.code} signal={s} />
+      ))}
+    </div>
+  );
+}
+
+/** Inline alert under a position. Urgent (flow against) pulses red. */
+function SignalChip({ signal }: { signal: TradeSignal }) {
+  const urgent = signal.severity === "urgent";
+  return (
+    <div
+      className={cn(
+        "mt-1 flex items-center gap-1.5 rounded px-1.5 py-1 text-[11px] font-semibold",
+        signal.stance === "against"
+          ? cn("bg-rose-500/15 text-rose-300", urgent && "animate-pulse")
+          : "bg-amber-500/15 text-amber-300",
+      )}
+    >
+      <span aria-hidden>{signal.stance === "against" ? "⚠" : "✋"}</span>
+      <span>{signal.message}</span>
     </div>
   );
 }

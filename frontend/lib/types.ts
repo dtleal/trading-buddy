@@ -292,6 +292,17 @@ export const Position = z.object({
 });
 export type Position = z.infer<typeof Position>;
 
+/** A deterministic in-trade alert about one open position. */
+export const TradeSignal = z.object({
+  symbol: AssetSymbol,
+  ticket: z.number(),
+  code: z.enum(["pressure_against", "take_profit"]),
+  severity: z.enum(["info", "warn", "urgent"]),
+  stance: z.enum(["against", "caution", "favor"]),
+  message: z.string(),
+});
+export type TradeSignal = z.infer<typeof TradeSignal>;
+
 /** One per-symbol order-flow message from /ws/orderflow. */
 export const OrderFlowSnapshot = z.object({
   symbol: AssetSymbol,
@@ -303,6 +314,7 @@ export const OrderFlowSnapshot = z.object({
   liquidity: SessionLiquidity.nullable().default(null),
   live_activity: LiveActivity.nullable().default(null),
   positions: z.array(Position).default([]),
+  signals: z.array(TradeSignal).default([]),
 });
 export type OrderFlowSnapshot = z.infer<typeof OrderFlowSnapshot>;
 

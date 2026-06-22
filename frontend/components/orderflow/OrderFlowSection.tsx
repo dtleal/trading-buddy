@@ -149,7 +149,7 @@ function SymbolColumn({
           <LiquidityChip liquidity={flow.liquidity} live={flow.live_activity} />
           {flow.positions.length > 0 && (
             <FlowBlock title="Posição aberta (MT5)">
-              <PositionPanel positions={flow.positions} />
+              <PositionPanel positions={flow.positions} signals={flow.signals} />
             </FlowBlock>
           )}
           <FlowBlock title="Pressão (compra · venda)">

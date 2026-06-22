@@ -189,6 +189,45 @@ def test_malformed_position_does_not_drop_stream(client: TestClient) -> None:
     assert ustec["positions"] == []
 
 
+def test_signals_stamped_when_flow_turns_against_a_position(client: TestClient) -> None:
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json(_positions_msg(side="buy"))  # long USTEC
+        # A burst of sell-aggressor prints → flow leaning hard against the long.
+        ws.send_json(
+            {
+                "type": "trades",
+                "symbol": "USTEC",
+                "trades": [
+                    {"at": "2026-06-09T14:00:01Z", "price": 100.0, "volume": 1.0, "side": "sell"}
+                    for _ in range(12)
+                ],
+            }
+        )
+    ustec = next(s for s in client.get("/api/orderflow").json() if s["symbol"] == "USTEC")
+    assert len(ustec["signals"]) == 1
+    sig = ustec["signals"][0]
+    assert sig["code"] == "pressure_against"
+    assert sig["stance"] == "against"
+    assert sig["ticket"] == 12345
+
+
+def test_no_signals_without_a_position(client: TestClient) -> None:
+    # Same lopsided flow but flat → no positions, so no signals.
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json(
+            {
+                "type": "trades",
+                "symbol": "USTEC",
+                "trades": [
+                    {"at": "2026-06-09T14:00:01Z", "price": 100.0, "volume": 1.0, "side": "sell"}
+                    for _ in range(12)
+                ],
+            }
+        )
+    ustec = next(s for s in client.get("/api/orderflow").json() if s["symbol"] == "USTEC")
+    assert ustec["signals"] == []
+
+
 def test_ingest_ignores_untracked_symbol(client: TestClient) -> None:
     with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
         ws.send_json(
