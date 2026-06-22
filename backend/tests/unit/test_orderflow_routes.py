@@ -39,7 +39,23 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
 
     app = create_app()
     with TestClient(app) as test_client:
+        # Lifespan wired a real (lazy) bot-trade repo; disable DB writes by
+        # default so tests don't touch Postgres. Recording tests inject a fake.
+        of._bot_trade_repo = None
         yield test_client
+
+
+class _FakeBotTradeRepo:
+    """Captures bot trade records in memory for assertions."""
+
+    def __init__(self) -> None:
+        self.events: list[dict] = []
+
+    async def record(self, **fields) -> None:
+        self.events.append(fields)
+
+    async def list_recent(self, limit: int = 200) -> list:
+        return []
 
 
 def _book_msg() -> dict:
@@ -461,3 +477,58 @@ def test_bot_open_result_recorded(client: TestClient) -> None:
             {"type": "open_result", "ok": True, "symbol": "USTEC", "side": "buy", "ticket": 555}
         )
     assert "555" in (client.get("/api/orderflow/bot").json()["last_result"] or "")
+
+
+def test_bot_open_persisted_to_history(client: TestClient) -> None:
+    repo = _FakeBotTradeRepo()
+    of._bot_trade_repo = repo
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json(
+            {
+                "type": "open_result",
+                "ok": True,
+                "symbol": "USTEC",
+                "side": "sell",
+                "lots": 2.0,
+                "price": 30000.0,
+                "ticket": 777,
+            }
+        )
+    assert len(repo.events) == 1
+    ev = repo.events[0]
+    assert ev["kind"] == "open" and ev["symbol"] == "USTEC" and ev["side"] == "sell"
+    assert ev["lots"] == 2.0 and ev["ticket"] == 777 and ev["price"] == 30000.0
+
+
+def test_bot_failed_open_not_persisted(client: TestClient) -> None:
+    repo = _FakeBotTradeRepo()
+    of._bot_trade_repo = repo
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json(
+            {"type": "open_result", "ok": False, "symbol": "USTEC", "error": "retcode=10027"}
+        )
+    assert repo.events == []
+
+
+def test_bot_close_persisted_to_history(client: TestClient) -> None:
+    repo = _FakeBotTradeRepo()
+    of._bot_trade_repo = repo
+    of._bot.enabled = True
+    of._bot.armed = True
+    of._bot.profit_target = 100.0
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json(_positions_msg(profit=150.0))  # hits target → bot closes all
+        ws.receive_json()  # the close_all command
+    assert any(e["kind"] == "close" and e["reason"] == "target" for e in repo.events)
+
+
+def test_manual_close_not_persisted(client: TestClient) -> None:
+    # The per-asset manual close must NOT land in bot history.
+    repo = _FakeBotTradeRepo()
+    of._bot_trade_repo = repo
+    of._autoclose.enabled = True
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        resp = client.post("/api/orderflow/close/USTEC")
+        ws.receive_json()  # close_symbol command
+    assert resp.status_code == 200
+    assert repo.events == []  # manual close recorded nothing

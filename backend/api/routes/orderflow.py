@@ -30,6 +30,7 @@ from core.enums import AssetSymbol
 from core.models import (
     AutoCloseStatus,
     BotStatus,
+    BotTrade,
     OrderBookLevel,
     OrderBookSnapshot,
     OrderFlowSnapshot,
@@ -335,6 +336,27 @@ _DEFAULT_LOTS: dict[AssetSymbol, float] = {
 _bot = _BotState()
 _bot.lots = dict(_DEFAULT_LOTS)
 
+# Trade-history store for the bot's own executions. Set at app startup (see
+# api/app.py); None in tests/headless unless injected. Recording is best-effort
+# — a DB hiccup must never break the live bot or the ingest stream.
+_bot_trade_repo: Any = None
+
+
+def set_bot_trade_repo(repo: Any) -> None:
+    global _bot_trade_repo
+    _bot_trade_repo = repo
+
+
+async def _record_bot_trade(**fields: Any) -> None:
+    """Persist one bot execution event. Guarded so storage problems are logged
+    and ignored rather than propagated into the trading loop."""
+    if _bot_trade_repo is None:
+        return
+    try:
+        await _bot_trade_repo.record(**fields)
+    except Exception:  # never let persistence break the bot
+        logger.exception("Failed to record bot trade: %r", fields)
+
 
 def _bot_status() -> BotStatus:
     return BotStatus(
@@ -375,6 +397,7 @@ async def _run_bot(touched: set[AssetSymbol]) -> None:
         _bot.realized = session
         _bot.last_result = f"stop diário (sessão {session:.2f}) — fechou tudo e parou"
         logger.warning("Bot daily stop: %s", _bot.last_result)
+        await _record_bot_trade(kind="close", symbol="ALL", pnl=floating, reason="stop")
         await _send_to_collector({"type": "close_all", "reason": _bot.last_result})
         return
 
@@ -389,6 +412,7 @@ async def _run_bot(touched: set[AssetSymbol]) -> None:
             _bot.armed = False
             _bot.last_result = f"meta +{floating:.2f} (sessão {_bot.realized:.2f}) — parou"
         logger.info("Bot exit: %s", _bot.last_result)
+        await _record_bot_trade(kind="close", symbol="ALL", pnl=floating, reason="target")
         await _send_to_collector({"type": "close_all", "reason": _bot.last_result})
         return
 
@@ -412,12 +436,20 @@ async def _run_bot(touched: set[AssetSymbol]) -> None:
         # Banked on flat (above); re-entry into the new side comes via the normal
         # explosion path once flat + cooldown.
         if current_side is not None and should_reverse(snap, current_side):
-            _bot.closing[symbol] = sum(p.profit for p in positions)
+            reverse_pnl = sum(p.profit for p in positions)
+            _bot.closing[symbol] = reverse_pnl
             _bot.cooldown_until[symbol] = now + _bot.cooldown_s
             _bot.last_result = (
                 f"reversão {symbol.value}: fluxo virou contra {current_side} — fechando"
             )
             logger.info("Bot reverse: %s", _bot.last_result)
+            await _record_bot_trade(
+                kind="close",
+                symbol=symbol.value,
+                side=current_side,
+                pnl=reverse_pnl,
+                reason="reverse",
+            )
             await _send_to_collector({"type": "close_symbol", "symbol": symbol.value})
             continue
 
@@ -495,6 +527,15 @@ async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
         sym = msg.get("symbol")
         if ok:
             _bot.last_result = f"abriu {msg.get('side')} {sym} (ticket {msg.get('ticket')})"
+            # Persist the executed open (bot trades only — there is no manual open).
+            await _record_bot_trade(
+                kind="open",
+                symbol=str(sym),
+                side=msg.get("side"),
+                lots=float(msg["lots"]) if msg.get("lots") is not None else None,
+                ticket=int(msg["ticket"]) if msg.get("ticket") is not None else None,
+                price=float(msg["price"]) if msg.get("price") is not None else None,
+            )
         else:
             _bot.last_result = f"falha ao abrir {sym}: {msg.get('error')}"
         logger.info("Bot open result: %s", _bot.last_result)
@@ -757,3 +798,13 @@ async def set_bot(body: BotRequest) -> BotStatus:
     )
     logger.info("Scalper bot %s", "ARMED" if body.armed else "disarmed")
     return _bot_status()
+
+
+@router.get("/api/orderflow/bot/trades", response_model=list[BotTrade], tags=["orderflow"])
+async def get_bot_trades(limit: int = 200) -> list[BotTrade]:
+    """Recent bot executions (newest first) for performance analysis. Only bot
+    trades are recorded — never manual ones."""
+    if _bot_trade_repo is None:
+        return []
+    limit = max(1, min(limit, 1000))
+    return await _bot_trade_repo.list_recent(limit)

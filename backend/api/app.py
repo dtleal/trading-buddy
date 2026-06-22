@@ -14,6 +14,7 @@ from typing import AsyncIterator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from adapters.db_bottrades import PostgresBotTradeRepository
 from adapters.db_qa import PostgresQARepository
 from api.routes import brief as brief_route
 from api.routes import orderflow as orderflow_route
@@ -55,9 +56,16 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     # and reused across requests via the `_qa_repository` dependency.
     qa_repository = PostgresQARepository(dsn=get_settings().postgres_dsn)
     app.state.qa_repository = qa_repository
+    # Bot trade-history store (scalper executions only). Handed to the order-flow
+    # route module, whose ingest handler records opens/closes outside any request.
+    bot_trade_repository = PostgresBotTradeRepository(dsn=get_settings().postgres_dsn)
+    app.state.bot_trade_repository = bot_trade_repository
+    orderflow_route.set_bot_trade_repo(bot_trade_repository)
     try:
         yield
     finally:
+        orderflow_route.set_bot_trade_repo(None)
+        await bot_trade_repository.close()
         await qa_repository.close()
         logger.info("FastAPI shutting down")
 

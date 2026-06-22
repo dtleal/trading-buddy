@@ -627,7 +627,11 @@ def _drain_control(
         result = _open_position(brokers[0], side, lots)
         ok = result is not None and getattr(result, "retcode", None) == mt5.TRADE_RETCODE_DONE
         logger.info("Bot open %s %s %s → ok=%s", side, brokers[0], lots, ok)
+        # Fill price for the trade-history record: prefer the executed deal price.
+        fill_price = float(getattr(result, "price", 0.0) or 0.0) if ok else None
         ws.send(json.dumps({"type": "open_result", "ok": ok, "symbol": backend_sym, "side": side,
+                            "lots": float(lots),
+                            "price": fill_price,
                             "ticket": getattr(result, "order", None) if ok else None,
                             "error": None if ok else f"retcode={getattr(result,'retcode','?')} "
                                                      f"{getattr(result,'comment','')}"}))

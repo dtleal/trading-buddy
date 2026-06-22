@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Float, Index, String, Text, func
+from sqlalchemy import JSON, BigInteger, DateTime, Float, Index, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -107,6 +107,28 @@ class QAEntryRow(Base):
     __table_args__ = (Index("ix_qa_entries_updated_at", "updated_at"),)
 
 
+class BotTradeRow(Base):
+    """Append-only audit log of the scalper bot's own executions (opens and
+    closes). ONLY bot trades land here — manual closes / manual auto-close are
+    never recorded. Kept event-shaped so future performance analysis can pair
+    opens with closes or just aggregate realized `pnl` over closes."""
+
+    __tablename__ = "bot_trades"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String(8), index=True)  # "open" | "close"
+    symbol: Mapped[str] = mapped_column(String(16), index=True)  # or "ALL" for close-all
+    side: Mapped[str | None] = mapped_column(String(8), nullable=True)  # buy/sell
+    lots: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ticket: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    price: Mapped[float | None] = mapped_column(Float, nullable=True)  # fill (open)
+    pnl: Mapped[float | None] = mapped_column(Float, nullable=True)  # realized (close)
+    reason: Mapped[str | None] = mapped_column(String(32), nullable=True)  # target/stop/reverse
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
 __all__ = [
     "Base",
     "MarketSnapshotRow",
@@ -115,4 +137,5 @@ __all__ = [
     "BiasReportRow",
     "LLMOutputRow",
     "QAEntryRow",
+    "BotTradeRow",
 ]

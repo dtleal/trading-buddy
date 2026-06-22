@@ -530,6 +530,22 @@ class BotStatus(_Frozen):
     last_result: str | None = None
 
 
+class BotTrade(_Frozen):
+    """One persisted scalper-bot execution event (open or close). Read model for
+    the trade-history endpoint; only bot trades are ever recorded."""
+
+    id: int
+    kind: Literal["open", "close"]
+    symbol: str
+    side: str | None = None
+    lots: float | None = None
+    ticket: int | None = None
+    price: float | None = None
+    pnl: float | None = None
+    reason: str | None = None
+    created_at: datetime
+
+
 class OrderFlowSnapshot(_Frozen):
     """Per-symbol order-flow state broadcast to the frontend.
 
