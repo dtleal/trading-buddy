@@ -32,6 +32,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     of.aggregator = of._build_aggregator()
     of._positions_store.clear()
     of._liquidity_store.clear()
+    of._autoclose = of._AutoCloseState()
     orderflow_broadcaster._latest.clear()
 
     app = create_app()
@@ -242,3 +243,89 @@ def test_ingest_ignores_untracked_symbol(client: TestClient) -> None:
         )
     snaps = client.get("/api/orderflow").json()
     assert all(s["symbol"] != "BITCOIN" for s in snaps)
+
+
+# --- auto-close + manual close ----------------------------------------------
+
+
+def test_autoclose_status_defaults(client: TestClient) -> None:
+    st = client.get("/api/orderflow/autoclose").json()
+    assert st["enabled"] is False and st["armed"] is False and st["target_usd"] is None
+
+
+def test_hello_sets_execution_capability(client: TestClient) -> None:
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json({"type": "hello", "source": "FTMO", "auto_close_enabled": True})
+    assert client.get("/api/orderflow/autoclose").json()["enabled"] is True
+
+
+def test_arm_refused_when_collector_cannot_execute(client: TestClient) -> None:
+    of._autoclose.enabled = False
+    resp = client.post("/api/orderflow/autoclose", json={"armed": True, "target_usd": 100.0})
+    assert resp.status_code == 409
+
+
+def test_arm_refused_with_non_positive_target(client: TestClient) -> None:
+    of._autoclose.enabled = True
+    resp = client.post("/api/orderflow/autoclose", json={"armed": True, "target_usd": 0.0})
+    assert resp.status_code == 422
+
+
+def test_arm_and_disarm(client: TestClient) -> None:
+    of._autoclose.enabled = True
+    armed = client.post(
+        "/api/orderflow/autoclose", json={"armed": True, "target_usd": 250.0}
+    ).json()
+    assert armed["armed"] is True and armed["target_usd"] == 250.0
+    disarmed = client.post("/api/orderflow/autoclose", json={"armed": False}).json()
+    assert disarmed["armed"] is False
+
+
+def test_autoclose_fires_close_all_over_target(client: TestClient) -> None:
+    of._autoclose.enabled = True
+    of._autoclose.armed = True
+    of._autoclose.target_usd = 100.0
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json(_positions_msg(profit=150.0))  # whole-account P&L over target
+        cmd = ws.receive_json()
+    assert cmd["type"] == "close_all"
+    assert of._autoclose.armed is False  # one-shot
+
+
+def test_autoclose_does_not_fire_under_target(client: TestClient) -> None:
+    of._autoclose.enabled = True
+    of._autoclose.armed = True
+    of._autoclose.target_usd = 100.0
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json(_positions_msg(profit=40.0))
+    assert of._autoclose.armed is True  # still armed, never fired
+
+
+def test_manual_close_symbol_sends_command(client: TestClient) -> None:
+    of._autoclose.enabled = True
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        resp = client.post("/api/orderflow/close/USTEC")
+        cmd = ws.receive_json()
+    assert resp.status_code == 200
+    assert cmd["type"] == "close_symbol" and cmd["symbol"] == "USTEC"
+
+
+def test_manual_close_refused_when_not_enabled(client: TestClient) -> None:
+    of._autoclose.enabled = False
+    assert client.post("/api/orderflow/close/USTEC").status_code == 409
+
+
+def test_manual_close_unknown_symbol(client: TestClient) -> None:
+    of._autoclose.enabled = True
+    assert client.post("/api/orderflow/close/DOGE").status_code == 404
+
+
+def test_manual_close_without_collector_connected(client: TestClient) -> None:
+    of._autoclose.enabled = True  # capable, but no live socket
+    assert client.post("/api/orderflow/close/USTEC").status_code == 503
+
+
+def test_autoclose_result_recorded(client: TestClient) -> None:
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json({"type": "autoclose_result", "ok": True, "closed": 2})
+    assert "2" in (client.get("/api/orderflow/autoclose").json()["last_result"] or "")

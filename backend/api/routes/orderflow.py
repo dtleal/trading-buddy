@@ -16,15 +16,18 @@ the channel is fully configured before the first collector connects.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, status
+from pydantic import BaseModel
 
 from api.orderflow_broadcaster import orderflow_broadcaster
 from core.enums import AssetSymbol
 from core.models import (
+    AutoCloseStatus,
     OrderBookLevel,
     OrderBookSnapshot,
     OrderFlowSnapshot,
@@ -35,6 +38,7 @@ from core.models import (
 from settings import get_settings
 from use_cases.aggregate_orderflow import OrderFlowAggregator
 from use_cases.assess_trade_signals import assess_trade_signals
+from use_cases.autoclose import should_autoclose
 
 logger = logging.getLogger(__name__)
 
@@ -194,17 +198,106 @@ def _parse_trade(msg: dict[str, Any], symbol: AssetSymbol) -> TapeTrade:
 _current_source: str | None = None
 
 
+class _AutoCloseState:
+    """Mutable whole-account auto-close state. One per process (one collector).
+
+    The collector is the only thing that can execute, so `enabled` mirrors its
+    `allow_auto_close` capability from the `hello` message; arming is refused
+    when the collector can't execute. `armed` is one-shot — cleared on fire.
+    """
+
+    def __init__(self) -> None:
+        self.enabled: bool = False  # collector permits execution (allow_auto_close)
+        self.armed: bool = False
+        self.target_usd: float | None = None
+        self.last_fired_at: datetime | None = None
+        self.last_result: str | None = None
+
+
+_autoclose = _AutoCloseState()
+
+# The live collector ingest socket + a lock, so commands (close_all /
+# close_symbol) can be sent safely from either the ingest receive task or a REST
+# handler task without two coroutines writing the same socket concurrently.
+_collector_ws: WebSocket | None = None
+_collector_send_lock = asyncio.Lock()
+
+
+async def _send_to_collector(payload: dict[str, Any]) -> bool:
+    """Send one command to the connected collector. False if none connected."""
+    async with _collector_send_lock:
+        if _collector_ws is None:
+            return False
+        await _collector_ws.send_json(payload)
+        return True
+
+
+def _open_profit() -> float:
+    """Summed floating P&L across all open positions in every tracked symbol."""
+    return sum(p.profit for ps in _positions_store.values() for p in ps)
+
+
+def _autoclose_status() -> AutoCloseStatus:
+    return AutoCloseStatus(
+        enabled=_autoclose.enabled,
+        armed=_autoclose.armed,
+        target_usd=_autoclose.target_usd,
+        open_profit=_open_profit(),
+        last_fired_at=_autoclose.last_fired_at,
+        last_result=_autoclose.last_result,
+    )
+
+
+async def _maybe_autoclose() -> None:
+    """Fire the profit target if reached: disarm (one-shot) and tell the
+    collector to close everything."""
+    if not _autoclose.armed:
+        return
+    profit = _open_profit()
+    if not should_autoclose(profit, _autoclose.target_usd, _autoclose.armed):
+        return
+    _autoclose.armed = False  # one-shot, regardless of what happens next
+    _autoclose.last_fired_at = datetime.now(timezone.utc)
+    target = _autoclose.target_usd
+    if not _autoclose.enabled:
+        # Armed but the collector can't execute (reconnected without the flag).
+        _autoclose.last_result = "abortado: collector sem allow_auto_close"
+        logger.warning("Auto-close target hit but collector cannot execute")
+        return
+    _autoclose.last_result = f"disparo: P&L {profit:.2f} >= alvo {target:.2f} — fechando tudo"
+    logger.info("Auto-close firing: %s", _autoclose.last_result)
+    await _send_to_collector({"type": "close_all", "reason": _autoclose.last_result})
+
+
 async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
     """Feed one ingest message into the aggregator. Returns symbols touched."""
     global _current_source
     mtype = msg.get("type")
 
     if mtype == "hello":
-        # Identifies which MT5 terminal (FTMO, ActivTrades, …) is feeding flow.
+        # Identifies which MT5 terminal (FTMO, ActivTrades, …) is feeding flow,
+        # and whether that collector is allowed to execute auto-close orders.
         src = msg.get("source")
         if isinstance(src, str) and src:
             _current_source = src
             logger.info("Order-flow source set: %s", src)
+        _autoclose.enabled = bool(msg.get("auto_close_enabled", False))
+        if not _autoclose.enabled and _autoclose.armed:
+            # Lost execution capability (reconnect without the flag) → disarm.
+            _autoclose.armed = False
+            _autoclose.last_result = "desarmado: collector reconectou sem allow_auto_close"
+        logger.info("Auto-close execution capability: %s", _autoclose.enabled)
+        return set()
+
+    if mtype == "autoclose_result":
+        # The collector reporting the outcome of a close_all it executed.
+        ok = bool(msg.get("ok"))
+        closed = msg.get("closed")
+        err = msg.get("error") or msg.get("errors")
+        _autoclose.last_result = (
+            f"fechado: {closed} posição(ões)" if ok else f"falha ao fechar: {err}"
+        )
+        logger.info("Auto-close result: ok=%s closed=%s err=%s", ok, closed, err)
         return set()
 
     symbol = _parse_symbol(msg.get("symbol"))
@@ -280,7 +373,9 @@ async def ingest_ws(websocket: WebSocket) -> None:
         logger.warning("Order-flow ingest refused: bad token from %s", websocket.client)
         return
 
+    global _collector_ws
     await websocket.accept()
+    _collector_ws = websocket  # latest collector wins; used to send commands back
     logger.info("Order-flow collector connected: %s", websocket.client)
     try:
         while True:
@@ -294,6 +389,9 @@ async def ingest_ws(websocket: WebSocket) -> None:
                 continue
             for symbol in touched:
                 await orderflow_broadcaster.publish(_stamp_snapshot(aggregator.snapshot(symbol)))
+            # Evaluate the profit-target auto-close after each message (cheap; the
+            # P&L only moves on position updates). Disarms itself on fire.
+            await _maybe_autoclose()
     except WebSocketDisconnect:
         logger.info("Order-flow collector disconnected: %s", websocket.client)
     except Exception:
@@ -302,6 +400,11 @@ async def ingest_ws(websocket: WebSocket) -> None:
             await websocket.close(code=1011)
         except Exception:  # pragma: no cover - already closed
             pass
+    finally:
+        # Only clear if we're still the active socket (a newer collector may have
+        # replaced us). Stops commands being sent to a dead connection.
+        if _collector_ws is websocket:
+            _collector_ws = None
 
 
 # --- subscribe (backend → browser) ------------------------------------------
@@ -336,3 +439,67 @@ async def get_orderflow() -> list[OrderFlowSnapshot]:
     if cached:
         return cached
     return [_stamp_snapshot(s) for s in aggregator.all_snapshots()]
+
+
+# --- auto-close (whole-account profit target) --------------------------------
+
+
+class AutoCloseRequest(BaseModel):
+    """Arm/disarm the whole-account profit-target auto-close from the UI."""
+
+    armed: bool
+    target_usd: float | None = None
+
+
+@router.get("/api/orderflow/autoclose", response_model=AutoCloseStatus, tags=["orderflow"])
+async def get_autoclose() -> AutoCloseStatus:
+    return _autoclose_status()
+
+
+@router.post("/api/orderflow/autoclose", response_model=AutoCloseStatus, tags=["orderflow"])
+async def set_autoclose(body: AutoCloseRequest) -> AutoCloseStatus:
+    """Arm or disarm the auto-close.
+
+    Arming requires (a) the collector to permit execution (`allow_auto_close`)
+    and (b) a positive target. Disarming always succeeds — it's the kill switch.
+    """
+    if body.armed:
+        if not _autoclose.enabled:
+            raise HTTPException(
+                status_code=409,
+                detail="O collector não habilitou auto-close (allow_auto_close=true no config.json).",
+            )
+        if body.target_usd is None or body.target_usd <= 0:
+            raise HTTPException(
+                status_code=422, detail="target_usd deve ser um valor positivo para armar."
+            )
+    _autoclose.armed = body.armed
+    _autoclose.target_usd = body.target_usd
+    _autoclose.last_result = (
+        f"armado: alvo {body.target_usd:.2f}" if body.armed else "desarmado pelo usuário"
+    )
+    logger.info("Auto-close %s (target=%s)", "ARMED" if body.armed else "disarmed", body.target_usd)
+    return _autoclose_status()
+
+
+@router.post("/api/orderflow/close/{symbol}", tags=["orderflow"])
+async def close_symbol(symbol: str) -> dict[str, Any]:
+    """Manually close ALL open positions for one symbol (the per-asset button).
+
+    Same execution gate as auto-close: requires the collector to permit it
+    (`allow_auto_close`). Fires immediately; the close result comes back async
+    from the collector and lands in the auto-close status `last_result`.
+    """
+    sym = _parse_symbol(symbol)
+    if sym is None or not aggregator.tracks(sym):
+        raise HTTPException(status_code=404, detail=f"Símbolo não rastreado: {symbol}")
+    if not _autoclose.enabled:
+        raise HTTPException(
+            status_code=409,
+            detail="O collector não habilitou execução (allow_auto_close=true no config.json).",
+        )
+    sent = await _send_to_collector({"type": "close_symbol", "symbol": sym.value})
+    if not sent:
+        raise HTTPException(status_code=503, detail="Collector não conectado.")
+    logger.info("Manual close requested for %s", sym.value)
+    return {"ok": True, "detail": f"Fechamento de {sym.value} enviado ao collector."}

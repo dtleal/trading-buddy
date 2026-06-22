@@ -7,9 +7,11 @@ import { Badge } from "@/components/ui/badge";
 import { BidAskChart } from "./BidAskChart";
 import { PressureGauge } from "./PressureGauge";
 import { PositionPanel } from "./PositionPanel";
+import { AutoCloseControl } from "./AutoCloseControl";
 import { FootprintPanel } from "./FootprintPanel";
 import { TapePanel } from "./TapePanel";
 import { useOrderFlow } from "@/hooks/useOrderFlow";
+import { useAutoClose } from "@/hooks/useAutoClose";
 import { cn } from "@/lib/utils";
 import type { AssetSymbol, LiveActivity, OrderFlowSnapshot, SessionLiquidity } from "@/lib/types";
 
@@ -26,6 +28,8 @@ const FLOW_ASSETS: { key: AssetSymbol; label: string }[] = [
  */
 export function OrderFlowSection() {
   const { flows, status } = useOrderFlow();
+  const { status: autoClose, arm, disarm, closeSymbol } = useAutoClose();
+  const executionEnabled = autoClose?.enabled ?? false;
 
   // Ticking clock so per-symbol staleness is reactive without calling Date.now()
   // during render.
@@ -79,15 +83,19 @@ export function OrderFlowSection() {
           </div>
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="flex flex-col gap-4">
+        <AutoCloseControl status={autoClose} arm={arm} disarm={disarm} />
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
           {FLOW_ASSETS.map((a) => (
             <SymbolColumn
               key={a.key}
               label={a.label}
+              symbol={a.key}
               flow={flows[a.key]}
               now={now}
               status={status}
+              executionEnabled={executionEnabled}
+              onCloseSymbol={closeSymbol}
             />
           ))}
         </div>
@@ -98,14 +106,20 @@ export function OrderFlowSection() {
 
 function SymbolColumn({
   label,
+  symbol,
   flow,
   now,
   status,
+  executionEnabled,
+  onCloseSymbol,
 }: {
   label: string;
+  symbol: AssetSymbol;
   flow: OrderFlowSnapshot | undefined;
   now: number;
   status: "connecting" | "open" | "reconnecting" | "closed";
+  executionEnabled: boolean;
+  onCloseSymbol: (symbol: string) => Promise<void>;
 }) {
   const asof = flow?.asof ? new Date(flow.asof).getTime() : null;
   const ageMs = asof != null && now > 0 ? now - asof : null;
@@ -149,7 +163,14 @@ function SymbolColumn({
           <LiquidityChip liquidity={flow.liquidity} live={flow.live_activity} />
           {flow.positions.length > 0 && (
             <FlowBlock title="Posição aberta (MT5)">
-              <PositionPanel positions={flow.positions} signals={flow.signals} />
+              <PositionPanel
+                label={label}
+                symbol={symbol}
+                positions={flow.positions}
+                signals={flow.signals}
+                executionEnabled={executionEnabled}
+                onCloseAll={onCloseSymbol}
+              />
             </FlowBlock>
           )}
           <FlowBlock title="Pressão (compra · venda)">

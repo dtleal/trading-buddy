@@ -492,6 +492,25 @@ class TradeSignal(_Frozen):
     message: str
 
 
+class AutoCloseStatus(_Frozen):
+    """State of the whole-account profit-target auto-close.
+
+    `enabled` is the collector's capability (its `allow_auto_close` flag, learned
+    from the `hello` message) — the UI can't arm execution unless the local
+    collector also permits it. `armed` + `target_usd` are set from the UI.
+    `open_profit` is the current summed floating P&L across all open positions,
+    so the UI shows progress toward the target. After a fire the rule disarms
+    itself (one-shot) and records `last_result` / `last_fired_at`.
+    """
+
+    enabled: bool = False
+    armed: bool = False
+    target_usd: float | None = None
+    open_profit: float = 0.0
+    last_fired_at: datetime | None = None
+    last_result: str | None = None
+
+
 class OrderFlowSnapshot(_Frozen):
     """Per-symbol order-flow state broadcast to the frontend.
 

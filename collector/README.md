@@ -10,10 +10,15 @@ mid-day and left the chart stuck), so it is no longer trusted as the quote sourc
 
 It also mirrors your **open positions** live (entry, floating P&L, time-in-trade,
 SL/TP) and the backend overlays deterministic **in-trade alerts** on them
-(flow turning against the position; in-profit-but-momentum-stalling). This is
-**read-only** — the collector only *reads* positions, it never places or modifies
-orders. The alerts are decision support, not advice, and on synthesized-tape CFD
-feeds they are a directional proxy (see the data-quality table below).
+(flow turning against the position; in-profit-but-momentum-stalling). The alerts
+are decision support, not advice, and on synthesized-tape CFD feeds they are a
+directional proxy (see the data-quality table below).
+
+**Order execution is OFF by default.** Optionally the collector can *close*
+positions — a whole-account profit-target **auto-close** and a per-asset
+**"fechar tudo"** button in the UI. This is the only path that places orders, and
+it requires an explicit local opt-in (`allow_auto_close: true` in `config.json`)
+**plus** arming/clicking in the UI. See [Auto-close & manual close](#auto-close--manual-close).
 
 This bridge **only reads market data** — it never places orders.
 
@@ -186,6 +191,7 @@ what you are looking at:
 | **Tape / Footprint / Pressure** | **derived** from quote-tick direction when there are no real trade ticks | ⚠️ direction is sound; **"volume" is a tick count, not contracts** |
 | **Open positions** | `mt5.positions_get()` (read-only) | ✅ real (your live entry, P&L, SL/TP, time-in-trade) |
 | **In-trade alerts** | position + flow lean (`pressure_against`, `take_profit`) | ⚠️ deterministic, but only as sound as the synthesized flow it reads — decision support, not advice |
+| **Auto-close / fechar tudo** | `mt5.order_send` (only if `allow_auto_close`) | ✅ real order execution — closes your positions for real |
 
 With quote-tick synthesis the aggressor is inferred by the **tick rule** on the
 mid price: an up-tick is a buy (at the ask), a down-tick is a sell (at the bid),
@@ -208,7 +214,8 @@ For exchange-grade footprint/delta you'd switch the backend to a real CME feed
 | `synthesize_trades_from_quotes` | `true` for feeds with **no** times&trades: builds tape/footprint/pressure from quote-tick direction. `false` only if your broker sends real trade ticks. |
 | `liquidity_baseline_days` | Sessions used for the **day-outlook liquidity gauge** baseline (default `20`). The collector compares today's cumulative tick volume to the median of the prior N sessions at the same time-of-day and pushes the ratio to the backend, which folds it into the "Perfil do Dia" banner/alert. `0` disables. |
 | `liquidity_poll_seconds` | How often (s) to recompute + push that ratio (default `60`). It reads ~3 weeks of M5 bars, so it is throttled well below the tick poll. `0` disables. |
-| `positions_poll_seconds` | How often (s) to read + push your **open positions** for the live P&L / time-in-trade panel and in-trade alerts (default `0.25`). Read-only. `0` disables position reading entirely. |
+| `positions_poll_seconds` | How often (s) to read + push your **open positions** for the live P&L / time-in-trade panel and in-trade alerts (default `0.25`). Reading is always safe. `0` disables position reading entirely. |
+| `allow_auto_close` | **Execution gate** (default `false` = strictly read-only). `true` lets this collector place **closing** orders when the backend profit target fires or you click "fechar tudo". Only enable on a machine/account where you accept automated execution — **test on DEMO first**. Never opens positions. |
 | `symbols[]` | Map each backend symbol to **your broker's exact MT5 name**. `backend` must be one of `USTEC` / `SPX` / `GOLD`. `mt5` is whatever your broker calls it (`US100.cash`, `Usa500`, `XAUUSD`, …). |
 | `symbols[].footprint_tick` | Optional price step used to group footprint rows (e.g. `1.0` for an index ~28000, `0.1` for gold). Omit to auto-derive from the broker tick size. Keeps a continuous quote feed from fragmenting into thousands of cells. |
 | `mt5.sources[]` | Priority list of terminals; each `{name, path}` is tried in order until one attaches. `path` is the `terminal64.exe`. Add `login`/`password`/`server` only to drive a specific account. |
@@ -218,6 +225,37 @@ For exchange-grade footprint/delta you'd switch the backend to a real CME feed
 
 `config.json` holds your ingest token and is **git-ignored** — never commit it.
 `config.example.json` is the committed template.
+
+## Auto-close & manual close
+
+Two ways to close positions from the dashboard. **Both place real orders and are
+off until you opt in.**
+
+- **Whole-account auto-close** — set a USD target in the UI and ARM it. When the
+  *summed floating P&L of all open positions* reaches the target, the backend
+  tells the collector to close everything, **once** (it disarms itself). Built
+  for the "+$500 then it reverted before I could click" case.
+- **Per-asset "fechar tudo"** — a button on each symbol's position panel closes
+  all positions for that symbol on demand (2-click confirm). Handy when you get
+  the "em lucro mas momentum esfriou" alert and want out of just that asset.
+
+**Safety model (defense in depth):**
+
+1. **Local opt-in** — nothing executes unless `allow_auto_close: true` in this
+   `config.json`. With it `false` (default), the backend can fire all it wants
+   and the collector refuses and reports back; the UI shows "execução
+   desabilitada". The collector logs a loud warning on startup when it's `true`.
+2. **UI action** — even enabled, it only fires when you ARM a target / click the
+   button. DESARMAR is an always-available kill switch.
+3. **One-shot** — auto-close disarms the instant it fires; it never loops.
+4. **Close-only** — it only ever *closes* existing positions, never opens.
+5. The brain (the target decision) lives in the backend and is unit-tested; the
+   collector is a thin executor gated by step 1.
+
+**Test on DEMO first.** On a funded/prop account this closes real money, and your
+prop-firm rules on automation are your responsibility. Filling mode is broker
+specific — the collector tries IOC → FOK → RETURN and reports any ticket it
+couldn't close.
 
 ## Enable on the backend
 

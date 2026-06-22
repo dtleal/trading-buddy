@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { fmtPrice } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import type { Position, TradeSignal } from "@/lib/types";
@@ -16,11 +17,19 @@ import type { Position, TradeSignal } from "@/lib/types";
  * already signals.
  */
 export function PositionPanel({
+  label,
+  symbol,
   positions,
   signals = [],
+  executionEnabled = false,
+  onCloseAll,
 }: {
+  label: string;
+  symbol: string;
   positions: Position[];
   signals?: TradeSignal[];
+  executionEnabled?: boolean;
+  onCloseAll?: (symbol: string) => Promise<void>;
 }) {
   if (positions.length === 0) return null;
 
@@ -33,6 +42,56 @@ export function PositionPanel({
           signals={signals.filter((s) => s.ticket === p.ticket)}
         />
       ))}
+      {executionEnabled && onCloseAll && (
+        <CloseAllButton label={label} onConfirm={() => onCloseAll(symbol)} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Per-asset "close everything" button with a 2-click guard: the first click
+ * arms it ("Confirmar?") for a few seconds, the second executes. Fast enough to
+ * react to an alert, but a stray single click never closes real positions.
+ */
+function CloseAllButton({ label, onConfirm }: { label: string; onConfirm: () => Promise<void> }) {
+  const [armed, setArmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleClick() {
+    if (!armed) {
+      setArmed(true);
+      setError(null);
+      setTimeout(() => setArmed(false), 3000);
+      return;
+    }
+    setBusy(true);
+    try {
+      await onConfirm();
+      setArmed(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao fechar.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div>
+      <button
+        onClick={handleClick}
+        disabled={busy}
+        className={cn(
+          "w-full rounded px-2 py-1.5 text-[11px] font-bold uppercase tracking-wider transition-colors disabled:opacity-50",
+          armed
+            ? "animate-pulse bg-rose-600 text-white hover:bg-rose-500"
+            : "bg-rose-500/15 text-rose-300 hover:bg-rose-500/25",
+        )}
+      >
+        {busy ? "Fechando…" : armed ? `Confirmar — fechar tudo de ${label}?` : `Fechar tudo · ${label}`}
+      </button>
+      {error && <div className="mt-1 text-[10px] text-rose-400">{error}</div>}
     </div>
   );
 }

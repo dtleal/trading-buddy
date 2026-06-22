@@ -321,6 +321,17 @@ export type OrderFlowSnapshot = z.infer<typeof OrderFlowSnapshot>;
 /** Response from GET /api/orderflow. */
 export const OrderFlowList = z.array(OrderFlowSnapshot);
 
+/** State of the whole-account profit-target auto-close (/api/orderflow/autoclose). */
+export const AutoCloseStatus = z.object({
+  enabled: z.boolean(), // collector permits execution (allow_auto_close)
+  armed: z.boolean(),
+  target_usd: z.number().nullable().default(null),
+  open_profit: z.number(),
+  last_fired_at: z.string().nullable().default(null),
+  last_result: z.string().nullable().default(null),
+});
+export type AutoCloseStatus = z.infer<typeof AutoCloseStatus>;
+
 /** Response from /api/vix/history. */
 export const VixHistoryResponse = z.object({
   symbol: z.string(),

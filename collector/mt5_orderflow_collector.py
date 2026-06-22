@@ -72,6 +72,10 @@ def _load_config(path: str) -> dict[str, Any]:
     # refresh fast but throttle below the tick poll to avoid flooding. 0 disables
     # reading positions entirely.
     cfg.setdefault("positions_poll_seconds", 0.25)
+    # Auto-close EXECUTION gate. False = strictly read-only (default): even if the
+    # backend fires the profit target, the collector refuses to send orders. Must
+    # be set true ON THIS MACHINE to allow closing positions automatically.
+    cfg.setdefault("allow_auto_close", False)
     if not cfg.get("backend_ws_url"):
         raise SystemExit("config: 'backend_ws_url' is required")
     if not cfg.get("symbols"):
@@ -301,6 +305,63 @@ def _read_positions(
     return out
 
 
+def _close_position(p) -> Any:
+    """Send a market order that closes one open position. Returns the MT5
+    order_send result (or None). Tries the common filling modes in turn because
+    the accepted one is broker-specific (CFD brokers often reject the default)."""
+    tick = mt5.symbol_info_tick(p.symbol)
+    if p.type == mt5.POSITION_TYPE_BUY:
+        order_type, price = mt5.ORDER_TYPE_SELL, float(getattr(tick, "bid", 0.0) or 0.0)
+    else:
+        order_type, price = mt5.ORDER_TYPE_BUY, float(getattr(tick, "ask", 0.0) or 0.0)
+    base = {
+        "action": mt5.TRADE_ACTION_DEAL,
+        "symbol": p.symbol,
+        "volume": float(p.volume),
+        "type": order_type,
+        "position": int(p.ticket),
+        "price": price,
+        "deviation": 50,
+        "comment": "trading-buddy autoclose",
+        "type_time": mt5.ORDER_TIME_GTC,
+    }
+    result = None
+    for filling in (mt5.ORDER_FILLING_IOC, mt5.ORDER_FILLING_FOK, mt5.ORDER_FILLING_RETURN):
+        result = mt5.order_send({**base, "type_filling": filling})
+        if result is not None and result.retcode == mt5.TRADE_RETCODE_DONE:
+            return result
+        # Only a bad filling mode is worth retrying; any other failure is final.
+        if result is not None and result.retcode != mt5.TRADE_RETCODE_INVALID_FILL:
+            return result
+    return result
+
+
+def _close_all_positions(broker_symbols: set[str] | None = None) -> dict[str, Any]:
+    """Close open positions (fresh read). With `broker_symbols`, only those MT5
+    symbols are closed (the per-asset button); None closes everything (the
+    profit-target auto-close). Returns a result summary the backend records and
+    shows in the UI. Best-effort: keeps going past a failure and reports which
+    tickets could not be closed."""
+    raw = mt5.positions_get()
+    if raw is None:
+        return {"ok": False, "closed": 0, "error": "positions_get() retornou None"}
+    closed = 0
+    errors: list[str] = []
+    for p in raw:
+        if broker_symbols is not None and p.symbol not in broker_symbols:
+            continue
+        result = _close_position(p)
+        if result is not None and getattr(result, "retcode", None) == mt5.TRADE_RETCODE_DONE:
+            closed += 1
+            logger.info("Auto-close: closed %s #%s", p.symbol, p.ticket)
+        else:
+            rc = getattr(result, "retcode", "?")
+            cm = getattr(result, "comment", "")
+            errors.append(f"{p.symbol}#{p.ticket}: retcode={rc} {cm}")
+            logger.warning("Auto-close FAILED for %s #%s: retcode=%s %s", p.symbol, p.ticket, rc, cm)
+    return {"ok": not errors, "closed": closed, "errors": errors}
+
+
 def _median(values: list[float]) -> float | None:
     """Median of a non-empty list, else None."""
     if not values:
@@ -471,20 +532,56 @@ def _connect_backend(url: str, token: str):
     return ws
 
 
-def _drain_control(ws) -> None:
-    """Answer the backend's keepalive pings.
+def _drain_control(ws, allow_auto_close: bool, broker_to_backend: dict[str, str]) -> None:
+    """Answer the backend's keepalive pings AND handle control commands.
 
-    The collector is send-only, but websocket-client only emits the protocol
-    PONG for a server PING while inside recv(). Without this periodic drain the
-    backend sees an unresponsive peer and drops the ingest socket as idle every
-    ~30-50s (WinError 10053), causing visible gaps in the dashboard. A timeout
-    here just means "no frame waiting" — anything else (e.g. a real close) is
-    re-raised so the outer loop reconnects.
+    The collector is mostly send-only, but websocket-client only emits the
+    protocol PONG for a server PING while inside recv(). Without this periodic
+    drain the backend sees an unresponsive peer and drops the ingest socket as
+    idle every ~30-50s (WinError 10053), causing visible gaps in the dashboard.
+    A timeout here just means "no frame waiting".
+
+    The backend sends two commands down this socket: `close_all` (the profit
+    target fired) and `close_symbol` (the per-asset button). Both execute ONLY
+    when this machine opted in via `allow_auto_close`; otherwise we refuse and
+    report back, so the UI never shows a phantom "fired" with nothing closed.
+    Any non-timeout socket error propagates so the outer loop reconnects.
     """
     try:
-        ws.recv()
+        raw = ws.recv()
     except websocket.WebSocketTimeoutException:
-        pass
+        return
+    if not raw:
+        return
+    try:
+        cmd = json.loads(raw)
+    except (ValueError, TypeError):
+        return
+    if not isinstance(cmd, dict) or cmd.get("type") not in ("close_all", "close_symbol"):
+        return
+
+    ctype = cmd["type"]
+    # Resolve which broker symbols to close. close_all → everything (None).
+    # close_symbol → the broker symbols mapping to the requested backend symbol.
+    target_brokers: set[str] | None
+    if ctype == "close_symbol":
+        backend_sym = cmd.get("symbol")
+        target_brokers = {b for b, be in broker_to_backend.items() if be == backend_sym}
+        if not target_brokers:
+            ws.send(json.dumps({"type": "autoclose_result", "ok": False, "closed": 0,
+                                "error": f"símbolo desconhecido: {backend_sym}"}))
+            return
+    else:
+        target_brokers = None
+
+    logger.info("Received %s from backend: %s", ctype, cmd.get("reason", cmd.get("symbol", "")))
+    if not allow_auto_close:
+        logger.warning("Refusing %s: allow_auto_close is false on this collector", ctype)
+        ws.send(json.dumps({"type": "autoclose_result", "ok": False, "closed": 0,
+                            "error": "allow_auto_close=false no collector"}))
+        return
+    result = _close_all_positions(target_brokers)
+    ws.send(json.dumps({"type": "autoclose_result", **result}))
 
 
 def run(cfg: dict[str, Any]) -> None:
@@ -525,6 +622,14 @@ def run(cfg: dict[str, Any]) -> None:
     broker_to_backend: dict[str, str] = {m["mt5"]: m["backend"] for m in cfg["symbols"]}
     next_pos_at = 0.0
     pos_flat: dict[str, bool] = {}
+    # Auto-close execution gate (read-only by default). Logged loudly when on so
+    # it's never a surprise that this collector can place closing orders.
+    allow_auto_close = bool(cfg.get("allow_auto_close", False))
+    if allow_auto_close:
+        logger.warning(
+            "allow_auto_close=TRUE — this collector WILL place closing orders when "
+            "the backend's profit target fires."
+        )
     if quote_mode:
         logger.info(
             "tape source: quote-tick flow (no real times&trades on this feed); "
@@ -540,15 +645,20 @@ def run(cfg: dict[str, Any]) -> None:
                 # Identify which broker is feeding this stream — the backend
                 # stamps every subsequent snapshot with this name so the UI can
                 # label each column. Re-sent on every reconnect.
-                ws.send(json.dumps({"type": "hello", "source": source_name}))
+                ws.send(json.dumps({
+                    "type": "hello",
+                    "source": source_name,
+                    "auto_close_enabled": allow_auto_close,
+                }))
                 # Force a full position resync on (re)connect: mark every symbol
                 # not-flat so the next poll reports its true state once (an open
                 # list, or a single clear). Without this, a collector restart
                 # while flat would leave the backend showing stale positions.
                 pos_flat = {b: False for b in broker_to_backend.values()}
                 next_pos_at = 0.0
-            # Keep the socket alive by replying to server pings before polling.
-            _drain_control(ws)
+            # Keep the socket alive by replying to server pings before polling,
+            # and handle any control command (close_all / close_symbol) sent.
+            _drain_control(ws, allow_auto_close, broker_to_backend)
             for m in cfg["symbols"]:
                 backend, broker = m["backend"], m["mt5"]
                 if quote_mode:
