@@ -252,6 +252,13 @@ off until you opt in.**
 5. The brain (the target decision) lives in the backend and is unit-tested; the
    collector is a thin executor gated by step 1.
 
+**You must enable AutoTrading in the MT5 terminal.** MT5 blocks all script/EA
+orders until the **"AutoTrading" / "Algo Trading"** toolbar button is on (green;
+shortcut **Ctrl+E**). Without it every close is rejected with `retcode=10027
+"AutoTrading disabled by client"` and the position stays open — `allow_auto_close`
+alone is not enough. Also check **Tools → Options → Expert Advisors → Allow
+algorithmic trading**.
+
 **Test on DEMO first.** On a funded/prop account this closes real money, and your
 prop-firm rules on automation are your responsibility. Filling mode is broker
 specific — the collector tries IOC → FOK → RETURN and reports any ticket it
@@ -287,6 +294,7 @@ Local: restart the backend container. KVM: redeploy.
 | Flow appears then drops every ~50s | (already fixed) collector now answers backend keepalive pings | Pull latest `mt5_orderflow_collector.py` |
 | Backend hangs / `/api/orderflow` times out under quote synthesis | (already fixed) per-trade snapshot + unbounded footprint cells | Pull latest backend; ensure `footprint_tick` is set per symbol |
 | Bid/Ask chart stuck on "Coletando cotações…" while tape/pressure update | (already fixed) the broker's mirrored DOM **froze** and was the quote source, so the quote never changed | Pull latest `mt5_orderflow_collector.py` (quote synthesis now feeds the chart from the live quote tick). The chart also now shows "cotação parada" instead of failing silently |
+| Auto-close / "fechar tudo" does nothing; `last_result` shows `retcode=10027 "AutoTrading disabled by client"` | The MT5 terminal's **AutoTrading** button is off — MT5 blocks all programmatic orders | Turn on **AutoTrading / Algo Trading** in the MT5 toolbar (green; **Ctrl+E**), and check Tools → Options → Expert Advisors → Allow algorithmic trading |
 
 Quick health check from the backend host:
 
