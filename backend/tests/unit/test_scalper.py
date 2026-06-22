@@ -11,9 +11,11 @@ from datetime import datetime, timezone
 from core.enums import AssetSymbol
 from core.models import LiveActivity, OrderFlowSnapshot, TapeTrade
 from use_cases.scalper import (
+    ADD_LEAN,
     EXPANSION_MULT,
     MIN_PRINTS,
     STRONG_FRACTION,
+    decide_entry,
     detect_explosion,
     should_open,
 )
@@ -89,6 +91,35 @@ def test_expansion_threshold() -> None:
     # Just above 1.8 * range_per_bar (=3.6) fires; just below does not.
     assert detect_explosion(_snap(20, 3, window_range=3.7, range_per_bar=2.0)) == "buy"
     assert detect_explosion(_snap(20, 3, window_range=3.5, range_per_bar=2.0)) is None
+
+
+def test_decide_entry_flat_requires_explosion() -> None:
+    # Flat: a burst opens; a calm/weak window does not.
+    assert decide_entry(_snap(20, 3), current_side=None, open_on_symbol=0) == "buy"
+    assert decide_entry(_snap(12, 12), current_side=None, open_on_symbol=0) is None
+
+
+def test_decide_entry_adds_in_held_direction_without_explosion() -> None:
+    # Holding sells, flow still leans sell (no range expansion needed) → add sell.
+    snap = _snap(3, 17, window_range=2.0, range_per_bar=10.0)  # no expansion
+    assert detect_explosion(snap) is None  # would NOT re-trigger as a burst
+    assert decide_entry(snap, current_side="sell", open_on_symbol=3) == "sell"
+
+
+def test_decide_entry_never_opposite_side() -> None:
+    # Holding buys but flow flipped to sell → do NOT open a sell (no hedge).
+    snap = _snap(3, 17)  # strongly sell
+    assert decide_entry(snap, current_side="buy", open_on_symbol=2) is None
+
+
+def test_decide_entry_stops_adding_when_lean_fades() -> None:
+    assert ADD_LEAN == 0.10  # guard the table
+    # Holding buys, flow back to ~neutral (lean < ADD_LEAN) → no add.
+    assert decide_entry(_snap(11, 9), current_side="buy", open_on_symbol=2) is None
+
+
+def test_decide_entry_ambiguous_hold_does_not_add() -> None:
+    assert decide_entry(_snap(20, 3), current_side=None, open_on_symbol=4) is None
 
 
 def test_should_open_gates() -> None:

@@ -41,7 +41,7 @@ from settings import get_settings
 from use_cases.aggregate_orderflow import OrderFlowAggregator
 from use_cases.assess_trade_signals import assess_trade_signals
 from use_cases.autoclose import should_autoclose
-from use_cases.scalper import detect_explosion, should_open
+from use_cases.scalper import Direction, decide_entry, should_open
 
 logger = logging.getLogger(__name__)
 
@@ -240,6 +240,19 @@ def _open_profit() -> float:
     return sum(p.profit for ps in _positions_store.values() for p in ps)
 
 
+def _symbol_side(positions: list[Position]) -> Direction | None:
+    """The net side held on a symbol: 'buy'/'sell', or None when flat or tied
+    (a tie should not happen with direction-consistent entries; treated as
+    'don't add' for safety)."""
+    buys = sum(1 for p in positions if p.side == "buy")
+    sells = sum(1 for p in positions if p.side == "sell")
+    if buys > sells:
+        return "buy"
+    if sells > buys:
+        return "sell"
+    return None
+
+
 def _autoclose_status() -> AutoCloseStatus:
     return AutoCloseStatus(
         enabled=_autoclose.enabled,
@@ -379,13 +392,20 @@ async def _run_bot(touched: set[AssetSymbol]) -> None:
     for symbol in touched:
         if symbol not in _bot.lots:
             continue
+        positions = _positions_store.get(symbol, [])
         liq = _liquidity_store.get(symbol)
         liquidity_ok = liq is None or liq.ratio >= _THIN_RATIO
-        direction = detect_explosion(aggregator.snapshot(symbol))
+        # Direction matching what we already hold (or an explosion when flat);
+        # never the opposite side of an open position.
+        direction = decide_entry(
+            aggregator.snapshot(symbol),
+            current_side=_symbol_side(positions),
+            open_on_symbol=len(positions),
+        )
         cooldown_ok = now >= _bot.cooldown_until.get(symbol, 0.0)
         if should_open(
             direction=direction,
-            open_on_symbol=len(_positions_store.get(symbol, [])),
+            open_on_symbol=len(positions),
             max_per_symbol=_bot.max_per_symbol,
             cooldown_ok=cooldown_ok,
             daily_halted=False,

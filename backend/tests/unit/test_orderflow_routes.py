@@ -367,8 +367,8 @@ def test_bot_arm_and_disarm(client: TestClient) -> None:
 
 
 def test_bot_opens_on_explosion(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    # Force the (separately-tested) detector to fire; assert the wiring opens.
-    monkeypatch.setattr(of, "detect_explosion", lambda snap: "buy")
+    # Force the (separately-tested) entry decision; assert the wiring opens.
+    monkeypatch.setattr(of, "decide_entry", lambda *a, **k: "buy")
     of._bot.enabled = True
     of._bot.armed = True
     with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
@@ -411,7 +411,7 @@ def test_bot_does_not_open_in_thin_session(
     from core.enums import AssetSymbol
     from core.models import SessionLiquidity
 
-    monkeypatch.setattr(of, "detect_explosion", lambda snap: "buy")
+    monkeypatch.setattr(of, "decide_entry", lambda *a, **k: "buy")
     of._bot.enabled = True
     of._bot.armed = True
     # Thin session for USTEC (ratio below the 0.75 floor) → no entry.
