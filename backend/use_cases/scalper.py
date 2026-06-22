@@ -84,15 +84,19 @@ def should_open(
     max_per_symbol: int,
     cooldown_ok: bool,
     daily_halted: bool,
+    liquidity_ok: bool = True,
 ) -> bool:
     """Gate one entry. Pure so every refusal reason is unit-testable.
 
-    Opens only when there's a burst, we're under the per-symbol position cap,
-    the post-trade cooldown has elapsed, and the day isn't halted (loss limit).
+    Opens only when there's a burst, the session isn't thin (`liquidity_ok`),
+    we're under the per-symbol position cap, the post-trade cooldown has elapsed,
+    and the day isn't halted (loss limit).
     """
     if direction is None:
         return False
     if daily_halted:
+        return False
+    if not liquidity_ok:
         return False
     if not cooldown_ok:
         return False

@@ -97,6 +97,8 @@ def test_should_open_gates() -> None:
     assert should_open(direction=None, **base) is False
     assert should_open(direction="buy", **{**base, "daily_halted": True}) is False
     assert should_open(direction="buy", **{**base, "cooldown_ok": False}) is False
+    # Thin session blocks entries.
+    assert should_open(direction="buy", **{**base, "liquidity_ok": False}) is False
     # At the per-symbol cap (>=) → no more adds.
     assert should_open(direction="buy", **{**base, "open_on_symbol": 6}) is False
     assert should_open(direction="buy", **{**base, "open_on_symbol": 5}) is True

@@ -339,6 +339,7 @@ export const BotStatus = z.object({
   profit_target: z.number(),
   loss_stop: z.number(),
   open_profit: z.number(),
+  realized: z.number().default(0),
   open_count: z.number(),
   last_result: z.string().nullable().default(null),
 });

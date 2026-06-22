@@ -378,15 +378,57 @@ def test_bot_opens_on_explosion(client: TestClient, monkeypatch: pytest.MonkeyPa
     assert cmd["symbol"] == "USTEC" and cmd["side"] == "buy" and cmd["lots"] == 2.0
 
 
-def test_bot_exits_all_at_profit_target(client: TestClient) -> None:
+def test_bot_banks_and_rearms_on_profit_target(client: TestClient) -> None:
     of._bot.enabled = True
     of._bot.armed = True
+    of._bot.rearm = True
+    of._bot.profit_target = 100.0
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json(_positions_msg(profit=150.0))
+        cmd = ws.receive_json()
+    assert cmd["type"] == "close_all"
+    # 24h mode: stays armed, banks the win, and waits to settle (flattening).
+    assert of._bot.armed is True
+    assert of._bot.realized == 150.0
+    assert of._bot.flattening is True
+
+
+def test_bot_one_shot_stops_on_profit_target(client: TestClient) -> None:
+    of._bot.enabled = True
+    of._bot.armed = True
+    of._bot.rearm = False
     of._bot.profit_target = 100.0
     with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
         ws.send_json(_positions_msg(profit=150.0))
         cmd = ws.receive_json()
     assert cmd["type"] == "close_all"
     assert of._bot.armed is False
+
+
+def test_bot_does_not_open_in_thin_session(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.enums import AssetSymbol
+    from core.models import SessionLiquidity
+
+    monkeypatch.setattr(of, "detect_explosion", lambda snap: "buy")
+    of._bot.enabled = True
+    of._bot.armed = True
+    # Thin session for USTEC (ratio below the 0.75 floor) → no entry.
+    of._liquidity_store[AssetSymbol.USTEC] = SessionLiquidity(
+        symbol=AssetSymbol.USTEC,
+        asof="2026-06-09T14:00:00Z",
+        realized_volume=10.0,
+        baseline_volume=100.0,
+        ratio=0.3,
+        sample_days=20,
+    )
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json({"type": "positions", "symbol": "USTEC", "positions": []})
+        # No open command should arrive; a follow-up book does (stream alive).
+        ws.send_json(_book_msg())
+    # The bot left no "abriu" trace and opened nothing.
+    assert "abriu" not in (client.get("/api/orderflow/bot").json()["last_result"] or "")
 
 
 def test_bot_loss_stop_closes_all(client: TestClient) -> None:

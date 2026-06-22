@@ -86,6 +86,13 @@ export function ScalperBotControl({
                 {profit >= 0 ? "+" : "−"}
                 {Math.abs(profit).toFixed(2)}
               </span>
+              <span className="ml-2">
+                sessão{" "}
+                <span className="tabular-nums font-semibold text-zinc-400">
+                  {status.realized >= 0 ? "+" : "−"}
+                  {Math.abs(status.realized).toFixed(2)}
+                </span>
+              </span>
             </span>
           </div>
         </div>

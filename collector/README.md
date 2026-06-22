@@ -265,10 +265,15 @@ so it's gated hardest:
   0.12 lt; up to 6 positions per symbol; entries paced by a cooldown.
 - **Entry** = a burst: short-window range expansion + strong directional pressure
   (tunable thresholds in `use_cases/scalper.py` — noisy on synthesized feeds,
-  expect to tune on demo).
-- **Exit** = whole-account close at **+profit_target** or **−loss_stop**
-  (defaults +$350 / −$900), then it disarms. **PARAR** is the kill switch.
-- It is a *mechanism*, not a proven edge — forward-test on demo.
+  expect to tune on demo). **Thin sessions are skipped** (no entries when the
+  day-outlook liquidity ratio is below ~0.75) to avoid false bursts overnight.
+- **Exit** = whole-account close at **+profit_target** (banks the win, then
+  **re-arms** to keep scalping — 24h mode) and a hard daily stop at **−loss_stop**
+  on the *session* P&L (realized + floating), which closes all and stops for good.
+  Defaults +$350 / −$900. **PARAR** is the kill switch.
+- It is a *mechanism*, not a proven edge — forward-test on demo. Note: the
+  armed/session state lives in backend memory, so a backend restart disarms it
+  (re-arm to resume).
 
 **You must enable AutoTrading in the MT5 terminal.** MT5 blocks all script/EA
 orders until the **"AutoTrading" / "Algo Trading"** toolbar button is on (green;

@@ -275,19 +275,36 @@ async def _maybe_autoclose() -> None:
 # --- explosion-scalper bot (opens AND closes; demo only) ---------------------
 
 
+# Session is thin (skip entries) when realized participation is below this share
+# of the same-time-of-day baseline — matches the dashboard's "thin" threshold.
+_THIN_RATIO = 0.75
+# After banking a win we wait for positions to flatten AND this long before the
+# bot opens again, so it doesn't immediately re-enter the exhausted move.
+_REARM_COOLDOWN_S = 5.0
+
+
 class _BotState:
     """Mutable scalper-bot state. `enabled` mirrors the collector's
-    auto-trade-on-demo capability (from hello); arming is refused otherwise."""
+    auto-trade-on-demo capability (from hello); arming is refused otherwise.
+
+    24h mode: on a +profit_target cycle it banks the win into `realized`, flattens
+    and re-arms; it hard-stops for the day only when the *session* P&L
+    (realized + floating) hits −loss_stop. `flattening` suppresses entries/exits
+    while a close-all is settling so a win isn't double-counted."""
 
     def __init__(self) -> None:
         self.enabled: bool = False  # collector allow_auto_trade AND demo account
         self.armed: bool = False
-        self.profit_target: float = 350.0  # close-all at +this (account-wide)
-        self.loss_stop: float = 900.0  # close-all + stop at −this
+        self.rearm: bool = True  # cycle after each win (24h) vs one-shot
+        self.profit_target: float = 350.0  # bank + re-arm at +this (floating)
+        self.loss_stop: float = 900.0  # hard stop for the day at −this (session)
         self.max_per_symbol: int = 6
         self.cooldown_s: float = 2.0  # min gap between adds on a symbol (paces scale-in)
         self.lots: dict[AssetSymbol, float] = {}  # per-symbol size; defaults below
         self.cooldown_until: dict[AssetSymbol, float] = {}
+        self.realized: float = 0.0  # banked P&L this session
+        self.flattening: bool = False  # a close-all is settling; pause
+        self.resume_at: float = 0.0  # monotonic time to resume after flatten
         self.last_result: str | None = None
 
 
@@ -309,37 +326,61 @@ def _bot_status() -> BotStatus:
         profit_target=_bot.profit_target,
         loss_stop=_bot.loss_stop,
         open_profit=_open_profit(),
+        realized=_bot.realized,
         open_count=sum(len(ps) for ps in _positions_store.values()),
         last_result=_bot.last_result,
     )
 
 
 async def _run_bot(touched: set[AssetSymbol]) -> None:
-    """One bot tick: account-wide exit first, then explosion entries on the
-    symbols that just updated. Called from the ingest loop after each message."""
+    """One bot tick: settle a pending close, then account-wide exit, then
+    explosion entries on the symbols that just updated. Called from the ingest
+    loop after each message."""
     if not _bot.armed:
         return
 
-    # Account-wide exits (one-shot; disarm on either).
-    profit = _open_profit()
-    if profit >= _bot.profit_target:
-        _bot.armed = False
-        _bot.last_result = f"meta atingida (+{profit:.2f}) — fechando tudo"
-        logger.info("Bot exit: %s", _bot.last_result)
-        await _send_to_collector({"type": "close_all", "reason": _bot.last_result})
+    now = time.monotonic()
+    open_count = sum(len(ps) for ps in _positions_store.values())
+
+    # Settling a previous close-all: do nothing until flat AND past the cooldown,
+    # so a banked win isn't re-counted and we don't re-enter the spent move.
+    if _bot.flattening:
+        if open_count == 0 and now >= _bot.resume_at:
+            _bot.flattening = False
         return
-    if profit <= -_bot.loss_stop:
+
+    floating = _open_profit()
+    session = _bot.realized + floating
+
+    # Hard daily stop on session drawdown (realized + floating) — stops for good.
+    if session <= -_bot.loss_stop:
         _bot.armed = False
-        _bot.last_result = f"stop de perda ({profit:.2f}) — fechou tudo e parou"
-        logger.warning("Bot loss-stop: %s", _bot.last_result)
+        _bot.realized = session
+        _bot.last_result = f"stop diário (sessão {session:.2f}) — fechou tudo e parou"
+        logger.warning("Bot daily stop: %s", _bot.last_result)
         await _send_to_collector({"type": "close_all", "reason": _bot.last_result})
         return
 
-    # Entries: only the symbols whose flow just moved.
-    now = time.monotonic()
+    # Profit target on this cycle's floating → bank it, then re-arm (24h) or stop.
+    if floating >= _bot.profit_target:
+        _bot.realized += floating
+        if _bot.rearm:
+            _bot.flattening = True
+            _bot.resume_at = now + _REARM_COOLDOWN_S
+            _bot.last_result = f"meta +{floating:.2f} (sessão {_bot.realized:.2f}) — re-armando"
+        else:
+            _bot.armed = False
+            _bot.last_result = f"meta +{floating:.2f} (sessão {_bot.realized:.2f}) — parou"
+        logger.info("Bot exit: %s", _bot.last_result)
+        await _send_to_collector({"type": "close_all", "reason": _bot.last_result})
+        return
+
+    # Entries: only the symbols whose flow just moved, and not in a thin session.
     for symbol in touched:
         if symbol not in _bot.lots:
             continue
+        liq = _liquidity_store.get(symbol)
+        liquidity_ok = liq is None or liq.ratio >= _THIN_RATIO
         direction = detect_explosion(aggregator.snapshot(symbol))
         cooldown_ok = now >= _bot.cooldown_until.get(symbol, 0.0)
         if should_open(
@@ -348,6 +389,7 @@ async def _run_bot(touched: set[AssetSymbol]) -> None:
             max_per_symbol=_bot.max_per_symbol,
             cooldown_ok=cooldown_ok,
             daily_halted=False,
+            liquidity_ok=liquidity_ok,
         ):
             _bot.cooldown_until[symbol] = now + _bot.cooldown_s
             _bot.last_result = f"abriu {direction} {symbol.value} {_bot.lots[symbol]} lt"
@@ -653,7 +695,11 @@ async def set_bot(body: BotRequest) -> BotStatus:
             if body.loss_stop <= 0:
                 raise HTTPException(status_code=422, detail="loss_stop deve ser > 0.")
             _bot.loss_stop = body.loss_stop
-        _bot.cooldown_until.clear()  # fresh start
+        # Fresh session: clear cooldowns, banked P&L and any settling state.
+        _bot.cooldown_until.clear()
+        _bot.realized = 0.0
+        _bot.flattening = False
+        _bot.resume_at = 0.0
     _bot.armed = body.armed
     _bot.last_result = (
         f"bot ARMADO (meta +{_bot.profit_target:.0f} / stop −{_bot.loss_stop:.0f})"
