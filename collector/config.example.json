@@ -8,6 +8,8 @@
   "_comment_liquidity": "Day-outlook liquidity gauge: compares today's cumulative tick volume to the median of the prior N sessions at the same time-of-day, and pushes the ratio to the backend. baseline_days=0 or poll_seconds=0 disables it.",
   "liquidity_baseline_days": 20,
   "liquidity_poll_seconds": 60,
+  "_comment_positions": "Read-only mirror of your open positions for the live P&L / time-in-trade panel and in-trade alerts. Polled every positions_poll_seconds (0 disables). The collector never places or modifies orders.",
+  "positions_poll_seconds": 0.25,
   "symbols": [
     { "backend": "USTEC", "mt5": "USTEC" },
     { "backend": "SPX",   "mt5": "USA500" },

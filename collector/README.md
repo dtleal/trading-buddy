@@ -1,12 +1,19 @@
 # MT5 Order-Flow Collector (Windows)
 
-Streams live **bid/ask · footprint · tape · pressure** from your MetaTrader 5
-terminal to the trading-buddy backend, which renders it on the dashboard for
-**USTEC, USA500 (→ SPX) and GOLD**. The dashboard's top-of-book panel is a
-real-time bid/ask tick chart. With `synthesize_trades_from_quotes` on, that
-bid/ask is taken from the **live quote tick** — not the broker's DOM book, which
-on these CFD demo feeds is mirrored *and freezes* (it stopped updating mid-day
-and left the chart stuck), so it is no longer trusted as the quote source.
+Streams live **bid/ask · footprint · tape · pressure · open positions** from your
+MetaTrader 5 terminal to the trading-buddy backend, which renders it on the
+dashboard for **USTEC, USA500 (→ SPX) and GOLD**. The dashboard's top-of-book
+panel is a real-time bid/ask tick chart. With `synthesize_trades_from_quotes` on,
+that bid/ask is taken from the **live quote tick** — not the broker's DOM book,
+which on these CFD demo feeds is mirrored *and freezes* (it stopped updating
+mid-day and left the chart stuck), so it is no longer trusted as the quote source.
+
+It also mirrors your **open positions** live (entry, floating P&L, time-in-trade,
+SL/TP) and the backend overlays deterministic **in-trade alerts** on them
+(flow turning against the position; in-profit-but-momentum-stalling). This is
+**read-only** — the collector only *reads* positions, it never places or modifies
+orders. The alerts are decision support, not advice, and on synthesized-tape CFD
+feeds they are a directional proxy (see the data-quality table below).
 
 This bridge **only reads market data** — it never places orders.
 
@@ -177,6 +184,8 @@ what you are looking at:
 | **Bid/Ask tick chart** | **live quote tick** (`bid`/`ask`) under quote synthesis; raw DOM top-of-book otherwise | ✅ real (price movement) |
 | **DOM depth (sizes)** | broker book | ⚠️ on demo accounts it is often **mirrored** (bid size = ask size at every level) → imbalance is always 0; worse, it can **freeze** for hours. Not used as the quote source when synthesis is on; the ladder isn't shown |
 | **Tape / Footprint / Pressure** | **derived** from quote-tick direction when there are no real trade ticks | ⚠️ direction is sound; **"volume" is a tick count, not contracts** |
+| **Open positions** | `mt5.positions_get()` (read-only) | ✅ real (your live entry, P&L, SL/TP, time-in-trade) |
+| **In-trade alerts** | position + flow lean (`pressure_against`, `take_profit`) | ⚠️ deterministic, but only as sound as the synthesized flow it reads — decision support, not advice |
 
 With quote-tick synthesis the aggressor is inferred by the **tick rule** on the
 mid price: an up-tick is a buy (at the ask), a down-tick is a sell (at the bid),
@@ -199,6 +208,7 @@ For exchange-grade footprint/delta you'd switch the backend to a real CME feed
 | `synthesize_trades_from_quotes` | `true` for feeds with **no** times&trades: builds tape/footprint/pressure from quote-tick direction. `false` only if your broker sends real trade ticks. |
 | `liquidity_baseline_days` | Sessions used for the **day-outlook liquidity gauge** baseline (default `20`). The collector compares today's cumulative tick volume to the median of the prior N sessions at the same time-of-day and pushes the ratio to the backend, which folds it into the "Perfil do Dia" banner/alert. `0` disables. |
 | `liquidity_poll_seconds` | How often (s) to recompute + push that ratio (default `60`). It reads ~3 weeks of M5 bars, so it is throttled well below the tick poll. `0` disables. |
+| `positions_poll_seconds` | How often (s) to read + push your **open positions** for the live P&L / time-in-trade panel and in-trade alerts (default `0.25`). Read-only. `0` disables position reading entirely. |
 | `symbols[]` | Map each backend symbol to **your broker's exact MT5 name**. `backend` must be one of `USTEC` / `SPX` / `GOLD`. `mt5` is whatever your broker calls it (`US100.cash`, `Usa500`, `XAUUSD`, …). |
 | `symbols[].footprint_tick` | Optional price step used to group footprint rows (e.g. `1.0` for an index ~28000, `0.1` for gold). Omit to auto-derive from the broker tick size. Keeps a continuous quote feed from fragmenting into thousands of cells. |
 | `mt5.sources[]` | Priority list of terminals; each `{name, path}` is tried in order until one attaches. `path` is the `terminal64.exe`. Add `login`/`password`/`server` only to drive a specific account. |
