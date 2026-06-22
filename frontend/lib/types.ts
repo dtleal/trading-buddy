@@ -277,6 +277,21 @@ export const LiveActivity = z.object({
 });
 export type LiveActivity = z.infer<typeof LiveActivity>;
 
+/** One open MT5 position (read-only mirror), streamed live by the collector. */
+export const Position = z.object({
+  symbol: AssetSymbol,
+  ticket: z.number(),
+  side: z.enum(["buy", "sell"]),
+  volume: z.number(),
+  price_open: z.number(),
+  price_current: z.number(),
+  profit: z.number(), // floating P&L in account currency
+  sl: z.number().nullable().default(null),
+  tp: z.number().nullable().default(null),
+  seconds_open: z.number(), // time-in-trade at the moment the snapshot was built
+});
+export type Position = z.infer<typeof Position>;
+
 /** One per-symbol order-flow message from /ws/orderflow. */
 export const OrderFlowSnapshot = z.object({
   symbol: AssetSymbol,
@@ -287,6 +302,7 @@ export const OrderFlowSnapshot = z.object({
   source: z.string().nullable().default(null),
   liquidity: SessionLiquidity.nullable().default(null),
   live_activity: LiveActivity.nullable().default(null),
+  positions: z.array(Position).default([]),
 });
 export type OrderFlowSnapshot = z.infer<typeof OrderFlowSnapshot>;
 

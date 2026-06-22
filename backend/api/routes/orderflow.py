@@ -28,6 +28,7 @@ from core.models import (
     OrderBookLevel,
     OrderBookSnapshot,
     OrderFlowSnapshot,
+    Position,
     SessionLiquidity,
     TapeTrade,
 )
@@ -62,6 +63,12 @@ aggregator = _build_aggregator()
 # the same process as the tick loop (API + loop share a process), so the
 # day-outlook assessor reads it directly — no DB / cache round-trip needed.
 _liquidity_store: dict[AssetSymbol, SessionLiquidity] = {}
+
+# Latest open positions per symbol pushed by the collector (read-only mirror of
+# MT5). Lives in the same process as the ingest loop, like `_liquidity_store`,
+# and is stamped onto each symbol's snapshot. An explicit empty list means the
+# collector reported the symbol is flat (so a closed trade clears from the UI).
+_positions_store: dict[AssetSymbol, list[Position]] = {}
 
 
 def latest_liquidity() -> dict[AssetSymbol, SessionLiquidity]:
@@ -141,6 +148,32 @@ def _parse_liquidity(msg: dict[str, Any], symbol: AssetSymbol) -> SessionLiquidi
     )
 
 
+def _nonzero_price(value: Any) -> float | None:
+    """MT5 reports an unset SL/TP as 0.0; treat that as 'no level'."""
+    if value is None:
+        return None
+    price = float(value)
+    return price if price != 0.0 else None
+
+
+def _parse_position(raw: dict[str, Any], symbol: AssetSymbol) -> Position:
+    side = str(raw.get("side", "")).lower()
+    if side not in ("buy", "sell"):
+        raise ValueError(f"position side must be buy/sell, got {side!r}")
+    return Position(
+        symbol=symbol,
+        ticket=int(raw["ticket"]),
+        side=side,  # type: ignore[arg-type]
+        volume=float(raw["volume"]),
+        price_open=float(raw["price_open"]),
+        price_current=float(raw["price_current"]),
+        profit=float(raw["profit"]),
+        sl=_nonzero_price(raw.get("sl")),
+        tp=_nonzero_price(raw.get("tp")),
+        seconds_open=float(raw.get("seconds_open", 0.0)),
+    )
+
+
 def _parse_trade(msg: dict[str, Any], symbol: AssetSymbol) -> TapeTrade:
     side = str(msg.get("side", "unknown")).lower()
     if side not in ("buy", "sell", "unknown"):
@@ -194,6 +227,13 @@ async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
         # pressure bar. Touch the symbol so the snapshot is re-broadcast now.
         _liquidity_store[symbol] = _parse_liquidity(msg, symbol)
         return {symbol}
+    if mtype == "positions":
+        # Open positions for this symbol (read-only). An empty list is a valid,
+        # meaningful update — it means "now flat", so a closed trade clears.
+        _positions_store[symbol] = [
+            _parse_position(raw, symbol) for raw in msg.get("positions", ())
+        ]
+        return {symbol}
     logger.debug("Ignoring unknown order-flow message type: %r", mtype)
     return set()
 
@@ -206,6 +246,9 @@ def _stamp_snapshot(snapshot: "OrderFlowSnapshot") -> "OrderFlowSnapshot":
     liq = _liquidity_store.get(snapshot.symbol)
     if liq is not None:
         update["liquidity"] = liq
+    positions = _positions_store.get(snapshot.symbol)
+    if positions:
+        update["positions"] = positions
     return snapshot.model_copy(update=update) if update else snapshot
 
 

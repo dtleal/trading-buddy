@@ -30,6 +30,8 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
 
     # Reset the shared singletons so tests don't leak state into each other.
     of.aggregator = of._build_aggregator()
+    of._positions_store.clear()
+    of._liquidity_store.clear()
     orderflow_broadcaster._latest.clear()
 
     app = create_app()
@@ -118,6 +120,73 @@ def test_ingest_rejects_bad_token(client: TestClient) -> None:
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect("/ws/ingest/orderflow?token=wrong") as ws:
             ws.receive_json()
+
+
+def _positions_msg(symbol: str = "USTEC", **over) -> dict:
+    pos = {
+        "ticket": 12345,
+        "side": "buy",
+        "volume": 0.5,
+        "price_open": 100.0,
+        "price_current": 100.4,
+        "profit": 20.0,
+        "sl": 99.0,
+        "tp": 101.0,
+        "seconds_open": 8.0,
+    }
+    pos.update(over)
+    return {"type": "positions", "symbol": symbol, "positions": [pos]}
+
+
+def test_positions_stamped_on_snapshot(client: TestClient) -> None:
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json(_positions_msg())
+    ustec = next(s for s in client.get("/api/orderflow").json() if s["symbol"] == "USTEC")
+    assert len(ustec["positions"]) == 1
+    p = ustec["positions"][0]
+    assert p["ticket"] == 12345
+    assert p["side"] == "buy"
+    assert p["profit"] == 20.0
+    assert p["sl"] == 99.0 and p["tp"] == 101.0
+    assert p["seconds_open"] == 8.0
+
+
+def test_positions_empty_list_clears_a_closed_trade(client: TestClient) -> None:
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json(_positions_msg())  # open
+        ws.send_json({"type": "positions", "symbol": "USTEC", "positions": []})  # now flat
+    ustec = next(s for s in client.get("/api/orderflow").json() if s["symbol"] == "USTEC")
+    assert ustec["positions"] == []
+
+
+def test_position_unset_sl_tp_become_null(client: TestClient) -> None:
+    # MT5 reports an unset SL/TP as 0.0; the parser must surface that as null.
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json(_positions_msg(sl=0.0, tp=0.0))
+    ustec = next(s for s in client.get("/api/orderflow").json() if s["symbol"] == "USTEC")
+    p = ustec["positions"][0]
+    assert p["sl"] is None and p["tp"] is None
+
+
+def test_positions_live_push_reaches_subscriber(client: TestClient) -> None:
+    with client.websocket_connect("/ws/orderflow") as viewer:
+        with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ingest:
+            ingest.send_json(_positions_msg(symbol="GOLD", side="sell", profit=-12.0))
+            # GOLD positions ride the same per-symbol snapshot broadcast.
+            msg = viewer.receive_json()
+    assert msg["symbol"] == "GOLD"
+    assert msg["positions"][0]["side"] == "sell"
+    assert msg["positions"][0]["profit"] == -12.0
+
+
+def test_malformed_position_does_not_drop_stream(client: TestClient) -> None:
+    # Bad side → parse raises → the message is skipped, the stream survives.
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json(_positions_msg(side="hold"))
+        ws.send_json(_book_msg())
+    ustec = next(s for s in client.get("/api/orderflow").json() if s["symbol"] == "USTEC")
+    assert ustec["book"]["bids"][0]["price"] == 100.0
+    assert ustec["positions"] == []
 
 
 def test_ingest_ignores_untracked_symbol(client: TestClient) -> None:

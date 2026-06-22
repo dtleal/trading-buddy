@@ -68,6 +68,10 @@ def _load_config(path: str) -> dict[str, Any]:
     # and how often (seconds) we recompute + push the reading. 0 disables it.
     cfg.setdefault("liquidity_baseline_days", 20)
     cfg.setdefault("liquidity_poll_seconds", 60)
+    # Open-position polling cadence (seconds). Positions carry live P&L, so we
+    # refresh fast but throttle below the tick poll to avoid flooding. 0 disables
+    # reading positions entirely.
+    cfg.setdefault("positions_poll_seconds", 0.25)
     if not cfg.get("backend_ws_url"):
         raise SystemExit("config: 'backend_ws_url' is required")
     if not cfg.get("symbols"):
@@ -252,6 +256,49 @@ def _read_trades(
             }
         )
     return out, high
+
+
+def _read_positions(
+    broker_to_backend: dict[str, str],
+) -> dict[str, list[dict[str, Any]]] | None:
+    """Read open positions live from MT5, grouped by backend symbol.
+
+    READ-ONLY: `positions_get()` only queries; the collector never sends orders.
+    Returns a dict with an entry for every configured backend symbol (empty list
+    when flat, so the backend can clear a closed trade), or None on an MT5 error
+    (so the caller leaves the last known state untouched rather than wiping it).
+
+    `seconds_open` (time-in-trade) is computed here, not on the frontend: MT5's
+    `position.time` is in the broker's *server* clock, so we subtract it from the
+    same clock — the symbol's latest tick time — to avoid timezone skew. The UI
+    then ticks the value up locally from when it arrives.
+    """
+    raw = mt5.positions_get()
+    if raw is None:
+        return None
+    out: dict[str, list[dict[str, Any]]] = {b: [] for b in broker_to_backend.values()}
+    for p in raw:
+        backend = broker_to_backend.get(p.symbol)
+        if backend is None:
+            continue  # a position on a symbol we don't track
+        tick = mt5.symbol_info_tick(p.symbol)
+        broker_now = float(getattr(tick, "time", 0.0) or 0.0)
+        seconds_open = max(0.0, broker_now - float(p.time)) if broker_now else 0.0
+        side = "buy" if p.type == mt5.POSITION_TYPE_BUY else "sell"
+        out[backend].append(
+            {
+                "ticket": int(p.ticket),
+                "side": side,
+                "volume": float(p.volume),
+                "price_open": float(p.price_open),
+                "price_current": float(p.price_current),
+                "profit": float(p.profit),
+                "sl": float(p.sl),
+                "tp": float(p.tp),
+                "seconds_open": seconds_open,
+            }
+        )
+    return out
 
 
 def _median(values: list[float]) -> float | None:
@@ -470,6 +517,14 @@ def run(cfg: dict[str, Any]) -> None:
     ftick: dict[str, float | None] = {
         m["mt5"]: (m.get("footprint_tick") or _broker_tick(m["mt5"])) for m in cfg["symbols"]
     }
+    # Open-position polling. `broker_to_backend` maps MT5 symbol → backend symbol
+    # for grouping. `pos_flat` remembers which backend symbols we last reported
+    # as flat, so a "now flat" clear is sent exactly once while open positions
+    # keep streaming live P&L every period.
+    pos_period = float(cfg.get("positions_poll_seconds", 0.25))
+    broker_to_backend: dict[str, str] = {m["mt5"]: m["backend"] for m in cfg["symbols"]}
+    next_pos_at = 0.0
+    pos_flat: dict[str, bool] = {}
     if quote_mode:
         logger.info(
             "tape source: quote-tick flow (no real times&trades on this feed); "
@@ -486,6 +541,12 @@ def run(cfg: dict[str, Any]) -> None:
                 # stamps every subsequent snapshot with this name so the UI can
                 # label each column. Re-sent on every reconnect.
                 ws.send(json.dumps({"type": "hello", "source": source_name}))
+                # Force a full position resync on (re)connect: mark every symbol
+                # not-flat so the next poll reports its true state once (an open
+                # list, or a single clear). Without this, a collector restart
+                # while flat would leave the backend showing stale positions.
+                pos_flat = {b: False for b in broker_to_backend.values()}
+                next_pos_at = 0.0
             # Keep the socket alive by replying to server pings before polling.
             _drain_control(ws)
             for m in cfg["symbols"]:
@@ -535,6 +596,29 @@ def run(cfg: dict[str, Any]) -> None:
                         liq = None
                     if liq:
                         ws.send(json.dumps(liq))
+            # Push open positions (live P&L). Throttled below the tick poll. While
+            # a symbol has positions we send every period so P&L stays live; when
+            # it goes flat we send one empty list to clear, then stay quiet.
+            if pos_period > 0 and now_mono >= next_pos_at:
+                next_pos_at = now_mono + pos_period
+                try:
+                    pos_map = _read_positions(broker_to_backend)
+                except Exception as exc:  # never let position reads break the stream
+                    logger.debug("positions read failed: %s", exc)
+                    pos_map = None
+                if pos_map is not None:
+                    for backend, plist in pos_map.items():
+                        if plist:
+                            ws.send(json.dumps(
+                                {"type": "positions", "symbol": backend, "positions": plist}
+                            ))
+                            pos_flat[backend] = False
+                        elif not pos_flat.get(backend, True):
+                            # Transitioned open → flat: clear once.
+                            ws.send(json.dumps(
+                                {"type": "positions", "symbol": backend, "positions": []}
+                            ))
+                            pos_flat[backend] = True
             time.sleep(poll_s)
         except KeyboardInterrupt:
             logger.info("Stopping (Ctrl-C).")

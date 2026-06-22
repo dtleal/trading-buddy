@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { BidAskChart } from "./BidAskChart";
 import { PressureGauge } from "./PressureGauge";
+import { PositionPanel } from "./PositionPanel";
 import { FootprintPanel } from "./FootprintPanel";
 import { TapePanel } from "./TapePanel";
 import { useOrderFlow } from "@/hooks/useOrderFlow";
@@ -146,6 +147,11 @@ function SymbolColumn({
       ) : (
         <>
           <LiquidityChip liquidity={flow.liquidity} live={flow.live_activity} />
+          {flow.positions.length > 0 && (
+            <FlowBlock title="Posição aberta (MT5)">
+              <PositionPanel positions={flow.positions} />
+            </FlowBlock>
+          )}
           <FlowBlock title="Pressão (compra · venda)">
             <PressureGauge flow={flow} />
           </FlowBlock>

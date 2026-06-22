@@ -448,6 +448,29 @@ class LiveActivity(_Frozen):
     sampled_bars: int  # completed bars that fed the medians
 
 
+class Position(_Frozen):
+    """One open MT5 position for a symbol, read live by the collector.
+
+    Read-only mirror of `mt5.positions_get()` — the collector never places or
+    modifies orders. `profit` is in the account currency. `seconds_open` is the
+    time-in-trade computed on the collector at read time: MT5 reports the open
+    time in the *broker's server clock* (not UTC), so we cannot subtract it from
+    a browser/backend clock without skew — the collector does the subtraction
+    against the broker clock and ships the result, which the UI ticks up locally.
+    """
+
+    symbol: AssetSymbol
+    ticket: int  # broker position id (stable for the life of the position)
+    side: Literal["buy", "sell"]  # buy = long, sell = short
+    volume: float  # lots
+    price_open: float
+    price_current: float
+    profit: float  # floating P&L in account currency
+    sl: float | None = None  # stop loss price (None / 0 → not set)
+    tp: float | None = None  # take profit price
+    seconds_open: float  # time-in-trade at read time (broker-clock delta)
+
+
 class OrderFlowSnapshot(_Frozen):
     """Per-symbol order-flow state broadcast to the frontend.
 
@@ -473,6 +496,10 @@ class OrderFlowSnapshot(_Frozen):
     # once any bar exists (no baseline needed), so the UI shows activity the
     # instant flow arrives.
     live_activity: LiveActivity | None = None
+    # Open positions for this symbol, read live from MT5 by the collector. Empty
+    # when flat. Stamped onto every broadcast so the UI can overlay live P&L and
+    # time-in-trade next to the flow.
+    positions: list[Position] = Field(default_factory=list)
 
 
 # -----------------------------------------------------------------------------
