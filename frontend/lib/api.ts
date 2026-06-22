@@ -3,6 +3,7 @@
  */
 import {
   AutoCloseStatus,
+  BotStatus,
   BriefResponse,
   DashboardTick,
   QAEntry,
@@ -113,6 +114,13 @@ export const api = {
     }),
   closeSymbol: (symbol: string) =>
     fetchVoid(`/api/orderflow/close/${symbol}`, { method: "POST" }),
+  getBot: () => fetchJson("/api/orderflow/bot", BotStatus),
+  setBot: (armed: boolean, profitTarget: number | null, lossStop: number | null) =>
+    fetchJson("/api/orderflow/bot", BotStatus, {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ armed, profit_target: profitTarget, loss_stop: lossStop }),
+    }),
 };
 
 export { ApiError, BASE_URL };

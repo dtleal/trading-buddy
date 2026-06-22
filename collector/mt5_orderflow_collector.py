@@ -76,6 +76,10 @@ def _load_config(path: str) -> dict[str, Any]:
     # backend fires the profit target, the collector refuses to send orders. Must
     # be set true ON THIS MACHINE to allow closing positions automatically.
     cfg.setdefault("allow_auto_close", False)
+    # Auto-TRADE gate (the explosion-scalper bot OPENING positions). Strictly
+    # separate from allow_auto_close because opening is far riskier than closing.
+    # Even when true, the collector refuses to open unless the account is a DEMO.
+    cfg.setdefault("allow_auto_trade", False)
     if not cfg.get("backend_ws_url"):
         raise SystemExit("config: 'backend_ws_url' is required")
     if not cfg.get("symbols"):
@@ -336,6 +340,44 @@ def _close_position(p) -> Any:
     return result
 
 
+def _account_is_demo() -> bool:
+    """True only when attached to a DEMO account. The auto-trade bot refuses to
+    OPEN positions on anything else, no matter the config."""
+    try:
+        acct = mt5.account_info()
+    except Exception:  # pragma: no cover - defensive
+        return False
+    return acct is not None and acct.trade_mode == mt5.ACCOUNT_TRADE_MODE_DEMO
+
+
+def _open_position(broker: str, side: str, lots: float) -> Any:
+    """Open a market position (the scalper bot). Tries broker-specific filling
+    modes in turn. Returns the MT5 order_send result (or None)."""
+    tick = mt5.symbol_info_tick(broker)
+    if side == "buy":
+        order_type, price = mt5.ORDER_TYPE_BUY, float(getattr(tick, "ask", 0.0) or 0.0)
+    else:
+        order_type, price = mt5.ORDER_TYPE_SELL, float(getattr(tick, "bid", 0.0) or 0.0)
+    base = {
+        "action": mt5.TRADE_ACTION_DEAL,
+        "symbol": broker,
+        "volume": float(lots),
+        "type": order_type,
+        "price": price,
+        "deviation": 50,
+        "comment": "trading-buddy scalper",
+        "type_time": mt5.ORDER_TIME_GTC,
+    }
+    result = None
+    for filling in (mt5.ORDER_FILLING_IOC, mt5.ORDER_FILLING_FOK, mt5.ORDER_FILLING_RETURN):
+        result = mt5.order_send({**base, "type_filling": filling})
+        if result is not None and result.retcode == mt5.TRADE_RETCODE_DONE:
+            return result
+        if result is not None and result.retcode != mt5.TRADE_RETCODE_INVALID_FILL:
+            return result
+    return result
+
+
 def _close_all_positions(broker_symbols: set[str] | None = None) -> dict[str, Any]:
     """Close open positions (fresh read). With `broker_symbols`, only those MT5
     symbols are closed (the per-asset button); None closes everything (the
@@ -532,7 +574,13 @@ def _connect_backend(url: str, token: str):
     return ws
 
 
-def _drain_control(ws, allow_auto_close: bool, broker_to_backend: dict[str, str]) -> None:
+def _drain_control(
+    ws,
+    broker_to_backend: dict[str, str],
+    allow_auto_close: bool,
+    allow_auto_trade: bool,
+    is_demo: bool,
+) -> None:
     """Answer the backend's keepalive pings AND handle control commands.
 
     The collector is mostly send-only, but websocket-client only emits the
@@ -541,11 +589,11 @@ def _drain_control(ws, allow_auto_close: bool, broker_to_backend: dict[str, str]
     idle every ~30-50s (WinError 10053), causing visible gaps in the dashboard.
     A timeout here just means "no frame waiting".
 
-    The backend sends two commands down this socket: `close_all` (the profit
-    target fired) and `close_symbol` (the per-asset button). Both execute ONLY
-    when this machine opted in via `allow_auto_close`; otherwise we refuse and
-    report back, so the UI never shows a phantom "fired" with nothing closed.
-    Any non-timeout socket error propagates so the outer loop reconnects.
+    Commands the backend sends down this socket:
+      - `close_all` / `close_symbol` — gated by `allow_auto_close`.
+      - `open` (the scalper bot) — gated by `allow_auto_trade` AND a DEMO account.
+    On refusal we report back so the UI never shows a phantom action. Any
+    non-timeout socket error propagates so the outer loop reconnects.
     """
     try:
         raw = ws.recv()
@@ -557,10 +605,37 @@ def _drain_control(ws, allow_auto_close: bool, broker_to_backend: dict[str, str]
         cmd = json.loads(raw)
     except (ValueError, TypeError):
         return
-    if not isinstance(cmd, dict) or cmd.get("type") not in ("close_all", "close_symbol"):
+    if not isinstance(cmd, dict):
+        return
+    ctype = cmd.get("type")
+
+    if ctype == "open":
+        backend_sym = cmd.get("symbol")
+        side = cmd.get("side")
+        lots = float(cmd.get("lots", 0.0) or 0.0)
+        brokers = [b for b, be in broker_to_backend.items() if be == backend_sym]
+        if not brokers or side not in ("buy", "sell") or lots <= 0:
+            ws.send(json.dumps({"type": "open_result", "ok": False,
+                                "error": f"comando open inválido: {cmd}"}))
+            return
+        if not (allow_auto_trade and is_demo):
+            reason = "allow_auto_trade=false" if not allow_auto_trade else "conta não é demo"
+            logger.warning("Refusing open: %s", reason)
+            ws.send(json.dumps({"type": "open_result", "ok": False, "symbol": backend_sym,
+                                "error": reason}))
+            return
+        result = _open_position(brokers[0], side, lots)
+        ok = result is not None and getattr(result, "retcode", None) == mt5.TRADE_RETCODE_DONE
+        logger.info("Bot open %s %s %s → ok=%s", side, brokers[0], lots, ok)
+        ws.send(json.dumps({"type": "open_result", "ok": ok, "symbol": backend_sym, "side": side,
+                            "ticket": getattr(result, "order", None) if ok else None,
+                            "error": None if ok else f"retcode={getattr(result,'retcode','?')} "
+                                                     f"{getattr(result,'comment','')}"}))
         return
 
-    ctype = cmd["type"]
+    if ctype not in ("close_all", "close_symbol"):
+        return
+
     # Resolve which broker symbols to close. close_all → everything (None).
     # close_symbol → the broker symbols mapping to the requested backend symbol.
     target_brokers: set[str] | None
@@ -630,6 +705,14 @@ def run(cfg: dict[str, Any]) -> None:
             "allow_auto_close=TRUE — this collector WILL place closing orders when "
             "the backend's profit target fires."
         )
+    allow_auto_trade = bool(cfg.get("allow_auto_trade", False))
+    is_demo = _account_is_demo()
+    if allow_auto_trade:
+        logger.warning(
+            "allow_auto_trade=TRUE — the scalper bot may OPEN positions (account "
+            "is_demo=%s; opening is refused unless demo).",
+            is_demo,
+        )
     if quote_mode:
         logger.info(
             "tape source: quote-tick flow (no real times&trades on this feed); "
@@ -649,6 +732,8 @@ def run(cfg: dict[str, Any]) -> None:
                     "type": "hello",
                     "source": source_name,
                     "auto_close_enabled": allow_auto_close,
+                    "auto_trade_enabled": allow_auto_trade,
+                    "account_is_demo": is_demo,
                 }))
                 # Force a full position resync on (re)connect: mark every symbol
                 # not-flat so the next poll reports its true state once (an open
@@ -657,8 +742,8 @@ def run(cfg: dict[str, Any]) -> None:
                 pos_flat = {b: False for b in broker_to_backend.values()}
                 next_pos_at = 0.0
             # Keep the socket alive by replying to server pings before polling,
-            # and handle any control command (close_all / close_symbol) sent.
-            _drain_control(ws, allow_auto_close, broker_to_backend)
+            # and handle any control command (close_all / close_symbol / open).
+            _drain_control(ws, broker_to_backend, allow_auto_close, allow_auto_trade, is_demo)
             for m in cfg["symbols"]:
                 backend, broker = m["backend"], m["mt5"]
                 if quote_mode:

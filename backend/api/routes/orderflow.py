@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -28,6 +29,7 @@ from api.orderflow_broadcaster import orderflow_broadcaster
 from core.enums import AssetSymbol
 from core.models import (
     AutoCloseStatus,
+    BotStatus,
     OrderBookLevel,
     OrderBookSnapshot,
     OrderFlowSnapshot,
@@ -39,6 +41,7 @@ from settings import get_settings
 from use_cases.aggregate_orderflow import OrderFlowAggregator
 from use_cases.assess_trade_signals import assess_trade_signals
 from use_cases.autoclose import should_autoclose
+from use_cases.scalper import detect_explosion, should_open
 
 logger = logging.getLogger(__name__)
 
@@ -269,6 +272,96 @@ async def _maybe_autoclose() -> None:
     await _send_to_collector({"type": "close_all", "reason": _autoclose.last_result})
 
 
+# --- explosion-scalper bot (opens AND closes; demo only) ---------------------
+
+
+class _BotState:
+    """Mutable scalper-bot state. `enabled` mirrors the collector's
+    auto-trade-on-demo capability (from hello); arming is refused otherwise."""
+
+    def __init__(self) -> None:
+        self.enabled: bool = False  # collector allow_auto_trade AND demo account
+        self.armed: bool = False
+        self.profit_target: float = 350.0  # close-all at +this (account-wide)
+        self.loss_stop: float = 900.0  # close-all + stop at −this
+        self.max_per_symbol: int = 6
+        self.cooldown_s: float = 2.0  # min gap between adds on a symbol (paces scale-in)
+        self.lots: dict[AssetSymbol, float] = {}  # per-symbol size; defaults below
+        self.cooldown_until: dict[AssetSymbol, float] = {}
+        self.last_result: str | None = None
+
+
+# Default per-symbol sizes (Diego's: index 2.0 lots, gold 0.12).
+_DEFAULT_LOTS: dict[AssetSymbol, float] = {
+    AssetSymbol.USTEC: 2.0,
+    AssetSymbol.SPX: 2.0,
+    AssetSymbol.GOLD: 0.12,
+}
+
+_bot = _BotState()
+_bot.lots = dict(_DEFAULT_LOTS)
+
+
+def _bot_status() -> BotStatus:
+    return BotStatus(
+        enabled=_bot.enabled,
+        armed=_bot.armed,
+        profit_target=_bot.profit_target,
+        loss_stop=_bot.loss_stop,
+        open_profit=_open_profit(),
+        open_count=sum(len(ps) for ps in _positions_store.values()),
+        last_result=_bot.last_result,
+    )
+
+
+async def _run_bot(touched: set[AssetSymbol]) -> None:
+    """One bot tick: account-wide exit first, then explosion entries on the
+    symbols that just updated. Called from the ingest loop after each message."""
+    if not _bot.armed:
+        return
+
+    # Account-wide exits (one-shot; disarm on either).
+    profit = _open_profit()
+    if profit >= _bot.profit_target:
+        _bot.armed = False
+        _bot.last_result = f"meta atingida (+{profit:.2f}) — fechando tudo"
+        logger.info("Bot exit: %s", _bot.last_result)
+        await _send_to_collector({"type": "close_all", "reason": _bot.last_result})
+        return
+    if profit <= -_bot.loss_stop:
+        _bot.armed = False
+        _bot.last_result = f"stop de perda ({profit:.2f}) — fechou tudo e parou"
+        logger.warning("Bot loss-stop: %s", _bot.last_result)
+        await _send_to_collector({"type": "close_all", "reason": _bot.last_result})
+        return
+
+    # Entries: only the symbols whose flow just moved.
+    now = time.monotonic()
+    for symbol in touched:
+        if symbol not in _bot.lots:
+            continue
+        direction = detect_explosion(aggregator.snapshot(symbol))
+        cooldown_ok = now >= _bot.cooldown_until.get(symbol, 0.0)
+        if should_open(
+            direction=direction,
+            open_on_symbol=len(_positions_store.get(symbol, [])),
+            max_per_symbol=_bot.max_per_symbol,
+            cooldown_ok=cooldown_ok,
+            daily_halted=False,
+        ):
+            _bot.cooldown_until[symbol] = now + _bot.cooldown_s
+            _bot.last_result = f"abriu {direction} {symbol.value} {_bot.lots[symbol]} lt"
+            logger.info("Bot entry: %s", _bot.last_result)
+            await _send_to_collector(
+                {
+                    "type": "open",
+                    "symbol": symbol.value,
+                    "side": direction,
+                    "lots": _bot.lots[symbol],
+                }
+            )
+
+
 async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
     """Feed one ingest message into the aggregator. Returns symbols touched."""
     global _current_source
@@ -286,7 +379,14 @@ async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
             # Lost execution capability (reconnect without the flag) → disarm.
             _autoclose.armed = False
             _autoclose.last_result = "desarmado: collector reconectou sem allow_auto_close"
-        logger.info("Auto-close execution capability: %s", _autoclose.enabled)
+        # Scalper bot needs auto-trade AND a demo account.
+        _bot.enabled = bool(msg.get("auto_trade_enabled", False)) and bool(
+            msg.get("account_is_demo", False)
+        )
+        if not _bot.enabled and _bot.armed:
+            _bot.armed = False
+            _bot.last_result = "desarmado: collector sem auto_trade/conta demo"
+        logger.info("Execution capability — auto_close=%s bot=%s", _autoclose.enabled, _bot.enabled)
         return set()
 
     if mtype == "autoclose_result":
@@ -298,6 +398,16 @@ async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
             f"fechado: {closed} posição(ões)" if ok else f"falha ao fechar: {err}"
         )
         logger.info("Auto-close result: ok=%s closed=%s err=%s", ok, closed, err)
+        return set()
+
+    if mtype == "open_result":
+        ok = bool(msg.get("ok"))
+        sym = msg.get("symbol")
+        if ok:
+            _bot.last_result = f"abriu {msg.get('side')} {sym} (ticket {msg.get('ticket')})"
+        else:
+            _bot.last_result = f"falha ao abrir {sym}: {msg.get('error')}"
+        logger.info("Bot open result: %s", _bot.last_result)
         return set()
 
     symbol = _parse_symbol(msg.get("symbol"))
@@ -392,6 +502,8 @@ async def ingest_ws(websocket: WebSocket) -> None:
             # Evaluate the profit-target auto-close after each message (cheap; the
             # P&L only moves on position updates). Disarms itself on fire.
             await _maybe_autoclose()
+            # Run the scalper bot (entries on the touched symbols + account exits).
+            await _run_bot(touched)
     except WebSocketDisconnect:
         logger.info("Order-flow collector disconnected: %s", websocket.client)
     except Exception:
@@ -503,3 +615,50 @@ async def close_symbol(symbol: str) -> dict[str, Any]:
         raise HTTPException(status_code=503, detail="Collector não conectado.")
     logger.info("Manual close requested for %s", sym.value)
     return {"ok": True, "detail": f"Fechamento de {sym.value} enviado ao collector."}
+
+
+# --- scalper bot (opens AND closes; demo only) -------------------------------
+
+
+class BotRequest(BaseModel):
+    """Arm/disarm the explosion-scalper bot."""
+
+    armed: bool
+    profit_target: float | None = None
+    loss_stop: float | None = None
+
+
+@router.get("/api/orderflow/bot", response_model=BotStatus, tags=["orderflow"])
+async def get_bot() -> BotStatus:
+    return _bot_status()
+
+
+@router.post("/api/orderflow/bot", response_model=BotStatus, tags=["orderflow"])
+async def set_bot(body: BotRequest) -> BotStatus:
+    """Arm or disarm the scalper. Arming requires the collector to permit
+    auto-trade on a DEMO account, and positive profit target / loss stop.
+    Disarming always succeeds (kill switch); it does NOT close open positions —
+    use the per-asset button or auto-close for that."""
+    if body.armed:
+        if not _bot.enabled:
+            raise HTTPException(
+                status_code=409,
+                detail="Bot indisponível: o collector precisa de allow_auto_trade=true E conta DEMO.",
+            )
+        if body.profit_target is not None:
+            if body.profit_target <= 0:
+                raise HTTPException(status_code=422, detail="profit_target deve ser > 0.")
+            _bot.profit_target = body.profit_target
+        if body.loss_stop is not None:
+            if body.loss_stop <= 0:
+                raise HTTPException(status_code=422, detail="loss_stop deve ser > 0.")
+            _bot.loss_stop = body.loss_stop
+        _bot.cooldown_until.clear()  # fresh start
+    _bot.armed = body.armed
+    _bot.last_result = (
+        f"bot ARMADO (meta +{_bot.profit_target:.0f} / stop −{_bot.loss_stop:.0f})"
+        if body.armed
+        else "bot desarmado pelo usuário"
+    )
+    logger.info("Scalper bot %s", "ARMED" if body.armed else "disarmed")
+    return _bot_status()

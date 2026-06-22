@@ -8,10 +8,12 @@ import { BidAskChart } from "./BidAskChart";
 import { PressureGauge } from "./PressureGauge";
 import { PositionPanel } from "./PositionPanel";
 import { AutoCloseControl } from "./AutoCloseControl";
+import { ScalperBotControl } from "./ScalperBotControl";
 import { FootprintPanel } from "./FootprintPanel";
 import { TapePanel } from "./TapePanel";
 import { useOrderFlow } from "@/hooks/useOrderFlow";
 import { useAutoClose } from "@/hooks/useAutoClose";
+import { useScalperBot } from "@/hooks/useScalperBot";
 import { cn } from "@/lib/utils";
 import type { AssetSymbol, LiveActivity, OrderFlowSnapshot, SessionLiquidity } from "@/lib/types";
 
@@ -29,6 +31,7 @@ const FLOW_ASSETS: { key: AssetSymbol; label: string }[] = [
 export function OrderFlowSection() {
   const { flows, status } = useOrderFlow();
   const { status: autoClose, arm, disarm, closeSymbol } = useAutoClose();
+  const { status: bot, arm: armBot, disarm: disarmBot } = useScalperBot();
   const executionEnabled = autoClose?.enabled ?? false;
 
   // Ticking clock so per-symbol staleness is reactive without calling Date.now()
@@ -84,6 +87,7 @@ export function OrderFlowSection() {
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
+        <ScalperBotControl status={bot} arm={armBot} disarm={disarmBot} />
         <AutoCloseControl status={autoClose} arm={arm} disarm={disarm} />
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
           {FLOW_ASSETS.map((a) => (

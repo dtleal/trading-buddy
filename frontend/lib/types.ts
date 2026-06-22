@@ -332,6 +332,18 @@ export const AutoCloseStatus = z.object({
 });
 export type AutoCloseStatus = z.infer<typeof AutoCloseStatus>;
 
+/** State of the explosion-scalper bot (/api/orderflow/bot). */
+export const BotStatus = z.object({
+  enabled: z.boolean(), // collector allow_auto_trade AND demo account
+  armed: z.boolean(),
+  profit_target: z.number(),
+  loss_stop: z.number(),
+  open_profit: z.number(),
+  open_count: z.number(),
+  last_result: z.string().nullable().default(null),
+});
+export type BotStatus = z.infer<typeof BotStatus>;
+
 /** Response from /api/vix/history. */
 export const VixHistoryResponse = z.object({
   symbol: z.string(),

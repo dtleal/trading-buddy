@@ -216,6 +216,7 @@ For exchange-grade footprint/delta you'd switch the backend to a real CME feed
 | `liquidity_poll_seconds` | How often (s) to recompute + push that ratio (default `60`). It reads ~3 weeks of M5 bars, so it is throttled well below the tick poll. `0` disables. |
 | `positions_poll_seconds` | How often (s) to read + push your **open positions** for the live P&L / time-in-trade panel and in-trade alerts (default `0.25`). Reading is always safe. `0` disables position reading entirely. |
 | `allow_auto_close` | **Execution gate** (default `false` = strictly read-only). `true` lets this collector place **closing** orders when the backend profit target fires or you click "fechar tudo". Only enable on a machine/account where you accept automated execution — **test on DEMO first**. Never opens positions. |
+| `allow_auto_trade` | **OPENING gate** for the explosion-scalper bot (default `false`). `true` lets the bot OPEN positions on bursts — but the collector **refuses to open unless the account is DEMO**, no matter this flag. Separate from `allow_auto_close` because opening is far riskier. Requires AutoTrading on in MT5. |
 | `symbols[]` | Map each backend symbol to **your broker's exact MT5 name**. `backend` must be one of `USTEC` / `SPX` / `GOLD`. `mt5` is whatever your broker calls it (`US100.cash`, `Usa500`, `XAUUSD`, …). |
 | `symbols[].footprint_tick` | Optional price step used to group footprint rows (e.g. `1.0` for an index ~28000, `0.1` for gold). Omit to auto-derive from the broker tick size. Keeps a continuous quote feed from fragmenting into thousands of cells. |
 | `mt5.sources[]` | Priority list of terminals; each `{name, path}` is tried in order until one attaches. `path` is the `terminal64.exe`. Add `login`/`password`/`server` only to drive a specific account. |
@@ -251,6 +252,23 @@ off until you opt in.**
 4. **Close-only** — it only ever *closes* existing positions, never opens.
 5. The brain (the target decision) lives in the backend and is unit-tested; the
    collector is a thin executor gated by step 1.
+
+### Explosion-scalper bot (opens AND closes — demo only)
+
+An optional deterministic bot that **opens** scalps on detected bursts and exits
+the whole account at a profit target / loss stop. It is the highest-risk feature,
+so it's gated hardest:
+
+- **Opens** only when `allow_auto_trade: true` **and** the account is **DEMO**
+  (the collector refuses to open on a live account regardless of the flag), and
+  only after you click **OPERAR** in the UI. Default size: index 2.0 lt, gold
+  0.12 lt; up to 6 positions per symbol; entries paced by a cooldown.
+- **Entry** = a burst: short-window range expansion + strong directional pressure
+  (tunable thresholds in `use_cases/scalper.py` — noisy on synthesized feeds,
+  expect to tune on demo).
+- **Exit** = whole-account close at **+profit_target** or **−loss_stop**
+  (defaults +$350 / −$900), then it disarms. **PARAR** is the kill switch.
+- It is a *mechanism*, not a proven edge — forward-test on demo.
 
 **You must enable AutoTrading in the MT5 terminal.** MT5 blocks all script/EA
 orders until the **"AutoTrading" / "Algo Trading"** toolbar button is on (green;

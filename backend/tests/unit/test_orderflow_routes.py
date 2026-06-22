@@ -33,6 +33,8 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     of._positions_store.clear()
     of._liquidity_store.clear()
     of._autoclose = of._AutoCloseState()
+    of._bot = of._BotState()
+    of._bot.lots = dict(of._DEFAULT_LOTS)
     orderflow_broadcaster._latest.clear()
 
     app = create_app()
@@ -329,3 +331,78 @@ def test_autoclose_result_recorded(client: TestClient) -> None:
     with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
         ws.send_json({"type": "autoclose_result", "ok": True, "closed": 2})
     assert "2" in (client.get("/api/orderflow/autoclose").json()["last_result"] or "")
+
+
+# --- scalper bot ------------------------------------------------------------
+
+
+def test_bot_status_defaults(client: TestClient) -> None:
+    st = client.get("/api/orderflow/bot").json()
+    assert st["enabled"] is False and st["armed"] is False
+    assert st["profit_target"] == 350.0 and st["loss_stop"] == 900.0
+
+
+def test_bot_enabled_only_on_auto_trade_and_demo(client: TestClient) -> None:
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json({"type": "hello", "auto_trade_enabled": True, "account_is_demo": True})
+    assert client.get("/api/orderflow/bot").json()["enabled"] is True
+    # auto-trade on but NOT a demo account → bot stays disabled.
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json({"type": "hello", "auto_trade_enabled": True, "account_is_demo": False})
+    assert client.get("/api/orderflow/bot").json()["enabled"] is False
+
+
+def test_bot_arm_refused_when_disabled(client: TestClient) -> None:
+    of._bot.enabled = False
+    assert client.post("/api/orderflow/bot", json={"armed": True}).status_code == 409
+
+
+def test_bot_arm_and_disarm(client: TestClient) -> None:
+    of._bot.enabled = True
+    armed = client.post(
+        "/api/orderflow/bot", json={"armed": True, "profit_target": 350, "loss_stop": 900}
+    ).json()
+    assert armed["armed"] is True and armed["profit_target"] == 350.0
+    assert client.post("/api/orderflow/bot", json={"armed": False}).json()["armed"] is False
+
+
+def test_bot_opens_on_explosion(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Force the (separately-tested) detector to fire; assert the wiring opens.
+    monkeypatch.setattr(of, "detect_explosion", lambda snap: "buy")
+    of._bot.enabled = True
+    of._bot.armed = True
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json({"type": "positions", "symbol": "USTEC", "positions": []})  # touch, flat
+        cmd = ws.receive_json()
+    assert cmd["type"] == "open"
+    assert cmd["symbol"] == "USTEC" and cmd["side"] == "buy" and cmd["lots"] == 2.0
+
+
+def test_bot_exits_all_at_profit_target(client: TestClient) -> None:
+    of._bot.enabled = True
+    of._bot.armed = True
+    of._bot.profit_target = 100.0
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json(_positions_msg(profit=150.0))
+        cmd = ws.receive_json()
+    assert cmd["type"] == "close_all"
+    assert of._bot.armed is False
+
+
+def test_bot_loss_stop_closes_all(client: TestClient) -> None:
+    of._bot.enabled = True
+    of._bot.armed = True
+    of._bot.loss_stop = 900.0
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json(_positions_msg(profit=-1000.0))
+        cmd = ws.receive_json()
+    assert cmd["type"] == "close_all"
+    assert of._bot.armed is False
+
+
+def test_bot_open_result_recorded(client: TestClient) -> None:
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json(
+            {"type": "open_result", "ok": True, "symbol": "USTEC", "side": "buy", "ticket": 555}
+        )
+    assert "555" in (client.get("/api/orderflow/bot").json()["last_result"] or "")

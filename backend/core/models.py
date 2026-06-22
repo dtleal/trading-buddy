@@ -511,6 +511,24 @@ class AutoCloseStatus(_Frozen):
     last_result: str | None = None
 
 
+class BotStatus(_Frozen):
+    """State of the explosion-scalper bot (opens AND closes, demo only).
+
+    `enabled` is the collector's capability — it requires the collector's
+    `allow_auto_trade` flag AND a DEMO account; the UI can't arm otherwise.
+    `armed` runs the bot. It opens on bursts up to a per-symbol cap and exits
+    the whole account at `profit_target` (+) / `loss_stop` (−), disarming itself.
+    """
+
+    enabled: bool = False
+    armed: bool = False
+    profit_target: float = 350.0
+    loss_stop: float = 900.0
+    open_profit: float = 0.0
+    open_count: int = 0
+    last_result: str | None = None
+
+
 class OrderFlowSnapshot(_Frozen):
     """Per-symbol order-flow state broadcast to the frontend.
 
