@@ -150,7 +150,7 @@ function SymbolColumn({
             <PressureGauge flow={flow} />
           </FlowBlock>
           <FlowBlock title="Bid · Ask (tempo real)">
-            <BidAskChart flow={flow} />
+            <BidAskChart flow={flow} now={now} />
           </FlowBlock>
           <FlowBlock title="Footprint (volume executado)">
             <FootprintPanel bars={flow.footprint} />

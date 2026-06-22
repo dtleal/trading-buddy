@@ -360,7 +360,7 @@ def _quantize(price: float, tick: float | None) -> float:
 
 def _read_quote_flow(
     backend: str, broker: str, since_msc: int, last_mid: float | None, tick: float | None
-) -> tuple[list[dict[str, Any]], int, float | None]:
+) -> tuple[list[dict[str, Any]], int, float | None, tuple[float, float] | None]:
     """Synthesize a buy/sell tape from quote ticks when the broker has no
     times&trades (the common CFD case: COPY_TICKS_TRADE is empty).
 
@@ -369,15 +369,20 @@ def _read_quote_flow(
     are hitting the bid (side=sell at the bid). Volume is unknown on these feeds,
     so each directional tick counts as 1 — the *count* of up vs down ticks is the
     pressure signal (delta), not a traded contract count. Returns
-    (trades, new high-water time_msc, new last_mid).
+    (trades, new high-water time_msc, new last_mid, latest (bid, ask)).
+
+    The latest (bid, ask) is the live top of book — on CFD feeds the broker's DOM
+    (`market_book_get`) is a frozen, mirrored demo book, so the quote tick is the
+    only genuinely live bid/ask. It feeds the bid/ask chart. None if no new tick.
     """
     from_dt = datetime.fromtimestamp(max(since_msc, 0) / 1000.0, tz=timezone.utc)
     ticks = mt5.copy_ticks_from(broker, from_dt, 100000, mt5.COPY_TICKS_ALL)
     if ticks is None or len(ticks) == 0:
-        return [], since_msc, last_mid
+        return [], since_msc, last_mid, None
     out: list[dict[str, Any]] = []
     high = since_msc
     prev = last_mid
+    last_quote: tuple[float, float] | None = None
     for t in ticks:
         tmsc = int(t["time_msc"])
         if tmsc <= since_msc:
@@ -387,6 +392,7 @@ def _read_quote_flow(
         ask = float(t["ask"])
         if bid <= 0.0 or ask <= 0.0:
             continue
+        last_quote = (bid, ask)  # freshest top of book, regardless of mid move
         mid = (bid + ask) / 2.0
         if prev is not None and mid != prev:
             if mid > prev:
@@ -402,7 +408,7 @@ def _read_quote_flow(
                 }
             )
         prev = mid
-    return out, high, prev
+    return out, high, prev, last_quote
 
 
 # --- main loop ---------------------------------------------------------------
@@ -484,7 +490,26 @@ def run(cfg: dict[str, Any]) -> None:
             _drain_control(ws)
             for m in cfg["symbols"]:
                 backend, broker = m["backend"], m["mt5"]
-                book = _read_book(backend, broker, depth)
+                if quote_mode:
+                    # CFD feed: the broker's DOM is a frozen mirrored demo book,
+                    # so derive the live top of book from the quote tick instead.
+                    trades, since[broker], mid[broker], quote = _read_quote_flow(
+                        backend, broker, since[broker], mid[broker], ftick[broker]
+                    )
+                    book = (
+                        {
+                            "type": "book",
+                            "symbol": backend,
+                            "asof": _now_iso(),
+                            "bids": [[quote[0], 0.0]],
+                            "asks": [[quote[1], 0.0]],
+                        }
+                        if quote is not None
+                        else None
+                    )
+                else:
+                    book = _read_book(backend, broker, depth)
+                    trades, since[broker] = _read_trades(backend, broker, since[broker])
                 if book:
                     # Skip unchanged books so we don't flood the backend with a
                     # full snapshot broadcast every poll when nothing moved.
@@ -492,12 +517,6 @@ def run(cfg: dict[str, Any]) -> None:
                     if sig != last_book.get(broker):
                         last_book[broker] = sig
                         ws.send(json.dumps(book))
-                if quote_mode:
-                    trades, since[broker], mid[broker] = _read_quote_flow(
-                        backend, broker, since[broker], mid[broker], ftick[broker]
-                    )
-                else:
-                    trades, since[broker] = _read_trades(backend, broker, since[broker])
                 if trades:
                     ws.send(json.dumps({"type": "trades", "symbol": backend, "trades": trades}))
             # Periodically recompute + push the session-liquidity reading that

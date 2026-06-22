@@ -10,6 +10,12 @@ const MAX_POINTS = 140;
 const VIEW_W = 300;
 const VIEW_H = 120;
 
+// If the quote stops changing for this long while the feed is otherwise live,
+// the source is frozen (e.g. a broker's mirrored DOM that stops updating — the
+// exact failure that once left this chart silently stuck at "Coletando…").
+// Surface it loudly instead of pretending we're still warming up.
+const QUOTE_STALE_MS = 12_000;
+
 type Pt = { bid: number; ask: number };
 
 /**
@@ -20,9 +26,14 @@ type Pt = { bid: number; ask: number };
  * Points are accumulated from each incoming snapshot's top of book; a new point
  * is added only when the quote actually changes.
  */
-export function BidAskChart({ flow }: { flow: OrderFlowSnapshot | undefined }) {
+export function BidAskChart({ flow, now }: { flow: OrderFlowSnapshot | undefined; now: number }) {
   const [points, setPoints] = useState<Pt[]>([]);
   const lastQuote = useRef<string>("");
+  // Wall-clock of the last actual quote change. Drives the staleness guard —
+  // we can't compare book.asof to the snapshot's asof because they come from
+  // different clocks (broker server time vs collector wall-clock), so freshness
+  // is tracked client-side from when a new point actually lands.
+  const lastChangeAt = useRef<number>(0);
 
   const bid = flow?.book?.bids?.[0]?.price ?? null;
   const ask = flow?.book?.asks?.[0]?.price ?? null;
@@ -32,6 +43,7 @@ export function BidAskChart({ flow }: { flow: OrderFlowSnapshot | undefined }) {
     const key = `${bid}:${ask}`;
     if (key === lastQuote.current) return; // unchanged quote → no new tick
     lastQuote.current = key;
+    lastChangeAt.current = Date.now();
     setPoints((prev) => {
       const next = prev.length >= MAX_POINTS ? prev.slice(prev.length - MAX_POINTS + 1) : prev.slice();
       next.push({ bid, ask });
@@ -39,10 +51,18 @@ export function BidAskChart({ flow }: { flow: OrderFlowSnapshot | undefined }) {
     });
   }, [bid, ask]);
 
+  // Quote hasn't moved in a while though we've seen at least one — frozen source.
+  const stale =
+    lastChangeAt.current > 0 && now > 0 && now - lastChangeAt.current > QUOTE_STALE_MS;
+
   if (points.length < 2 || bid == null || ask == null) {
     return (
-      <div className="flex h-[120px] items-center justify-center text-xs text-zinc-500">
-        Coletando cotações…
+      <div className="flex h-[120px] items-center justify-center text-center text-xs text-zinc-500">
+        {stale ? (
+          <span className="text-amber-500">Bid/Ask sem atualização (cotação parada)</span>
+        ) : (
+          "Coletando cotações…"
+        )}
       </div>
     );
   }
@@ -100,6 +120,12 @@ export function BidAskChart({ flow }: { flow: OrderFlowSnapshot | undefined }) {
         <span className="text-zinc-500">spread {fmtPrice(spread)}</span>
         <span className="text-emerald-400">bid {fmtPrice(bid)}</span>
       </div>
+
+      {stale && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center pb-0.5 text-[10px] font-semibold text-amber-500">
+          cotação parada
+        </div>
+      )}
     </div>
   );
 }

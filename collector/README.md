@@ -3,8 +3,10 @@
 Streams live **bid/ask · footprint · tape · pressure** from your MetaTrader 5
 terminal to the trading-buddy backend, which renders it on the dashboard for
 **USTEC, USA500 (→ SPX) and GOLD**. The dashboard's top-of-book panel is a
-real-time bid/ask tick chart (the demo DOM book is mirrored, so the ladder was
-dropped in favour of the genuinely-real top-of-book quote).
+real-time bid/ask tick chart. With `synthesize_trades_from_quotes` on, that
+bid/ask is taken from the **live quote tick** — not the broker's DOM book, which
+on these CFD demo feeds is mirrored *and freezes* (it stopped updating mid-day
+and left the chart stuck), so it is no longer trusted as the quote source.
 
 This bridge **only reads market data** — it never places orders.
 
@@ -172,8 +174,8 @@ what you are looking at:
 
 | Panel | Source | Trustworthy? |
 |---|---|---|
-| **Bid/Ask tick chart** | broker top-of-book quote | ✅ real (price movement) |
-| **DOM depth (sizes)** | broker book | ⚠️ on demo accounts it is often **mirrored** (bid size = ask size at every level) → imbalance is always 0; we ingest the book only for the top-of-book quote, the ladder isn't shown |
+| **Bid/Ask tick chart** | **live quote tick** (`bid`/`ask`) under quote synthesis; raw DOM top-of-book otherwise | ✅ real (price movement) |
+| **DOM depth (sizes)** | broker book | ⚠️ on demo accounts it is often **mirrored** (bid size = ask size at every level) → imbalance is always 0; worse, it can **freeze** for hours. Not used as the quote source when synthesis is on; the ladder isn't shown |
 | **Tape / Footprint / Pressure** | **derived** from quote-tick direction when there are no real trade ticks | ⚠️ direction is sound; **"volume" is a tick count, not contracts** |
 
 With quote-tick synthesis the aggressor is inferred by the **tick rule** on the
@@ -236,6 +238,7 @@ Local: restart the backend container. KVM: redeploy.
 | DOM fills but tape/footprint/pressure stay empty | Broker sends no real trade ticks | Set `synthesize_trades_from_quotes: true` |
 | Flow appears then drops every ~50s | (already fixed) collector now answers backend keepalive pings | Pull latest `mt5_orderflow_collector.py` |
 | Backend hangs / `/api/orderflow` times out under quote synthesis | (already fixed) per-trade snapshot + unbounded footprint cells | Pull latest backend; ensure `footprint_tick` is set per symbol |
+| Bid/Ask chart stuck on "Coletando cotações…" while tape/pressure update | (already fixed) the broker's mirrored DOM **froze** and was the quote source, so the quote never changed | Pull latest `mt5_orderflow_collector.py` (quote synthesis now feeds the chart from the live quote tick). The chart also now shows "cotação parada" instead of failing silently |
 
 Quick health check from the backend host:
 
