@@ -6,10 +6,17 @@ Two surfaces:
 - **CLI dashboard** (`dtb run`) — Rich-based terminal view, same data, no browser needed.
 - **Web app** (`http://localhost:3000`) — Next.js 15 frontend with live VIX chart and configurable VIX alerts. See [`frontend/README.md`](frontend/README.md).
 
-It is **not** a trading bot. It does not place orders. It gives you a refreshed
-read of the macro + intraday environment while you trade, and points out
-**high-confluence setups** when (and only when) the data alignment is objectively
-favorable.
+At its core it is a **read-only co-pilot**: a refreshed read of the macro +
+intraday environment while you trade, pointing out **high-confluence setups** when
+(and only when) the data alignment is objectively favorable.
+
+It also has an **optional, opt-in order-flow execution layer** (off by default):
+a profit-target auto-close, a per-asset "fechar tudo" button, and a deterministic
+explosion-scalper bot that opens and closes positions. Execution requires explicit
+local gates on the collector (`allow_auto_close` / `allow_auto_trade`) and the bot
+only opens on a **demo** account. See [`collector/README.md`](collector/README.md).
+It is **not** a proven money-maker — the bot is a tunable mechanism to forward-test
+on demo, not financial advice.
 
 ## What it does
 
@@ -250,6 +257,8 @@ Protocol interfaces in `core/interfaces.py`.
 | `detect_trade_setup` | Pure heuristic: levels + bias → `TradeSetup` or `None`. |
 | `assess_day_outlook` | Pure gate: calendar + VIX + opening range + MT5 activity → `DayOutlook` (score/regime). |
 | `aggregate_orderflow` | Rolling DOM/footprint/tape state + real-time `LiveActivity` per symbol. |
+| `assess_trade_signals` | Pure: open position + flow lean → in-trade alerts (pressure-against / take-profit). |
+| `autoclose` / `scalper` | Pure decision logic for the opt-in execution layer: whole-account profit-target close, and the explosion-scalper bot's entries (`detect_explosion` / `decide_entry`), reversal (`should_reverse`) and gating (`should_open`). Demo-gated; off by default. |
 | `generate_briefing` / `explain_event` | LLM use cases (Claude). |
 
 ## Make targets
