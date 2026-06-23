@@ -120,6 +120,55 @@ def decide_entry(
     return current_side if lean >= ADD_LEAN else None
 
 
+# Grid / market-maker entry: one market order + this many limit orders spaced
+# below (buy) / above (sell) the entry, each step = GRID_STEP_FRAC × the recent
+# per-bar range (an ATR proxy). The "region floor" is the deepest level plus a
+# GRID_BREACH_FRAC buffer; price beyond it means the whole region failed → cut.
+GRID_LEVELS = 3
+GRID_STEP_FRAC = 0.5
+GRID_BREACH_FRAC = 0.5
+
+
+def grid_levels(
+    entry: float,
+    side: Direction,
+    range_per_bar: float,
+    *,
+    levels: int = GRID_LEVELS,
+    step_frac: float = GRID_STEP_FRAC,
+) -> list[float]:
+    """Limit-order prices below a buy entry (or above a sell entry), ATR-spaced.
+    Empty when there's no usable range (can't size the grid)."""
+    step = range_per_bar * step_frac
+    if step <= 0:
+        return []
+    sign = -1.0 if side == "buy" else 1.0
+    return [entry + sign * step * (k + 1) for k in range(levels)]
+
+
+def grid_breach_price(
+    entry: float,
+    side: Direction,
+    range_per_bar: float,
+    *,
+    levels: int = GRID_LEVELS,
+    step_frac: float = GRID_STEP_FRAC,
+    breach_frac: float = GRID_BREACH_FRAC,
+) -> float | None:
+    """Price beyond which the whole grid region has failed (→ cut/reverse).
+    For a buy it's below the deepest limit; for a sell, above. None if no range."""
+    step = range_per_bar * step_frac
+    if step <= 0:
+        return None
+    sign = -1.0 if side == "buy" else 1.0
+    return entry + sign * step * (levels + breach_frac)
+
+
+def region_broken(price: float, side: Direction, breach_price: float) -> bool:
+    """True when `price` has broken past the grid region (failed) for the side."""
+    return price < breach_price if side == "buy" else price > breach_price
+
+
 def should_reverse(snapshot: OrderFlowSnapshot, current_side: Direction) -> bool:
     """True when the flow has flipped strongly AGAINST the held side — the signal
     to close that side (stop & reverse). Uses REVERSE_LEAN (> ADD_LEAN) so noise
@@ -160,4 +209,13 @@ def should_open(
     return True
 
 
-__all__ = ["detect_explosion", "decide_entry", "should_reverse", "should_open", "Direction"]
+__all__ = [
+    "detect_explosion",
+    "decide_entry",
+    "should_reverse",
+    "should_open",
+    "grid_levels",
+    "grid_breach_price",
+    "region_broken",
+    "Direction",
+]

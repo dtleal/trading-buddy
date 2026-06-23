@@ -18,6 +18,9 @@ from use_cases.scalper import (
     STRONG_FRACTION,
     decide_entry,
     detect_explosion,
+    grid_breach_price,
+    grid_levels,
+    region_broken,
     should_open,
     should_reverse,
 )
@@ -139,6 +142,26 @@ def test_should_not_reverse_when_flow_still_favors_or_weak() -> None:
     assert should_reverse(_snap(9, 11), "buy") is False
     # Too few prints → no reverse.
     assert should_reverse(_snap(2, 3), "buy") is False
+
+
+def test_grid_levels_below_for_buy_above_for_sell() -> None:
+    # range_per_bar 10, step_frac 0.5 → step 5 → 3 levels.
+    assert grid_levels(100.0, "buy", 10.0) == [95.0, 90.0, 85.0]
+    assert grid_levels(100.0, "sell", 10.0) == [105.0, 110.0, 115.0]
+    assert grid_levels(100.0, "buy", 0.0) == []  # no range → no grid
+
+
+def test_grid_breach_and_region_broken() -> None:
+    # buy: deepest level 85 (3*5), breach buffer 0.5*5=2.5 → breach at 82.5.
+    bp = grid_breach_price(100.0, "buy", 10.0)
+    assert bp == 82.5
+    assert region_broken(82.4, "buy", bp) is True
+    assert region_broken(83.0, "buy", bp) is False
+    # sell mirror: breach at 117.5.
+    bps = grid_breach_price(100.0, "sell", 10.0)
+    assert bps == 117.5
+    assert region_broken(117.6, "sell", bps) is True
+    assert region_broken(117.0, "sell", bps) is False
 
 
 def test_should_open_gates() -> None:

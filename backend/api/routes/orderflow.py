@@ -42,7 +42,15 @@ from settings import get_settings
 from use_cases.aggregate_orderflow import OrderFlowAggregator
 from use_cases.assess_trade_signals import assess_trade_signals
 from use_cases.autoclose import should_autoclose
-from use_cases.scalper import Direction, decide_entry, should_open, should_reverse
+from use_cases.scalper import (
+    Direction,
+    detect_explosion,
+    grid_breach_price,
+    grid_levels,
+    region_broken,
+    should_open,
+    should_reverse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -253,6 +261,24 @@ def _open_profit() -> float:
     return sum(p.profit for ps in _positions_store.values() for p in ps)
 
 
+def _book_bid_ask(snapshot: OrderFlowSnapshot) -> tuple[float, float] | None:
+    """Top-of-book (bid, ask) from a snapshot, or None if absent."""
+    book = snapshot.book
+    if book is None or not book.bids or not book.asks:
+        return None
+    return book.bids[0].price, book.asks[0].price
+
+
+def _book_mid(snapshot: OrderFlowSnapshot) -> float | None:
+    ba = _book_bid_ask(snapshot)
+    return (ba[0] + ba[1]) / 2.0 if ba else None
+
+
+def _range_per_bar(snapshot: OrderFlowSnapshot) -> float:
+    """Recent per-bar range (ATR proxy) used to size the grid; 0 if unknown."""
+    return snapshot.live_activity.range_per_bar if snapshot.live_activity else 0.0
+
+
 def _symbol_side(positions: list[Position]) -> Direction | None:
     """The net side held on a symbol: 'buy'/'sell', or None when flat or tied
     (a tie should not happen with direction-consistent entries; treated as
@@ -351,6 +377,9 @@ class _BotState:
         self.cooldown_until: dict[AssetSymbol, float] = {}
         self.realized: float = 0.0  # banked P&L this session
         self.peak: dict[AssetSymbol, float] = {}  # peak unrealized P&L per symbol (profit lock)
+        # Per-symbol grid region while in a trade: {"side", "breach"} — `breach`
+        # is the price beyond which the whole grid failed (→ cut/reverse).
+        self.grid: dict[AssetSymbol, dict[str, Any]] = {}
         self.flattening: bool = False  # an account close-all is settling; pause
         self.resume_at: float = 0.0  # monotonic time to resume after flatten
         # Per-symbol stop-and-reverse in progress → captured P&L to bank once that
@@ -462,10 +491,12 @@ async def _run_bot(touched: set[AssetSymbol]) -> None:
             if not positions:
                 _bot.realized += _bot.closing.pop(symbol)
                 _bot.peak.pop(symbol, None)
+                _bot.grid.pop(symbol, None)
             continue
 
         if not positions:
             _bot.peak.pop(symbol, None)  # flat → forget the old peak
+            _bot.grid.pop(symbol, None)  # and the old grid region
 
         snap = aggregator.snapshot(symbol)
         current_side = _symbol_side(positions)
@@ -494,56 +525,76 @@ async def _run_bot(touched: set[AssetSymbol]) -> None:
                 await _send_to_collector({"type": "close_symbol", "symbol": symbol.value})
                 continue
 
-        # Stop & reverse: flow flipped hard against the held side → close it now.
-        # Banked on flat (above); re-entry into the new side comes via the normal
-        # explosion path once flat + cooldown.
-        if current_side is not None and should_reverse(snap, current_side):
-            reverse_pnl = sum(p.profit for p in positions)
-            _bot.closing[symbol] = reverse_pnl
-            _bot.cooldown_until[symbol] = now + _bot.cooldown_s
-            _bot.last_result = (
-                f"reversão {symbol.value}: fluxo virou contra {current_side} — fechando"
+        # Hybrid reverse: the grid catches pullbacks, but if price breaks past the
+        # whole region (deepest level + buffer) the trade has failed → close (the
+        # collector also cancels the unfilled limits) and let it re-enter/flip.
+        # Fall back to the lean-based reverse if no grid region is recorded.
+        if current_side is not None:
+            grid = _bot.grid.get(symbol)
+            mid = _book_mid(snap)
+            broke = (
+                grid is not None
+                and mid is not None
+                and region_broken(mid, current_side, grid["breach"])
             )
-            logger.info("Bot reverse: %s", _bot.last_result)
-            await _record_bot_trade(
-                kind="close",
-                symbol=symbol.value,
-                side=current_side,
-                pnl=reverse_pnl,
-                reason="reverse",
-            )
-            await _send_to_collector({"type": "close_symbol", "symbol": symbol.value})
-            continue
+            if broke or (grid is None and should_reverse(snap, current_side)):
+                _bot.closing[symbol] = sym_pnl
+                _bot.cooldown_until[symbol] = now + _bot.cooldown_s
+                why = "região rompida" if broke else "fluxo virou contra"
+                _bot.last_result = f"reversão {symbol.value}: {why} — fechando"
+                logger.info("Bot reverse: %s", _bot.last_result)
+                await _record_bot_trade(
+                    kind="close",
+                    symbol=symbol.value,
+                    side=current_side,
+                    pnl=sym_pnl,
+                    reason="reverse",
+                )
+                await _send_to_collector({"type": "close_symbol", "symbol": symbol.value})
+                continue
 
+        # Entry: only when FLAT and with no grid region pending (the grid does the
+        # scaling — no same-price market adds). A fresh explosion opens 1 market
+        # order + an ATR-spaced grid of limits below (buy) / above (sell).
+        if positions or symbol in _bot.grid:
+            continue
         liq = _liquidity_store.get(symbol)
         liquidity_ok = liq is None or liq.ratio >= _THIN_RATIO
-        # Direction matching what we already hold (or an explosion when flat);
-        # never the opposite side of an open position.
-        direction = decide_entry(
-            snap,
-            current_side=current_side,
-            open_on_symbol=len(positions),
-        )
+        direction = detect_explosion(snap)
         cooldown_ok = now >= _bot.cooldown_until.get(symbol, 0.0)
-        if should_open(
+        if not should_open(
             direction=direction,
-            open_on_symbol=len(positions),
+            open_on_symbol=0,
             max_per_symbol=_bot.max_per_symbol,
             cooldown_ok=cooldown_ok,
             daily_halted=False,
             liquidity_ok=liquidity_ok,
         ):
-            _bot.cooldown_until[symbol] = now + _bot.cooldown_s
-            _bot.last_result = f"abriu {direction} {symbol.value} {_bot.lots[symbol]} lt"
-            logger.info("Bot entry: %s", _bot.last_result)
-            await _send_to_collector(
-                {
-                    "type": "open",
-                    "symbol": symbol.value,
-                    "side": direction,
-                    "lots": _bot.lots[symbol],
-                }
-            )
+            continue
+        assert direction is not None  # should_open guarantees it
+        ba = _book_bid_ask(snap)
+        rpb = _range_per_bar(snap)
+        if ba is None or rpb <= 0:
+            continue  # need a quote + range to size the grid
+        bid, ask = ba
+        entry = ask if direction == "buy" else bid
+        levels = grid_levels(entry, direction, rpb)
+        breach = grid_breach_price(entry, direction, rpb)
+        _bot.grid[symbol] = {"side": direction, "breach": breach}
+        _bot.cooldown_until[symbol] = now + _bot.cooldown_s
+        _bot.last_result = (
+            f"abriu {direction} {symbol.value} {_bot.lots[symbol]}lt + grade {len(levels)} níveis"
+        )
+        logger.info("Bot entry: %s", _bot.last_result)
+        await _send_to_collector(
+            {
+                "type": "open",
+                "symbol": symbol.value,
+                "side": direction,
+                "lots": _bot.lots[symbol],
+                "grid": levels,
+            }
+        )
 
 
 async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
@@ -873,6 +924,7 @@ async def set_bot(body: BotRequest) -> BotStatus:
         _bot.cooldown_until.clear()
         _bot.closing.clear()
         _bot.peak.clear()
+        _bot.grid.clear()
         _bot.realized = 0.0
         _bot.flattening = False
         _bot.resume_at = 0.0

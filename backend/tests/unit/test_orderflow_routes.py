@@ -434,9 +434,14 @@ def test_bot_arm_and_disarm(client: TestClient) -> None:
     assert client.post("/api/orderflow/bot", json={"armed": False}).json()["armed"] is False
 
 
-def test_bot_opens_on_explosion(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    # Force the (separately-tested) entry decision; assert the wiring opens.
-    monkeypatch.setattr(of, "decide_entry", lambda *a, **k: "buy")
+def test_bot_opens_market_plus_grid_on_explosion(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Force a flat-entry explosion + a quote + range; assert it opens 1 market
+    # order WITH a grid of limit levels attached.
+    monkeypatch.setattr(of, "detect_explosion", lambda snap: "buy")
+    monkeypatch.setattr(of, "_book_bid_ask", lambda snap: (100.0, 100.5))
+    monkeypatch.setattr(of, "_range_per_bar", lambda snap: 10.0)
     of._bot.enabled = True
     of._bot.armed = True
     with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
@@ -444,6 +449,9 @@ def test_bot_opens_on_explosion(client: TestClient, monkeypatch: pytest.MonkeyPa
         cmd = ws.receive_json()
     assert cmd["type"] == "open"
     assert cmd["symbol"] == "USTEC" and cmd["side"] == "buy" and cmd["lots"] == 2.0
+    # entry 100.5, step 0.5*10=5 → limits below
+    assert cmd["grid"] == [95.5, 90.5, 85.5]
+    assert "USTEC" in of._bot.grid  # region recorded for the break-reverse
 
 
 def test_bot_reverses_on_flow_flip(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -457,6 +465,30 @@ def test_bot_reverses_on_flow_flip(client: TestClient, monkeypatch: pytest.Monke
         cmd = ws.receive_json()
     assert cmd["type"] == "close_symbol" and cmd["symbol"] == "USTEC"
     assert of._bot.armed is True
+
+
+def test_bot_reverses_when_region_breaks(client: TestClient) -> None:
+    # Holding a long with a grid region whose breach is 99; a book whose mid
+    # falls below 99 means the whole region failed → close (collector also
+    # cancels the limits).
+    from core.enums import AssetSymbol
+
+    of._bot.enabled = True
+    of._bot.armed = True
+    of._bot.grid[AssetSymbol.USTEC] = {"side": "buy", "breach": 99.0}
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json(_positions_msg(side="buy", profit=5.0))  # in the trade
+        ws.send_json(
+            {
+                "type": "book",
+                "symbol": "USTEC",
+                "asof": "2026-06-09T14:00:00Z",
+                "bids": [[98.0, 1.0]],
+                "asks": [[98.2, 1.0]],
+            }
+        )
+        cmd = ws.receive_json()
+    assert cmd["type"] == "close_symbol" and cmd["symbol"] == "USTEC"
 
 
 def test_bot_profit_lock_closes_on_giveback(client: TestClient) -> None:
@@ -514,7 +546,7 @@ def test_bot_does_not_open_in_thin_session(
     from core.enums import AssetSymbol
     from core.models import SessionLiquidity
 
-    monkeypatch.setattr(of, "decide_entry", lambda *a, **k: "buy")
+    monkeypatch.setattr(of, "detect_explosion", lambda snap: "buy")
     of._bot.enabled = True
     of._bot.armed = True
     # Thin session for USTEC (ratio below the 0.75 floor) → no entry.

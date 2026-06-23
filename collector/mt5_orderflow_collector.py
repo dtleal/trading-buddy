@@ -404,6 +404,57 @@ def _close_all_positions(broker_symbols: set[str] | None = None) -> dict[str, An
     return {"ok": not errors, "closed": closed, "errors": errors}
 
 
+def _place_pending(broker: str, side: str, lots: float, price: float) -> Any:
+    """Place one limit order (the grid): BUY_LIMIT below / SELL_LIMIT above the
+    market. Pending orders use FILLING_RETURN. Returns the order_send result."""
+    order_type = mt5.ORDER_TYPE_BUY_LIMIT if side == "buy" else mt5.ORDER_TYPE_SELL_LIMIT
+    req = {
+        "action": mt5.TRADE_ACTION_PENDING,
+        "symbol": broker,
+        "volume": float(lots),
+        "type": order_type,
+        "price": float(price),
+        "deviation": 50,
+        "comment": "trading-buddy grid",
+        "type_time": mt5.ORDER_TIME_GTC,
+        "type_filling": mt5.ORDER_FILLING_RETURN,
+    }
+    return mt5.order_send(req)
+
+
+def _place_grid(broker: str, side: str, lots: float, levels: list[float]) -> dict[str, Any]:
+    """Place the grid limit orders. Best-effort; reports how many landed."""
+    placed = 0
+    errors: list[str] = []
+    for price in levels:
+        r = _place_pending(broker, side, lots, price)
+        if r is not None and getattr(r, "retcode", None) == mt5.TRADE_RETCODE_DONE:
+            placed += 1
+        else:
+            errors.append(f"{broker}@{price}: retcode={getattr(r,'retcode','?')} "
+                          f"{getattr(r,'comment','')}")
+    return {"placed": placed, "errors": errors}
+
+
+def _cancel_pending_for(broker_symbols: set[str] | None) -> dict[str, Any]:
+    """Cancel resting (pending) orders. With `broker_symbols`, only those; None =
+    all. Used to clean up unfilled grid orders when a trade exits."""
+    raw = mt5.orders_get()
+    if raw is None:
+        return {"cancelled": 0, "errors": []}
+    cancelled = 0
+    errors: list[str] = []
+    for o in raw:
+        if broker_symbols is not None and o.symbol not in broker_symbols:
+            continue
+        r = mt5.order_send({"action": mt5.TRADE_ACTION_REMOVE, "order": int(o.ticket)})
+        if r is not None and getattr(r, "retcode", None) == mt5.TRADE_RETCODE_DONE:
+            cancelled += 1
+        else:
+            errors.append(f"{o.symbol}#{o.ticket}: retcode={getattr(r,'retcode','?')}")
+    return {"cancelled": cancelled, "errors": errors}
+
+
 def _median(values: list[float]) -> float | None:
     """Median of a non-empty list, else None."""
     if not values:
@@ -627,6 +678,11 @@ def _drain_control(
         result = _open_position(brokers[0], side, lots)
         ok = result is not None and getattr(result, "retcode", None) == mt5.TRADE_RETCODE_DONE
         logger.info("Bot open %s %s %s → ok=%s", side, brokers[0], lots, ok)
+        # Grid: place the limit orders below (buy) / above (sell), if requested.
+        grid = cmd.get("grid") or []
+        if ok and grid:
+            g = _place_grid(brokers[0], side, lots, [float(x) for x in grid])
+            logger.info("Grid for %s: placed %s, errors %s", brokers[0], g["placed"], g["errors"])
         # Fill price for the trade-history record: prefer the executed deal price.
         fill_price = float(getattr(result, "price", 0.0) or 0.0) if ok else None
         ws.send(json.dumps({"type": "open_result", "ok": ok, "symbol": backend_sym, "side": side,
@@ -635,6 +691,15 @@ def _drain_control(
                             "ticket": getattr(result, "order", None) if ok else None,
                             "error": None if ok else f"retcode={getattr(result,'retcode','?')} "
                                                      f"{getattr(result,'comment','')}"}))
+        return
+
+    if ctype == "cancel_pending":
+        backend_sym = cmd.get("symbol")
+        brokers_set = {b for b, be in broker_to_backend.items() if be == backend_sym}
+        if not allow_auto_close:
+            return  # closing/cancelling needs the close gate
+        res = _cancel_pending_for(brokers_set or None)
+        logger.info("Cancel pending %s: %s", backend_sym, res)
         return
 
     if ctype not in ("close_all", "close_symbol"):
@@ -660,6 +725,11 @@ def _drain_control(
                             "error": "allow_auto_close=false no collector"}))
         return
     result = _close_all_positions(target_brokers)
+    # Also cancel any resting grid orders for the same symbol(s), so closing a
+    # trade never leaves orphaned limits hanging.
+    cancel = _cancel_pending_for(target_brokers)
+    if cancel["cancelled"] or cancel["errors"]:
+        logger.info("Cancelled %s pending on close (%s)", cancel["cancelled"], cancel["errors"])
     ws.send(json.dumps({"type": "autoclose_result", **result}))
 
 

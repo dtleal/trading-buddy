@@ -268,15 +268,16 @@ so it's gated hardest:
   collector refuses to open on a live account regardless of the flags), and only
   after you click **OPERAR** in the UI. Default size: index 2.0 lt, gold 0.12 lt;
   up to 6 positions per symbol; entries paced by a cooldown.
-- **Entry** = a burst: short-window range expansion + strong directional pressure
-  (tunable thresholds in `use_cases/scalper.py` — noisy on synthesized feeds,
-  expect to tune on demo). **Thin sessions are skipped** (no entries when the
-  day-outlook liquidity ratio is below ~0.75) to avoid false bursts overnight.
-- **One direction per symbol**: it scales in on the same side while the flow keeps
-  leaning that way (no fresh explosion needed), up to 6 — never opening the
-  opposite side of an open position (no hedge).
-- **Stop & reverse**: when the flow flips hard against the held side, it closes
-  that symbol and re-enters the new direction on the next burst.
+- **Entry = burst + grid (market-maker)**: a burst (short-window range expansion
+  + strong directional pressure) opens **1 market order plus a grid of limit
+  orders** spaced below (buy) / above (sell) by `0.5×` the recent per-bar range
+  (ATR proxy) — so a pullback fills more at better prices instead of stacking at
+  one price. **Thin sessions are skipped** (liquidity ratio < ~0.75). One
+  direction per symbol — never the opposite side of an open position (no hedge).
+- **Hybrid reverse**: the grid catches pullbacks, but if price **breaks past the
+  whole region** (deepest level + buffer), the trade failed → it closes the
+  symbol (the collector also **cancels the unfilled grid limits**) and can flip
+  on the next burst. (Falls back to a lean-based reverse if no grid is recorded.)
 - **Trailing profit lock**: tracks each symbol's peak unrealized P&L; once a
   meaningful gain (≥ $40) gives back 40% of its peak while still positive, it
   banks that symbol — so a winning move that reverses isn't given back to
