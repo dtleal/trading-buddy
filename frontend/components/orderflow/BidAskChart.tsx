@@ -97,6 +97,27 @@ export function BidAskChart({ flow, now }: { flow: OrderFlowSnapshot | undefined
         className="h-[120px] w-full"
       >
         <polygon points={band} fill="rgb(139 92 246 / 0.12)" stroke="none" />
+        {/* high (max ask) / low (min bid) reference lines over the window */}
+        <line
+          x1={0}
+          y1={yAt(hi)}
+          x2={VIEW_W}
+          y2={yAt(hi)}
+          stroke="rgb(244 63 94 / 0.45)"
+          strokeWidth={1}
+          strokeDasharray="4 3"
+          vectorEffect="non-scaling-stroke"
+        />
+        <line
+          x1={0}
+          y1={yAt(lo)}
+          x2={VIEW_W}
+          y2={yAt(lo)}
+          stroke="rgb(16 185 129 / 0.45)"
+          strokeWidth={1}
+          strokeDasharray="4 3"
+          vectorEffect="non-scaling-stroke"
+        />
         <polyline
           points={bidPts.join(" ")}
           fill="none"
@@ -119,6 +140,21 @@ export function BidAskChart({ flow, now }: { flow: OrderFlowSnapshot | undefined
         <span className="text-zinc-500">spread {fmtPrice(spread)}</span>
         <span className="text-emerald-400">bid {fmtPrice(bid)}</span>
       </div>
+
+      {/* max/min labels pinned to their reference lines (px ≈ viewBox: height
+          is fixed at 120px, matching VIEW_H) */}
+      <span
+        className="pointer-events-none absolute right-1 text-[9px] font-semibold tabular-nums text-rose-400/80"
+        style={{ top: `${yAt(hi)}px` }}
+      >
+        máx {fmtPrice(hi)}
+      </span>
+      <span
+        className="pointer-events-none absolute right-1 text-[9px] font-semibold tabular-nums text-emerald-400/80"
+        style={{ top: `${yAt(lo) - 11}px` }}
+      >
+        mín {fmtPrice(lo)}
+      </span>
 
       {stale && (
         <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center pb-0.5 text-[10px] font-semibold text-amber-500">
