@@ -277,6 +277,10 @@ so it's gated hardest:
   opposite side of an open position (no hedge).
 - **Stop & reverse**: when the flow flips hard against the held side, it closes
   that symbol and re-enters the new direction on the next burst.
+- **Trailing profit lock**: tracks each symbol's peak unrealized P&L; once a
+  meaningful gain (≥ $40) gives back 40% of its peak while still positive, it
+  banks that symbol — so a winning move that reverses isn't given back to
+  breakeven.
 - **Exit** = whole-account close at **+profit_target** (banks the win, then
   **re-arms** to keep scalping — 24h mode) and a hard daily stop at **−loss_stop**
   on the *session* P&L (realized + floating), which closes all and stops for good.

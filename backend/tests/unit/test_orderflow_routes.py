@@ -459,6 +459,28 @@ def test_bot_reverses_on_flow_flip(client: TestClient, monkeypatch: pytest.Monke
     assert of._bot.armed is True
 
 
+def test_bot_profit_lock_closes_on_giveback(client: TestClient) -> None:
+    # Peak +100, then gives back to +50 (≤ 60% of peak) while still positive →
+    # the trailing lock banks it instead of letting it round-trip.
+    of._bot.enabled = True
+    of._bot.armed = True
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json(_positions_msg(profit=100.0))  # sets the peak
+        ws.send_json(_positions_msg(profit=50.0))  # gave back enough → lock
+        cmd = ws.receive_json()
+    assert cmd["type"] == "close_symbol" and cmd["symbol"] == "USTEC"
+
+
+def test_bot_profit_lock_ignores_small_peaks(client: TestClient) -> None:
+    # Peak only +35 (< _BOT_LOCK_MIN_USD) → no trailing lock.
+    of._bot.enabled = True
+    of._bot.armed = True
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json(_positions_msg(profit=35.0))
+        ws.send_json(_positions_msg(profit=10.0))
+    assert not of._bot.closing  # nothing locked
+
+
 def test_bot_banks_and_rearms_on_profit_target(client: TestClient) -> None:
     of._bot.enabled = True
     of._bot.armed = True

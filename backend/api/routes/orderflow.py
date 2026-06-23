@@ -322,6 +322,12 @@ _THIN_RATIO = 0.75
 # After banking a win we wait for positions to flatten AND this long before the
 # bot opens again, so it doesn't immediately re-enter the exhausted move.
 _REARM_COOLDOWN_S = 5.0
+# Trailing profit lock (per symbol): once a symbol's unrealized gain has peaked
+# at >= _BOT_LOCK_MIN_USD, close it if it gives back more than _BOT_LOCK_GIVEBACK
+# of that peak while still positive — banks the move instead of round-tripping
+# back to breakeven (the "perfect short that came all the way back" case).
+_BOT_LOCK_MIN_USD = 40.0
+_BOT_LOCK_GIVEBACK = 0.40
 
 
 class _BotState:
@@ -344,6 +350,7 @@ class _BotState:
         self.lots: dict[AssetSymbol, float] = {}  # per-symbol size; defaults below
         self.cooldown_until: dict[AssetSymbol, float] = {}
         self.realized: float = 0.0  # banked P&L this session
+        self.peak: dict[AssetSymbol, float] = {}  # peak unrealized P&L per symbol (profit lock)
         self.flattening: bool = False  # an account close-all is settling; pause
         self.resume_at: float = 0.0  # monotonic time to resume after flatten
         # Per-symbol stop-and-reverse in progress → captured P&L to bank once that
@@ -449,15 +456,43 @@ async def _run_bot(touched: set[AssetSymbol]) -> None:
             continue
         positions = _positions_store.get(symbol, [])
 
-        # Settling a stop-and-reverse close on this symbol: wait until it's flat,
-        # then bank the captured P&L. Re-entry happens on a later tick.
+        # Settling a per-symbol close (reverse or profit-lock): wait until flat,
+        # then bank the captured P&L and reset its peak. Re-entry on a later tick.
         if symbol in _bot.closing:
             if not positions:
                 _bot.realized += _bot.closing.pop(symbol)
+                _bot.peak.pop(symbol, None)
             continue
+
+        if not positions:
+            _bot.peak.pop(symbol, None)  # flat → forget the old peak
 
         snap = aggregator.snapshot(symbol)
         current_side = _symbol_side(positions)
+        sym_pnl = sum(p.profit for p in positions)
+
+        # Trailing profit lock: track the peak unrealized P&L; if a meaningful
+        # gain gives back too much while still positive, bank it now instead of
+        # letting it round-trip to breakeven.
+        if current_side is not None:
+            peak = max(_bot.peak.get(symbol, 0.0), sym_pnl)
+            _bot.peak[symbol] = peak
+            if peak >= _BOT_LOCK_MIN_USD and 0 < sym_pnl <= peak * (1.0 - _BOT_LOCK_GIVEBACK):
+                _bot.closing[symbol] = sym_pnl
+                _bot.cooldown_until[symbol] = now + _bot.cooldown_s
+                _bot.last_result = (
+                    f"lock {symbol.value}: +{sym_pnl:.2f} (pico {peak:.2f}) — realizando"
+                )
+                logger.info("Bot profit-lock: %s", _bot.last_result)
+                await _record_bot_trade(
+                    kind="close",
+                    symbol=symbol.value,
+                    side=current_side,
+                    pnl=sym_pnl,
+                    reason="lock",
+                )
+                await _send_to_collector({"type": "close_symbol", "symbol": symbol.value})
+                continue
 
         # Stop & reverse: flow flipped hard against the held side → close it now.
         # Banked on flat (above); re-entry into the new side comes via the normal
@@ -837,6 +872,7 @@ async def set_bot(body: BotRequest) -> BotStatus:
         # Fresh session: clear cooldowns, banked P&L and any settling state.
         _bot.cooldown_until.clear()
         _bot.closing.clear()
+        _bot.peak.clear()
         _bot.realized = 0.0
         _bot.flattening = False
         _bot.resume_at = 0.0
