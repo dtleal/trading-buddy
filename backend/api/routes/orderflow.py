@@ -501,13 +501,17 @@ async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
             # Lost execution capability (reconnect without the flag) → disarm.
             _autoclose.armed = False
             _autoclose.last_result = "desarmado: collector reconectou sem allow_auto_close"
-        # Scalper bot needs auto-trade AND a demo account.
-        _bot.enabled = bool(msg.get("auto_trade_enabled", False)) and bool(
-            msg.get("account_is_demo", False)
+        # Scalper bot needs to BOTH open and close, on a demo account: it requires
+        # auto-trade AND auto-close capability (else it could open and never be
+        # able to exit — the −loss_stop guard would be unable to close).
+        _bot.enabled = (
+            bool(msg.get("auto_trade_enabled", False))
+            and bool(msg.get("auto_close_enabled", False))
+            and bool(msg.get("account_is_demo", False))
         )
         if not _bot.enabled and _bot.armed:
             _bot.armed = False
-            _bot.last_result = "desarmado: collector sem auto_trade/conta demo"
+            _bot.last_result = "desarmado: collector sem auto_trade+auto_close/conta demo"
         logger.info("Execution capability — auto_close=%s bot=%s", _autoclose.enabled, _bot.enabled)
         return set()
 
@@ -774,7 +778,10 @@ async def set_bot(body: BotRequest) -> BotStatus:
         if not _bot.enabled:
             raise HTTPException(
                 status_code=409,
-                detail="Bot indisponível: o collector precisa de allow_auto_trade=true E conta DEMO.",
+                detail=(
+                    "Bot indisponível: o collector precisa de allow_auto_trade=true E "
+                    "allow_auto_close=true (pra poder fechar) E conta DEMO."
+                ),
             )
         if body.profit_target is not None:
             if body.profit_target <= 0:

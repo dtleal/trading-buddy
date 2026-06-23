@@ -358,13 +358,22 @@ def test_bot_status_defaults(client: TestClient) -> None:
     assert st["profit_target"] == 350.0 and st["loss_stop"] == 900.0
 
 
-def test_bot_enabled_only_on_auto_trade_and_demo(client: TestClient) -> None:
-    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
-        ws.send_json({"type": "hello", "auto_trade_enabled": True, "account_is_demo": True})
+def test_bot_enabled_requires_trade_close_and_demo(client: TestClient) -> None:
+    def hello(**flags) -> None:
+        with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+            ws.send_json({"type": "hello", **flags})
+
+    # All three → enabled.
+    hello(auto_trade_enabled=True, auto_close_enabled=True, account_is_demo=True)
     assert client.get("/api/orderflow/bot").json()["enabled"] is True
-    # auto-trade on but NOT a demo account → bot stays disabled.
-    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
-        ws.send_json({"type": "hello", "auto_trade_enabled": True, "account_is_demo": False})
+    # Missing auto-close → can open but never close → must stay DISABLED.
+    hello(auto_trade_enabled=True, auto_close_enabled=False, account_is_demo=True)
+    assert client.get("/api/orderflow/bot").json()["enabled"] is False
+    # Not a demo account → disabled.
+    hello(auto_trade_enabled=True, auto_close_enabled=True, account_is_demo=False)
+    assert client.get("/api/orderflow/bot").json()["enabled"] is False
+    # No auto-trade → disabled.
+    hello(auto_trade_enabled=False, auto_close_enabled=True, account_is_demo=True)
     assert client.get("/api/orderflow/bot").json()["enabled"] is False
 
 
