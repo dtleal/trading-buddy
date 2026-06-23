@@ -232,10 +232,14 @@ For exchange-grade footprint/delta you'd switch the backend to a real CME feed
 Two ways to close positions from the dashboard. **Both place real orders and are
 off until you opt in.**
 
-- **Whole-account auto-close** — set a USD target in the UI and ARM it. When the
-  *summed floating P&L of all open positions* reaches the target, the backend
-  tells the collector to close everything, **once** (it disarms itself). Built
-  for the "+$500 then it reverted before I could click" case.
+- **Whole-account auto-close** — when the *summed floating P&L of all open
+  positions* reaches the target, the backend tells the collector to close
+  everything. It **arms itself by default** at `ORDERFLOW_AUTOCLOSE_DEFAULT_USD`
+  ($500) as soon as the collector connects with close capability, **re-arms after
+  each fire**, and survives backend restarts / UI refreshes — so it's always on
+  without clicking. A manual disarm in the UI turns the default-on off until you
+  arm again; set the env to `0` to disable auto-arming entirely. Built for the
+  "+$500 then it reverted before I could click" case.
 - **Per-asset "fechar tudo"** — a button on each symbol's position panel closes
   all positions for that symbol on demand (2-click confirm). Handy when you get
   the "em lucro mas momentum esfriou" alert and want out of just that asset.

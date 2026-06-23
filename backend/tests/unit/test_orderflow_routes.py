@@ -307,7 +307,50 @@ def test_autoclose_fires_close_all_over_target(client: TestClient) -> None:
         ws.send_json(_positions_msg(profit=150.0))  # whole-account P&L over target
         cmd = ws.receive_json()
     assert cmd["type"] == "close_all"
-    assert of._autoclose.armed is False  # one-shot
+    assert of._autoclose.armed is False  # one-shot (auto_arm off)
+
+
+def test_autoclose_auto_arms_on_collector_connect(client: TestClient) -> None:
+    of._autoclose.auto_arm = True
+    of._autoclose.target_usd = 500.0
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json({"type": "hello", "auto_close_enabled": True})
+    st = client.get("/api/orderflow/autoclose").json()
+    assert st["armed"] is True and st["target_usd"] == 500.0
+
+
+def test_autoclose_no_auto_arm_when_pref_off(client: TestClient) -> None:
+    of._autoclose.auto_arm = False
+    of._autoclose.target_usd = 500.0
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json({"type": "hello", "auto_close_enabled": True})
+    assert client.get("/api/orderflow/autoclose").json()["armed"] is False
+
+
+def test_manual_disarm_disables_auto_arm(client: TestClient) -> None:
+    of._autoclose.enabled = True
+    of._autoclose.auto_arm = True
+    of._autoclose.target_usd = 500.0
+    of._autoclose.armed = True
+    client.post("/api/orderflow/autoclose", json={"armed": False})
+    assert of._autoclose.auto_arm is False
+    # A later reconnect must NOT silently re-arm after a manual disarm.
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json({"type": "hello", "auto_close_enabled": True})
+    assert client.get("/api/orderflow/autoclose").json()["armed"] is False
+
+
+def test_autoclose_rearms_after_fire_in_auto_arm(client: TestClient) -> None:
+    of._autoclose.enabled = True
+    of._autoclose.auto_arm = True
+    of._autoclose.armed = True
+    of._autoclose.target_usd = 100.0
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json(_positions_msg(profit=150.0))
+        cmd = ws.receive_json()
+    assert cmd["type"] == "close_all"
+    assert of._autoclose.armed is True  # stays armed (re-arm)
+    assert of._autoclose.cooling is True
 
 
 def test_autoclose_does_not_fire_under_target(client: TestClient) -> None:

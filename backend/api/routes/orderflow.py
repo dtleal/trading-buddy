@@ -214,11 +214,23 @@ class _AutoCloseState:
         self.enabled: bool = False  # collector permits execution (allow_auto_close)
         self.armed: bool = False
         self.target_usd: float | None = None
+        # Auto-arm: keep the account auto-close on by default — arm on collector
+        # connect and re-arm after each fire. A manual disarm turns this off.
+        self.auto_arm: bool = False
+        self.cooling: bool = False  # a close-all is settling; pause before re-fire
+        self.resume_at: float = 0.0
         self.last_fired_at: datetime | None = None
         self.last_result: str | None = None
 
 
+# After a fire, wait for positions to flatten AND this long before the account
+# auto-close can fire again (prevents re-firing during the close lag).
+_AUTOCLOSE_COOLDOWN_S = 5.0
+
 _autoclose = _AutoCloseState()
+# Default: arm the account auto-close at the configured target (0 disables).
+_autoclose.target_usd = get_settings().orderflow_autoclose_default_usd or None
+_autoclose.auto_arm = _autoclose.target_usd is not None
 
 # The live collector ingest socket + a lock, so commands (close_all /
 # close_symbol) can be sent safely from either the ingest receive task or a REST
@@ -266,22 +278,37 @@ def _autoclose_status() -> AutoCloseStatus:
 
 
 async def _maybe_autoclose() -> None:
-    """Fire the profit target if reached: disarm (one-shot) and tell the
-    collector to close everything."""
+    """Fire the account profit target if reached. In auto-arm mode it re-arms
+    after firing (stays on across fires/refreshes); otherwise it's one-shot."""
     if not _autoclose.armed:
+        return
+    now = time.monotonic()
+    # Settling a previous fire: wait until flat AND past the cooldown before it
+    # can fire again, so it doesn't re-fire on the same still-open profit.
+    if _autoclose.cooling:
+        open_count = sum(len(ps) for ps in _positions_store.values())
+        if open_count == 0 and now >= _autoclose.resume_at:
+            _autoclose.cooling = False
         return
     profit = _open_profit()
     if not should_autoclose(profit, _autoclose.target_usd, _autoclose.armed):
         return
-    _autoclose.armed = False  # one-shot, regardless of what happens next
     _autoclose.last_fired_at = datetime.now(timezone.utc)
     target = _autoclose.target_usd
     if not _autoclose.enabled:
         # Armed but the collector can't execute (reconnected without the flag).
+        _autoclose.armed = False
         _autoclose.last_result = "abortado: collector sem allow_auto_close"
         logger.warning("Auto-close target hit but collector cannot execute")
         return
-    _autoclose.last_result = f"disparo: P&L {profit:.2f} >= alvo {target:.2f} — fechando tudo"
+    if _autoclose.auto_arm:
+        # Stay armed; just cool down while the close settles, then re-arm.
+        _autoclose.cooling = True
+        _autoclose.resume_at = now + _AUTOCLOSE_COOLDOWN_S
+        _autoclose.last_result = f"meta +{profit:.2f} — fechou, re-armado (alvo {target:.2f})"
+    else:
+        _autoclose.armed = False  # one-shot
+        _autoclose.last_result = f"disparo: P&L {profit:.2f} >= alvo {target:.2f} — fechando tudo"
     logger.info("Auto-close firing: %s", _autoclose.last_result)
     await _send_to_collector({"type": "close_all", "reason": _autoclose.last_result})
 
@@ -501,6 +528,18 @@ async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
             # Lost execution capability (reconnect without the flag) → disarm.
             _autoclose.armed = False
             _autoclose.last_result = "desarmado: collector reconectou sem allow_auto_close"
+        elif (
+            _autoclose.enabled
+            and _autoclose.auto_arm
+            and not _autoclose.armed
+            and _autoclose.target_usd
+        ):
+            # Default-on: arm the account auto-close as soon as the collector can
+            # execute, so it survives backend restarts / UI refreshes.
+            _autoclose.armed = True
+            _autoclose.cooling = False
+            _autoclose.last_result = f"auto-armado: alvo {_autoclose.target_usd:.2f}"
+            logger.info("Auto-close auto-armed at %.2f", _autoclose.target_usd)
         # Scalper bot needs to BOTH open and close, on a demo account: it requires
         # auto-trade AND auto-close capability (else it could open and never be
         # able to exit — the −loss_stop guard would be unable to close).
@@ -722,6 +761,10 @@ async def set_autoclose(body: AutoCloseRequest) -> AutoCloseStatus:
             )
     _autoclose.armed = body.armed
     _autoclose.target_usd = body.target_usd
+    # A manual arm keeps it auto-arming (persist at this target); a manual disarm
+    # turns auto-arming off so it stays off until the user arms again.
+    _autoclose.auto_arm = body.armed
+    _autoclose.cooling = False
     _autoclose.last_result = (
         f"armado: alvo {body.target_usd:.2f}" if body.armed else "desarmado pelo usuário"
     )

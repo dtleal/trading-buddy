@@ -115,6 +115,12 @@ class Settings(BaseSettings):
     orderflow_footprint_bars: int = 30
     # How many recent trades to keep on the tape per symbol.
     orderflow_tape_maxlen: int = 200
+    # Default whole-account auto-close target in USD. When > 0, the account
+    # auto-close arms itself at this target as soon as the collector connects
+    # with close capability, and re-arms after each fire (so it stays on across
+    # UI refreshes / backend restarts). 0 disables auto-arming. A manual disarm
+    # in the UI turns auto-arming off until you arm again.
+    orderflow_autoclose_default_usd: float = 500.0
 
     # --- Breakout detector tuning -----------------------------------------
 
