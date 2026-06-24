@@ -454,6 +454,23 @@ def test_bot_opens_market_plus_grid_on_explosion(
     assert "USTEC" in of._bot.grid  # region recorded for the break-reverse
 
 
+def test_bot_grid_region_survives_fill_lag(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # After a grid entry, a flat tick during the fill lag (within cooldown) must
+    # NOT wipe the just-recorded region (else the break-reverse loses its level).
+    monkeypatch.setattr(of, "detect_explosion", lambda snap: "buy")
+    monkeypatch.setattr(of, "_book_bid_ask", lambda snap: (100.0, 100.5))
+    monkeypatch.setattr(of, "_range_per_bar", lambda snap: 10.0)
+    of._bot.enabled = True
+    of._bot.armed = True
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json({"type": "positions", "symbol": "USTEC", "positions": []})  # entry
+        ws.receive_json()  # the open command
+        ws.send_json({"type": "positions", "symbol": "USTEC", "positions": []})  # still flat (lag)
+    assert "USTEC" in of._bot.grid  # region kept through the fill lag
+
+
 def test_bot_reverses_on_flow_flip(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     # Holding a buy on USTEC; force a reversal signal → closes that symbol and
     # stays armed (it re-enters the new side via the normal path once flat).

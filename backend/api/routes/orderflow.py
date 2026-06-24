@@ -494,9 +494,12 @@ async def _run_bot(touched: set[AssetSymbol]) -> None:
                 _bot.grid.pop(symbol, None)
             continue
 
-        if not positions:
-            _bot.peak.pop(symbol, None)  # flat → forget the old peak
-            _bot.grid.pop(symbol, None)  # and the old grid region
+        if not positions and now >= _bot.cooldown_until.get(symbol, 0.0):
+            # Genuinely flat (not just waiting on a just-sent entry to fill — the
+            # entry cooldown covers that lag, so we don't wipe a fresh grid region
+            # before its market order reports back). Forget the old peak + grid.
+            _bot.peak.pop(symbol, None)
+            _bot.grid.pop(symbol, None)
 
         snap = aggregator.snapshot(symbol)
         current_side = _symbol_side(positions)
