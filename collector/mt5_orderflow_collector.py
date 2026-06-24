@@ -378,22 +378,31 @@ def _open_position(broker: str, side: str, lots: float) -> Any:
     return result
 
 
-def _position_realized(position_ticket: int) -> float:
-    """Realized P&L the broker actually booked for a (now-closed) position —
-    sum of profit + swap + commission across all its deals. This is the faithful
-    number for the trade history, not a floating estimate."""
-    try:
-        deals = mt5.history_deals_get(position=position_ticket)
-    except Exception:  # pragma: no cover - defensive
+def _deal_realized(result: Any) -> float:
+    """Realized P&L the broker booked for the closing deal of a just-sent order.
+
+    Reads the deal by its ticket (`result.deal`) — more reliable than filtering
+    by position right after the close. The deal can take a moment to land in the
+    local history cache, so retry briefly. Sums profit + swap + commission =
+    what MetaTrader shows for that close."""
+    deal_id = int(getattr(result, "deal", 0) or 0)
+    if deal_id <= 0:
         return 0.0
-    if not deals:
-        return 0.0
-    return sum(
-        float(getattr(d, "profit", 0.0) or 0.0)
-        + float(getattr(d, "swap", 0.0) or 0.0)
-        + float(getattr(d, "commission", 0.0) or 0.0)
-        for d in deals
-    )
+    for _ in range(6):
+        try:
+            deals = mt5.history_deals_get(ticket=deal_id)
+        except Exception:  # pragma: no cover - defensive
+            deals = None
+        if deals:
+            return sum(
+                float(getattr(d, "profit", 0.0) or 0.0)
+                + float(getattr(d, "swap", 0.0) or 0.0)
+                + float(getattr(d, "commission", 0.0) or 0.0)
+                for d in deals
+            )
+        time.sleep(0.03)  # deal not in history yet — brief wait (closes are rare)
+    logger.warning("Realized P&L unavailable for deal %s (history lag)", deal_id)
+    return 0.0
 
 
 def _close_all_positions(broker_symbols: set[str] | None = None) -> dict[str, Any]:
@@ -414,7 +423,7 @@ def _close_all_positions(broker_symbols: set[str] | None = None) -> dict[str, An
         result = _close_position(p)
         if result is not None and getattr(result, "retcode", None) == mt5.TRADE_RETCODE_DONE:
             closed += 1
-            pnl += _position_realized(p.ticket)  # broker-booked realized
+            pnl += _deal_realized(result)  # broker-booked realized of the close
             logger.info("Auto-close: closed %s #%s", p.symbol, p.ticket)
         else:
             rc = getattr(result, "retcode", "?")
