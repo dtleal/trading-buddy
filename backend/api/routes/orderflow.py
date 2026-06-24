@@ -460,8 +460,8 @@ async def _run_bot(touched: set[AssetSymbol]) -> None:
         _bot.realized = session
         _bot.last_result = f"stop diário (sessão {session:.2f}) — fechou tudo e parou"
         logger.warning("Bot daily stop: %s", _bot.last_result)
-        await _record_bot_trade(kind="close", symbol="ALL", pnl=floating, reason="stop")
-        await _send_to_collector({"type": "close_all", "reason": _bot.last_result})
+        # History is recorded from the collector's result (real broker P&L).
+        await _send_to_collector({"type": "close_all", "reason": "stop", "origin": "bot"})
         return
 
     # Profit target on this cycle's floating → bank it, then re-arm (24h) or stop.
@@ -475,8 +475,7 @@ async def _run_bot(touched: set[AssetSymbol]) -> None:
             _bot.armed = False
             _bot.last_result = f"meta +{floating:.2f} (sessão {_bot.realized:.2f}) — parou"
         logger.info("Bot exit: %s", _bot.last_result)
-        await _record_bot_trade(kind="close", symbol="ALL", pnl=floating, reason="target")
-        await _send_to_collector({"type": "close_all", "reason": _bot.last_result})
+        await _send_to_collector({"type": "close_all", "reason": "target", "origin": "bot"})
         return
 
     # Entries / reversals: only the symbols whose flow just moved.
@@ -518,14 +517,15 @@ async def _run_bot(touched: set[AssetSymbol]) -> None:
                     f"lock {symbol.value}: +{sym_pnl:.2f} (pico {peak:.2f}) — realizando"
                 )
                 logger.info("Bot profit-lock: %s", _bot.last_result)
-                await _record_bot_trade(
-                    kind="close",
-                    symbol=symbol.value,
-                    side=current_side,
-                    pnl=sym_pnl,
-                    reason="lock",
+                await _send_to_collector(
+                    {
+                        "type": "close_symbol",
+                        "symbol": symbol.value,
+                        "origin": "bot",
+                        "reason": "lock",
+                        "side": current_side,
+                    }
                 )
-                await _send_to_collector({"type": "close_symbol", "symbol": symbol.value})
                 continue
 
         # Hybrid reverse: the grid catches pullbacks, but if price breaks past the
@@ -546,14 +546,15 @@ async def _run_bot(touched: set[AssetSymbol]) -> None:
                 why = "região rompida" if broke else "fluxo virou contra"
                 _bot.last_result = f"reversão {symbol.value}: {why} — fechando"
                 logger.info("Bot reverse: %s", _bot.last_result)
-                await _record_bot_trade(
-                    kind="close",
-                    symbol=symbol.value,
-                    side=current_side,
-                    pnl=sym_pnl,
-                    reason="reverse",
+                await _send_to_collector(
+                    {
+                        "type": "close_symbol",
+                        "symbol": symbol.value,
+                        "origin": "bot",
+                        "reason": "reverse",
+                        "side": current_side,
+                    }
                 )
-                await _send_to_collector({"type": "close_symbol", "symbol": symbol.value})
                 continue
 
         # Entry: only when FLAT and with no grid region pending (the grid does the
@@ -644,7 +645,9 @@ async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
         return set()
 
     if mtype == "autoclose_result":
-        # The collector reporting the outcome of a close_all it executed.
+        # The collector reporting the outcome of a close it executed, with the
+        # broker's REAL realized `pnl`. Record bot-originated closes in history
+        # (faithful to the broker); manual closes are not recorded.
         ok = bool(msg.get("ok"))
         closed = msg.get("closed")
         err = msg.get("error") or msg.get("errors")
@@ -652,6 +655,14 @@ async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
             f"fechado: {closed} posição(ões)" if ok else f"falha ao fechar: {err}"
         )
         logger.info("Auto-close result: ok=%s closed=%s err=%s", ok, closed, err)
+        if msg.get("origin") == "bot":
+            await _record_bot_trade(
+                kind="close",
+                symbol=str(msg.get("symbol", "ALL")),
+                side=msg.get("side"),
+                pnl=float(msg["pnl"]) if msg.get("pnl") is not None else None,
+                reason=msg.get("reason"),
+            )
         return set()
 
     if mtype == "open_result":

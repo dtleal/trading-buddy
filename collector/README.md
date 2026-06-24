@@ -291,12 +291,16 @@ so it's gated hardest:
   (re-arm to resume).
 
 **Trade history (for performance analysis):** every bot execution — opens (with
-entry price, side, lots, ticket) and closes (with P&L and reason: target / stop /
-reverse) — is written to the `bot_trades` table. **Only bot trades are recorded**;
-the manual "fechar tudo" button and manual auto-close are excluded by
-construction. Read it back with `GET /api/orderflow/bot/trades?limit=N` (newest
-first) or query the table directly. Recording is best-effort — a DB problem is
-logged and never interrupts the bot.
+entry price, side, lots, ticket) and closes (reason: target / stop / reverse /
+lock) — is written to the `bot_trades` table. Close **P&L is the broker's real
+realized** (sum of the closing deals' profit + swap + commission, read via
+`history_deals_get`), so the history matches MetaTrader — not a backend estimate.
+**Only bot trades are recorded** (closes carry an `origin:"bot"` tag the collector
+echoes back); the manual "fechar tudo" button and manual auto-close are excluded.
+Read it back with `GET /api/orderflow/bot/trades?limit=N` (newest first). Recording
+is best-effort — a DB problem is logged and never interrupts the bot. (The live
+`realized`/UI number stays a fast floating estimate for the −loss_stop decision;
+the persisted history is the faithful record.)
 
 **You must enable AutoTrading in the MT5 terminal.** MT5 blocks all script/EA
 orders until the **"AutoTrading" / "Algo Trading"** toolbar button is on (green;

@@ -633,25 +633,33 @@ def test_bot_failed_open_not_persisted(client: TestClient) -> None:
     assert repo.events == []
 
 
-def test_bot_close_persisted_to_history(client: TestClient) -> None:
+def test_bot_close_persisted_with_broker_pnl(client: TestClient) -> None:
+    # History records a bot close from the collector's result (origin=bot), using
+    # the broker's REAL realized pnl — not a backend estimate.
     repo = _FakeBotTradeRepo()
     of._bot_trade_repo = repo
-    of._bot.enabled = True
-    of._bot.armed = True
-    of._bot.profit_target = 100.0
     with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
-        ws.send_json(_positions_msg(profit=150.0))  # hits target → bot closes all
-        ws.receive_json()  # the close_all command
-    assert any(e["kind"] == "close" and e["reason"] == "target" for e in repo.events)
+        ws.send_json(
+            {
+                "type": "autoclose_result",
+                "ok": True,
+                "closed": 4,
+                "pnl": 34.2,
+                "origin": "bot",
+                "reason": "target",
+                "symbol": "ALL",
+            }
+        )
+    assert len(repo.events) == 1
+    ev = repo.events[0]
+    assert ev["kind"] == "close" and ev["reason"] == "target" and ev["pnl"] == 34.2
 
 
 def test_manual_close_not_persisted(client: TestClient) -> None:
-    # The per-asset manual close must NOT land in bot history.
+    # A close result WITHOUT origin=bot (manual button / manual auto-close) must
+    # NOT land in the bot history.
     repo = _FakeBotTradeRepo()
     of._bot_trade_repo = repo
-    of._autoclose.enabled = True
     with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
-        resp = client.post("/api/orderflow/close/USTEC")
-        ws.receive_json()  # close_symbol command
-    assert resp.status_code == 200
-    assert repo.events == []  # manual close recorded nothing
+        ws.send_json({"type": "autoclose_result", "ok": True, "closed": 1, "pnl": 10.0})
+    assert repo.events == []  # no origin → not recorded

@@ -378,16 +378,35 @@ def _open_position(broker: str, side: str, lots: float) -> Any:
     return result
 
 
+def _position_realized(position_ticket: int) -> float:
+    """Realized P&L the broker actually booked for a (now-closed) position —
+    sum of profit + swap + commission across all its deals. This is the faithful
+    number for the trade history, not a floating estimate."""
+    try:
+        deals = mt5.history_deals_get(position=position_ticket)
+    except Exception:  # pragma: no cover - defensive
+        return 0.0
+    if not deals:
+        return 0.0
+    return sum(
+        float(getattr(d, "profit", 0.0) or 0.0)
+        + float(getattr(d, "swap", 0.0) or 0.0)
+        + float(getattr(d, "commission", 0.0) or 0.0)
+        for d in deals
+    )
+
+
 def _close_all_positions(broker_symbols: set[str] | None = None) -> dict[str, Any]:
     """Close open positions (fresh read). With `broker_symbols`, only those MT5
     symbols are closed (the per-asset button); None closes everything (the
     profit-target auto-close). Returns a result summary the backend records and
-    shows in the UI. Best-effort: keeps going past a failure and reports which
-    tickets could not be closed."""
+    shows in the UI, including `pnl` = the broker's actual realized total of the
+    closed positions. Best-effort: keeps going past a failure."""
     raw = mt5.positions_get()
     if raw is None:
-        return {"ok": False, "closed": 0, "error": "positions_get() retornou None"}
+        return {"ok": False, "closed": 0, "pnl": 0.0, "error": "positions_get() retornou None"}
     closed = 0
+    pnl = 0.0
     errors: list[str] = []
     for p in raw:
         if broker_symbols is not None and p.symbol not in broker_symbols:
@@ -395,13 +414,14 @@ def _close_all_positions(broker_symbols: set[str] | None = None) -> dict[str, An
         result = _close_position(p)
         if result is not None and getattr(result, "retcode", None) == mt5.TRADE_RETCODE_DONE:
             closed += 1
+            pnl += _position_realized(p.ticket)  # broker-booked realized
             logger.info("Auto-close: closed %s #%s", p.symbol, p.ticket)
         else:
             rc = getattr(result, "retcode", "?")
             cm = getattr(result, "comment", "")
             errors.append(f"{p.symbol}#{p.ticket}: retcode={rc} {cm}")
             logger.warning("Auto-close FAILED for %s #%s: retcode=%s %s", p.symbol, p.ticket, rc, cm)
-    return {"ok": not errors, "closed": closed, "errors": errors}
+    return {"ok": not errors, "closed": closed, "pnl": pnl, "errors": errors}
 
 
 def _place_pending(broker: str, side: str, lots: float, price: float) -> Any:
@@ -730,7 +750,10 @@ def _drain_control(
     cancel = _cancel_pending_for(target_brokers)
     if cancel["cancelled"] or cancel["errors"]:
         logger.info("Cancelled %s pending on close (%s)", cancel["cancelled"], cancel["errors"])
-    ws.send(json.dumps({"type": "autoclose_result", **result}))
+    # Echo back who asked + why + which symbol/side so the backend can record
+    # ONLY bot closes in the trade history, with the broker's real `pnl`.
+    echo = {k: cmd.get(k) for k in ("origin", "reason", "symbol", "side") if cmd.get(k) is not None}
+    ws.send(json.dumps({"type": "autoclose_result", **result, **echo}))
 
 
 def run(cfg: dict[str, Any]) -> None:
