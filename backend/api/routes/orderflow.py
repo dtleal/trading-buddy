@@ -532,6 +532,11 @@ async def _run_bot(touched: set[AssetSymbol]) -> None:
         # whole region (deepest level + buffer) the trade has failed → close (the
         # collector also cancels the unfilled limits) and let it re-enter/flip.
         # Fall back to the lean-based reverse if no grid region is recorded.
+        # NOTE: manual positions (not opened by the bot) have NO grid region, so
+        # they always take the should_reverse() fallback — a deliberately twitchy
+        # tape-flow signal (12 prints, 0.20 lean against). An armed bot manages
+        # manual trades too; this is how it cuts a short on a buy-side tape burst
+        # even while price drifts the trade's way. See backend/README.md.
         if current_side is not None:
             grid = _bot.grid.get(symbol)
             mid = _book_mid(snap)

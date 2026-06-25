@@ -77,6 +77,33 @@ EDT). The feed also rate-limits anonymous clients; the adapter logs a
 `WARNING` when the response has no `<event>` nodes so we can tell rate-limit
 days from quiet calendar days.
 
+### Scalper bot gotcha — it manages *manual* positions too
+
+When the scalper bot is **armed** (`_run_bot` in `api/routes/orderflow.py`), it
+manages **every open position on its symbols**, not just the ones it opened
+itself. It reads positions straight from MT5 via the collector and has no notion
+of who opened them — so a position you open by hand is fair game for its exit
+logic.
+
+The non-obvious part is the **reverse** path. Bot-opened trades carry a grid
+*region* (`_bot.grid[symbol]`, set only on a bot entry); the reverse first tests
+`region_broken(...)`, which only fires when price breaks past the whole grid
+region. A **manual** position has *no* grid recorded, so that branch is skipped
+and it falls straight to the lean-based `should_reverse(snap, side)` — which is
+intentionally twitchy: just `MIN_PRINTS = 12` directional prints with a
+`REVERSE_LEAN = 0.20` lean against the held side (≈70 % of the recent aggressor
+prints on the opposite side). That reads **aggressor order flow on the tape, not
+price direction** — so a short can be cut on a brief burst of buy-side prints
+even while price is still drifting down. Each symbol triggers independently, so
+several manual positions can be closed a few seconds apart rather than at once.
+
+Closes the bot issues are tagged `origin:"bot"` and persisted to `bot_trades`
+with a `reason` (`lock` / `reverse` / `target` / `stop`); manual closes are
+never recorded. To diagnose *why* a position was closed, read that `reason`
+column rather than guessing. This behaviour is intentional — documented here
+because it surprises (manual trades being closed by the bot looks like a bug but
+is the armed-bot contract).
+
 ## CLI commands
 
 ```bash
