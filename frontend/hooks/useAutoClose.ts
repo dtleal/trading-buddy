@@ -19,6 +19,7 @@ export function useAutoClose(): {
   arm: (targetUsd: number) => Promise<void>;
   disarm: () => Promise<void>;
   closeSymbol: (symbol: string) => Promise<void>;
+  breakevenSymbol: (symbol: string) => Promise<void>;
 } {
   const [status, setStatus] = useState<AutoCloseStatus | null>(null);
 
@@ -57,5 +58,13 @@ export function useAutoClose(): {
     [refresh],
   );
 
-  return { status, arm, disarm, closeSymbol };
+  const breakevenSymbol = useCallback(
+    async (symbol: string) => {
+      await api.breakevenSymbol(symbol);
+      await refresh();
+    },
+    [refresh],
+  );
+
+  return { status, arm, disarm, closeSymbol, breakevenSymbol };
 }

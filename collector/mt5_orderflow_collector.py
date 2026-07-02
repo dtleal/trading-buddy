@@ -433,6 +433,63 @@ def _close_all_positions(broker_symbols: set[str] | None = None) -> dict[str, An
     return {"ok": not errors, "closed": closed, "pnl": pnl, "errors": errors}
 
 
+def _move_to_breakeven(broker_symbols: set[str] | None = None) -> dict[str, Any]:
+    """Move each open position's stop-loss to its entry price (breakeven). With
+    `broker_symbols`, only those MT5 symbols; None = all. Best-effort: keeps going
+    past a failure and reports a summary the backend surfaces in the UI.
+
+    An SL only belongs at entry once price has moved in the trade's favour — for a
+    still-underwater position the entry sits on the wrong side of the market and
+    the broker rejects it — so those are skipped rather than sent (and counted so
+    the UI can say "nothing to lock in yet")."""
+    raw = mt5.positions_get()
+    if raw is None:
+        return {"ok": False, "moved": 0, "skipped": 0, "error": "positions_get() retornou None"}
+    moved = 0
+    skipped = 0
+    errors: list[str] = []
+    for p in raw:
+        if broker_symbols is not None and p.symbol not in broker_symbols:
+            continue
+        entry = float(p.price_open)
+        current = float(p.price_current)
+        # Skip positions not (yet) in profit — SL at entry would be invalid there.
+        if p.type == mt5.POSITION_TYPE_BUY and current <= entry:
+            skipped += 1
+            continue
+        if p.type == mt5.POSITION_TYPE_SELL and current >= entry:
+            skipped += 1
+            continue
+        # Already at (or better than) breakeven? Leave it — don't loosen a trailed SL.
+        sl = float(p.sl)
+        if p.type == mt5.POSITION_TYPE_BUY and sl >= entry and sl != 0.0:
+            skipped += 1
+            continue
+        if p.type == mt5.POSITION_TYPE_SELL and 0.0 < sl <= entry:
+            skipped += 1
+            continue
+        result = mt5.order_send(
+            {
+                "action": mt5.TRADE_ACTION_SLTP,
+                "symbol": p.symbol,
+                "position": int(p.ticket),
+                "sl": entry,
+                "tp": float(p.tp),  # keep the existing take-profit
+            }
+        )
+        if result is not None and getattr(result, "retcode", None) == mt5.TRADE_RETCODE_DONE:
+            moved += 1
+            logger.info("Breakeven: moved SL to entry for %s #%s", p.symbol, p.ticket)
+        else:
+            rc = getattr(result, "retcode", "?")
+            cm = getattr(result, "comment", "")
+            errors.append(f"{p.symbol}#{p.ticket}: retcode={rc} {cm}")
+            logger.warning(
+                "Breakeven FAILED for %s #%s: retcode=%s %s", p.symbol, p.ticket, rc, cm
+            )
+    return {"ok": not errors, "moved": moved, "skipped": skipped, "errors": errors}
+
+
 def _place_pending(broker: str, side: str, lots: float, price: float) -> Any:
     """Place one limit order (the grid): BUY_LIMIT below / SELL_LIMIT above the
     market. Pending orders use FILLING_RETURN. Returns the order_send result."""
@@ -729,6 +786,25 @@ def _drain_control(
             return  # closing/cancelling needs the close gate
         res = _cancel_pending_for(brokers_set or None)
         logger.info("Cancel pending %s: %s", backend_sym, res)
+        return
+
+    if ctype == "breakeven_symbol":
+        backend_sym = cmd.get("symbol")
+        brokers_set = {b for b, be in broker_to_backend.items() if be == backend_sym}
+        if not brokers_set:
+            ws.send(json.dumps({"type": "breakeven_result", "ok": False, "moved": 0,
+                                "error": f"símbolo desconhecido: {backend_sym}"}))
+            return
+        # Modifying an SL is a protective change, but it's still an order_send, so
+        # it rides the same execution gate as closing.
+        if not allow_auto_close:
+            logger.warning("Refusing breakeven: allow_auto_close is false on this collector")
+            ws.send(json.dumps({"type": "breakeven_result", "ok": False, "moved": 0,
+                                "symbol": backend_sym, "error": "allow_auto_close=false no collector"}))
+            return
+        res = _move_to_breakeven(brokers_set)
+        logger.info("Breakeven %s: %s", backend_sym, res)
+        ws.send(json.dumps({"type": "breakeven_result", "symbol": backend_sym, **res}))
         return
 
     if ctype not in ("close_all", "close_symbol"):

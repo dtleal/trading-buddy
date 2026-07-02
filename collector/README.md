@@ -15,10 +15,12 @@ are decision support, not advice, and on synthesized-tape CFD feeds they are a
 directional proxy (see the data-quality table below).
 
 **Order execution is OFF by default.** Optionally the collector can *close*
-positions — a whole-account profit-target **auto-close** and a per-asset
-**"fechar tudo"** button in the UI. This is the only path that places orders, and
-it requires an explicit local opt-in (`allow_auto_close: true` in `config.json`)
-**plus** arming/clicking in the UI. See [Auto-close & manual close](#auto-close--manual-close).
+positions — a whole-account profit-target **auto-close**, a per-asset
+**"fechar tudo"** button, and a per-asset **"breakeven"** button (moves every
+open position's stop-loss to its entry) in the UI. These are the only paths that
+place/modify orders, and they require an explicit local opt-in
+(`allow_auto_close: true` in `config.json`) **plus** arming/clicking in the UI.
+See [Auto-close & manual close](#auto-close--manual-close).
 
 This bridge **only reads market data** — it never places orders.
 
@@ -192,6 +194,7 @@ what you are looking at:
 | **Open positions** | `mt5.positions_get()` (read-only) | ✅ real (your live entry, P&L, SL/TP, time-in-trade) |
 | **In-trade alerts** | position + flow lean (`pressure_against`, `take_profit`) | ⚠️ deterministic, but only as sound as the synthesized flow it reads — decision support, not advice |
 | **Auto-close / fechar tudo** | `mt5.order_send` (only if `allow_auto_close`) | ✅ real order execution — closes your positions for real |
+| **Breakeven (SL → entry)** | `mt5.order_send` `TRADE_ACTION_SLTP` (only if `allow_auto_close`) | ✅ real order modification — moves your stops for real |
 
 With quote-tick synthesis the aggressor is inferred by the **tick rule** on the
 mid price: an up-tick is a buy (at the ask), a down-tick is a sell (at the bid),
@@ -240,9 +243,19 @@ off until you opt in.**
   without clicking. A manual disarm in the UI turns the default-on off until you
   arm again; set the env to `0` to disable auto-arming entirely. Built for the
   "+$500 then it reverted before I could click" case.
-- **Per-asset "fechar tudo"** — a button on each symbol's position panel closes
+- **Per-asset "fechar tudo"** — a button at the top of each symbol's card closes
   all positions for that symbol on demand (2-click confirm). Handy when you get
   the "em lucro mas momentum esfriou" alert and want out of just that asset.
+- **Per-asset "breakeven"** — a button next to it moves every open position on
+  that symbol to breakeven (SL → entry price, keeping the TP; 2-click confirm).
+  The collector only moves positions already in profit — for one still underwater
+  the SL would sit on the wrong side of the market and the broker would reject it,
+  so those are skipped and reported (`skipped` in the result). Positions already
+  at/beyond breakeven are left alone so a trailed stop is never loosened.
+- **Per-asset P&L total** — each card's header shows the summed floating P&L of
+  that symbol's open positions (green/red), so you read the number you're closing
+  or protecting right above the two buttons. Shown read-only even when execution
+  is off.
 
 **Safety model (defense in depth):**
 
@@ -253,7 +266,9 @@ off until you opt in.**
 2. **UI action** — even enabled, it only fires when you ARM a target / click the
    button. DESARMAR is an always-available kill switch.
 3. **One-shot** — auto-close disarms the instant it fires; it never loops.
-4. **Close-only** — it only ever *closes* existing positions, never opens.
+4. **Close/protect-only** — it only ever *closes* existing positions or tightens
+   their stop to breakeven, never opens. (Breakeven rides the same
+   `allow_auto_close` gate — it's still an `order_send`.)
 5. The brain (the target decision) lives in the backend and is unit-tested; the
    collector is a thin executor gated by step 1.
 

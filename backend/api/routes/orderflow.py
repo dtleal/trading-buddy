@@ -689,6 +689,22 @@ async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
         logger.info("Bot open result: %s", _bot.last_result)
         return set()
 
+    if mtype == "breakeven_result":
+        # The collector reporting the outcome of a breakeven SL modification.
+        ok = bool(msg.get("ok"))
+        moved = msg.get("moved")
+        skipped = msg.get("skipped")
+        err = msg.get("error") or msg.get("errors")
+        if ok:
+            _autoclose.last_result = (
+                f"breakeven: {moved} movida(s)"
+                + (f", {skipped} sem lucro ainda" if skipped else "")
+            )
+        else:
+            _autoclose.last_result = f"falha no breakeven: {err}"
+        logger.info("Breakeven result: ok=%s moved=%s skipped=%s err=%s", ok, moved, skipped, err)
+        return set()
+
     symbol = _parse_symbol(msg.get("symbol"))
     if symbol is None or not aggregator.tracks(symbol):
         return set()
@@ -898,6 +914,29 @@ async def close_symbol(symbol: str) -> dict[str, Any]:
         raise HTTPException(status_code=503, detail="Collector não conectado.")
     logger.info("Manual close requested for %s", sym.value)
     return {"ok": True, "detail": f"Fechamento de {sym.value} enviado ao collector."}
+
+
+@router.post("/api/orderflow/breakeven/{symbol}", tags=["orderflow"])
+async def breakeven_symbol(symbol: str) -> dict[str, Any]:
+    """Move every open position on one symbol to breakeven (SL → entry price).
+
+    Same execution gate as the per-asset close: requires the collector to permit
+    it (`allow_auto_close`, since it's an order_send). Fires immediately; the
+    result comes back async from the collector and lands in the status
+    `last_result`. Positions not yet in profit are skipped by the collector."""
+    sym = _parse_symbol(symbol)
+    if sym is None or not aggregator.tracks(sym):
+        raise HTTPException(status_code=404, detail=f"Símbolo não rastreado: {symbol}")
+    if not _autoclose.enabled:
+        raise HTTPException(
+            status_code=409,
+            detail="O collector não habilitou execução (allow_auto_close=true no config.json).",
+        )
+    sent = await _send_to_collector({"type": "breakeven_symbol", "symbol": sym.value})
+    if not sent:
+        raise HTTPException(status_code=503, detail="Collector não conectado.")
+    logger.info("Breakeven requested for %s", sym.value)
+    return {"ok": True, "detail": f"Breakeven de {sym.value} enviado ao collector."}
 
 
 # --- scalper bot (opens AND closes; demo only) -------------------------------

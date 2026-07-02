@@ -114,6 +114,8 @@ export const api = {
     }),
   closeSymbol: (symbol: string) =>
     fetchVoid(`/api/orderflow/close/${symbol}`, { method: "POST" }),
+  breakevenSymbol: (symbol: string) =>
+    fetchVoid(`/api/orderflow/breakeven/${symbol}`, { method: "POST" }),
   getBot: () => fetchJson("/api/orderflow/bot", BotStatus),
   setBot: (armed: boolean, profitTarget: number | null, lossStop: number | null) =>
     fetchJson("/api/orderflow/bot", BotStatus, {

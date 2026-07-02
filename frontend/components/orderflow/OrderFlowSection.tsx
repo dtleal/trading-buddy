@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { BidAskChart } from "./BidAskChart";
 import { PressureGauge } from "./PressureGauge";
 import { PositionPanel } from "./PositionPanel";
+import { PositionControls } from "./PositionControls";
 import { AutoCloseControl } from "./AutoCloseControl";
 import { ScalperBotControl } from "./ScalperBotControl";
 import { FootprintPanel } from "./FootprintPanel";
@@ -30,7 +31,7 @@ const FLOW_ASSETS: { key: AssetSymbol; label: string }[] = [
  */
 export function OrderFlowSection() {
   const { flows, status } = useOrderFlow();
-  const { status: autoClose, arm, disarm, closeSymbol } = useAutoClose();
+  const { status: autoClose, arm, disarm, closeSymbol, breakevenSymbol } = useAutoClose();
   const { status: bot, arm: armBot, disarm: disarmBot } = useScalperBot();
   const executionEnabled = autoClose?.enabled ?? false;
 
@@ -100,6 +101,7 @@ export function OrderFlowSection() {
               status={status}
               executionEnabled={executionEnabled}
               onCloseSymbol={closeSymbol}
+              onBreakevenSymbol={breakevenSymbol}
             />
           ))}
         </div>
@@ -116,6 +118,7 @@ function SymbolColumn({
   status,
   executionEnabled,
   onCloseSymbol,
+  onBreakevenSymbol,
 }: {
   label: string;
   symbol: AssetSymbol;
@@ -124,6 +127,7 @@ function SymbolColumn({
   status: "connecting" | "open" | "reconnecting" | "closed";
   executionEnabled: boolean;
   onCloseSymbol: (symbol: string) => Promise<void>;
+  onBreakevenSymbol: (symbol: string) => Promise<void>;
 }) {
   const asof = flow?.asof ? new Date(flow.asof).getTime() : null;
   const ageMs = asof != null && now > 0 ? now - asof : null;
@@ -164,6 +168,14 @@ function SymbolColumn({
         </p>
       ) : (
         <>
+          <PositionControls
+            label={label}
+            symbol={symbol}
+            positions={flow.positions}
+            executionEnabled={executionEnabled}
+            onCloseAll={onCloseSymbol}
+            onBreakeven={onBreakevenSymbol}
+          />
           <LiquidityChip liquidity={flow.liquidity} live={flow.live_activity} />
           {flow.positions.length > 0 && (
             <FlowBlock title="Posição aberta (MT5)">
@@ -172,8 +184,6 @@ function SymbolColumn({
                 symbol={symbol}
                 positions={flow.positions}
                 signals={flow.signals}
-                executionEnabled={executionEnabled}
-                onCloseAll={onCloseSymbol}
               />
             </FlowBlock>
           )}
