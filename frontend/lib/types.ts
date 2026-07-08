@@ -311,6 +311,7 @@ export const OrderFlowSnapshot = z.object({
   recent_trades: z.array(TapeTrade).default([]),
   footprint: z.array(FootprintBar).default([]),
   source: z.string().nullable().default(null),
+  account: z.number().nullable().default(null),
   liquidity: SessionLiquidity.nullable().default(null),
   live_activity: LiveActivity.nullable().default(null),
   positions: z.array(Position).default([]),

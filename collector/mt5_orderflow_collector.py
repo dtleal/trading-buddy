@@ -90,7 +90,7 @@ def _load_config(path: str) -> dict[str, Any]:
 # --- MT5 session -------------------------------------------------------------
 
 
-def _init_mt5(cfg: dict[str, Any]) -> str:
+def _init_mt5(cfg: dict[str, Any]) -> tuple[str, int | None]:
     """Attach to the first MT5 terminal in the configured priority list.
 
     Supports two config shapes:
@@ -103,8 +103,9 @@ def _init_mt5(cfg: dict[str, Any]) -> str:
       "mt5": { "path": "...", "login": ..., "password": "...", "server": "..." }
 
     The list form is the new preferred shape: each entry is tried in order until
-    one succeeds (terminal must be open and logged in). Returns the resolved
-    source name so the backend / UI can show which broker is feeding flow.
+    one succeeds (terminal must be open and logged in). Returns
+    ``(source_name, account_login)`` so the backend / UI can show which broker
+    and which account are feeding flow.
     """
     if mt5 is None:
         raise SystemExit(
@@ -140,14 +141,15 @@ def _init_mt5(cfg: dict[str, Any]) -> str:
         if mt5.initialize(**kwargs):
             term = mt5.terminal_info()
             acct = mt5.account_info()
+            login = getattr(acct, "login", None)
             logger.info(
                 "MT5 attached: source=%s terminal=%s connected=%s account=%s",
                 name,
                 getattr(term, "name", "?"),
                 getattr(term, "connected", "?"),
-                getattr(acct, "login", "?"),
+                login if login is not None else "?",
             )
-            return name
+            return name, (int(login) if login is not None else None)
         errors.append(f"{name}: {mt5.last_error()}")
         # Clean shutdown before trying the next candidate so init state is fresh.
         try:
@@ -844,7 +846,7 @@ def _drain_control(
 def run(cfg: dict[str, Any]) -> None:
     if create_connection is None:
         raise SystemExit("websocket-client not installed. `pip install websocket-client`.")
-    source_name = _init_mt5(cfg)
+    source_name, account_login = _init_mt5(cfg)
     _subscribe_symbols(cfg["symbols"])
 
     url = cfg["backend_ws_url"]
@@ -913,6 +915,7 @@ def run(cfg: dict[str, Any]) -> None:
                 ws.send(json.dumps({
                     "type": "hello",
                     "source": source_name,
+                    "account": account_login,
                     "auto_close_enabled": allow_auto_close,
                     "auto_trade_enabled": allow_auto_trade,
                     "account_is_demo": is_demo,

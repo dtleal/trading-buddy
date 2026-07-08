@@ -208,6 +208,7 @@ def _parse_trade(msg: dict[str, Any], symbol: AssetSymbol) -> TapeTrade:
 # per backend process today, so a module-level slot is enough; if we ever
 # multiplex collectors per-symbol we'd promote this into the aggregator.
 _current_source: str | None = None
+_current_account: int | None = None
 
 
 class _AutoCloseState:
@@ -608,7 +609,7 @@ async def _run_bot(touched: set[AssetSymbol]) -> None:
 
 async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
     """Feed one ingest message into the aggregator. Returns symbols touched."""
-    global _current_source
+    global _current_source, _current_account
     mtype = msg.get("type")
 
     if mtype == "hello":
@@ -618,6 +619,10 @@ async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
         if isinstance(src, str) and src:
             _current_source = src
             logger.info("Order-flow source set: %s", src)
+        acct = msg.get("account")
+        if isinstance(acct, int):
+            _current_account = acct
+            logger.info("Order-flow account set: %s", acct)
         _autoclose.enabled = bool(msg.get("auto_close_enabled", False))
         if not _autoclose.enabled and _autoclose.armed:
             # Lost execution capability (reconnect without the flag) → disarm.
@@ -742,6 +747,8 @@ def _stamp_snapshot(snapshot: "OrderFlowSnapshot") -> "OrderFlowSnapshot":
     update: dict[str, Any] = {}
     if _current_source is not None:
         update["source"] = _current_source
+    if _current_account is not None:
+        update["account"] = _current_account
     liq = _liquidity_store.get(snapshot.symbol)
     if liq is not None:
         update["liquidity"] = liq

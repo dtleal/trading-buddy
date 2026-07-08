@@ -563,6 +563,10 @@ class OrderFlowSnapshot(_Frozen):
     # …). Set by the collector via a `hello` message on connect; carried on
     # every snapshot so the UI can label each column.
     source: str | None = None
+    # MT5 login number of the account feeding this flow. Set by the collector via
+    # the same `hello` message as `source`; carried on every snapshot so the UI
+    # can show exactly which account is connected next to the broker name.
+    account: int | None = None
     # Latest session-liquidity reading for this symbol (today's tick volume vs
     # the same-time-of-day baseline). Stamped onto every broadcast so each flow
     # column can show "X% do volume normal" right above its pressure bar.

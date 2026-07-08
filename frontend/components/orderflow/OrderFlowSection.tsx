@@ -60,6 +60,8 @@ export function OrderFlowSection() {
   // it (one collector per backend today) but we don't enforce that.
   const source =
     FLOW_ASSETS.map((a) => flows[a.key]?.source).find((s): s is string => !!s) ?? null;
+  const account =
+    FLOW_ASSETS.map((a) => flows[a.key]?.account).find((n): n is number => n != null) ?? null;
 
   return (
     <Card>
@@ -79,6 +81,12 @@ export function OrderFlowSection() {
               <Badge tone="neutral">
                 <span className="text-zinc-500">fonte:</span>{" "}
                 <span className="text-zinc-200">{source}</span>
+              </Badge>
+            )}
+            {account != null && (
+              <Badge tone="neutral">
+                <span className="text-zinc-500">conta:</span>{" "}
+                <span className="text-zinc-200">{account}</span>
               </Badge>
             )}
             <Badge tone={status === "open" ? (anyFresh ? "positive" : "warning") : "negative"}>
