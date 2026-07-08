@@ -20,8 +20,12 @@ on the dashboard. Close either and the flow panels simply go stale.
 CFD CAVEATS:
 - DOM (`market_book_get`) only returns rungs if your broker publishes depth
   for that symbol. Many CFD brokers don't — check with Alt+B in MT5 first.
-- "Volume" on CFDs is *tick volume* (count of price changes), not real traded
-  contracts, and aggressor side is inferred. Treat footprint/delta as a proxy.
+- The tape source is AUTO-DETECTED per symbol: when the broker publishes real
+  times&trades (COPY_TICKS_TRADE with usable prints) we use its flags + real
+  volume; otherwise the tape is synthesized from quote ticks. On synthesized
+  feeds without per-tick volume, "volume" is a tick COUNT, not traded
+  contracts — treat footprint/delta as a pressure proxy. Run diag_forces.py
+  to see empirically what your feed exposes.
 """
 
 from __future__ import annotations
@@ -53,6 +57,14 @@ _BOOK_TYPE_SELL = 1  # ask side
 _BOOK_TYPE_SELL_MARKET = 3
 _BOOK_TYPE_BUY = 2  # bid side
 _BOOK_TYPE_BUY_MARKET = 4
+
+# MT5 tick flags (stable numeric values of the MT5 API's TICK_FLAG_* enum).
+# Mirrored as literals so the pure classification helpers below stay importable
+# — and unit-testable — on machines without the MetaTrader5 package.
+_TICK_FLAG_LAST = 8
+_TICK_FLAG_VOLUME = 16
+_TICK_FLAG_BUY = 32
+_TICK_FLAG_SELL = 64
 
 
 def _now_iso() -> str:
@@ -226,9 +238,9 @@ def _read_book(backend: str, broker: str, depth: int) -> dict[str, Any] | None:
 
 def _tick_side(flags: int, last: float, bid: float, ask: float) -> str:
     """Aggressor side for a trade tick. Prefer broker flags; else infer."""
-    if flags & mt5.TICK_FLAG_BUY:
+    if flags & _TICK_FLAG_BUY:
         return "buy"
-    if flags & mt5.TICK_FLAG_SELL:
+    if flags & _TICK_FLAG_SELL:
         return "sell"
     if ask and last >= ask:
         return "buy"
@@ -266,6 +278,72 @@ def _read_trades(
             }
         )
     return out, high
+
+
+# Tape-source auto-detection: how far back we probe COPY_TICKS_TRADE, how many
+# usable trade prints that window must contain before we trust the real tape,
+# and how often a symbol's resolved mode is re-checked while running.
+_TAPE_PROBE_MINUTES = 5.0
+_TAPE_PROBE_MIN_PRINTS = 5
+_TAPE_RECHECK_SECONDS = 300.0
+
+
+def _usable_trade_tick(flags: int, last: float, volume_real: float, volume: float) -> bool:
+    """True when a COPY_TICKS_TRADE tick is a real, usable print: it has a trade
+    price AND carries aggressor flags or a size. Some feeds return trade ticks
+    that are empty husks (last=0, no flags, no volume) — those prove nothing."""
+    if last <= 0.0:
+        return False
+    return bool(flags & (_TICK_FLAG_BUY | _TICK_FLAG_SELL)) or volume_real > 0.0 or volume > 0.0
+
+
+def _detect_tape_mode(broker: str) -> str:
+    """Resolve 'real' vs 'synth' for one symbol by probing the recent tape.
+
+    'real' when the broker returned at least _TAPE_PROBE_MIN_PRINTS usable trade
+    ticks (see _usable_trade_tick) over the last _TAPE_PROBE_MINUTES — enough to
+    trust real flags + real volume over the quote-tick proxy. Anything less (an
+    empty tape, husk ticks, an MT5 error) falls back to 'synth' so the flow
+    never goes dark just because the broker has no times&trades."""
+    from_dt = datetime.now(timezone.utc) - timedelta(minutes=_TAPE_PROBE_MINUTES)
+    try:
+        ticks = mt5.copy_ticks_from(broker, from_dt, 10000, mt5.COPY_TICKS_TRADE)
+    except Exception:  # pragma: no cover - defensive
+        return "synth"
+    if ticks is None or len(ticks) == 0:
+        return "synth"
+    usable = sum(
+        1
+        for t in ticks
+        if _usable_trade_tick(
+            int(t["flags"]), float(t["last"]), float(t["volume_real"]), float(t["volume"])
+        )
+    )
+    return "real" if usable >= _TAPE_PROBE_MIN_PRINTS else "synth"
+
+
+def _resolve_tape_modes(cfg: dict[str, Any]) -> dict[str, str]:
+    """Per-broker-symbol tape mode: 'real' (broker times&trades) or 'synth'
+    (quote-tick synthesis). `synthesize_trades_from_quotes` in the config is an
+    optional FORCE override: true forces synth, false forces the real tape, and
+    absent/null (the recommended default) auto-detects per symbol."""
+    force = cfg.get("synthesize_trades_from_quotes")
+    modes: dict[str, str] = {}
+    for m in cfg["symbols"]:
+        broker = m["mt5"]
+        if force is True:
+            modes[broker] = "synth"
+        elif force is False:
+            modes[broker] = "real"
+        else:
+            modes[broker] = _detect_tape_mode(broker)
+        logger.info(
+            "tape source for %s: %s (%s)",
+            broker,
+            "quote-tick synthesis" if modes[broker] == "synth" else "real times&trades",
+            "forced by config" if force is not None else "auto-detected",
+        )
+    return modes
 
 
 def _read_positions(
@@ -647,17 +725,59 @@ def _quantize(price: float, tick: float | None) -> float:
     return round(round(price / tick) * tick, 10)
 
 
+def _classify_quote_tick(
+    flags: int, last: float, bid: float, ask: float, prev_mid: float | None, mid: float
+) -> str | None:
+    """Aggressor side for one quote tick, or None when it carries no direction.
+
+    Evidence in order of strength (the Lee-Ready rule adapted to this feed):
+    1. Broker aggressor flags — rare on quote streams, but authoritative.
+    2. Quote rule on a FRESH `last` (only when TICK_FLAG_LAST says this tick
+       carried a trade — otherwise `last` is stale, carried forward from an
+       earlier deal, and says nothing about this quote): a print at/above the
+       ask is buyers lifting the offer, at/below the bid is sellers hitting it.
+       Inside the spread (or a stale last) → 3.
+    3. Tick test on the mid price: uptick = buy, downtick = sell. Unchanged mid
+       with no stronger evidence → None (not a directional print).
+    """
+    if flags & _TICK_FLAG_BUY:
+        return "buy"
+    if flags & _TICK_FLAG_SELL:
+        return "sell"
+    if (flags & _TICK_FLAG_LAST) and last > 0.0:
+        if ask and last >= ask:
+            return "buy"
+        if bid and last <= bid:
+            return "sell"
+    if prev_mid is not None and mid != prev_mid:
+        return "buy" if mid > prev_mid else "sell"
+    return None
+
+
+def _quote_tick_volume(volume_real: float, volume: float) -> float:
+    """Size of one synthesized print. Uses the feed's real per-tick volume when
+    it carries one (volume_real, else volume); only when BOTH are zero does it
+    fall back to 1.0 — at that point the tape is honestly a tick-COUNT proxy
+    (pressure = count of directional ticks), not traded contracts. Most CFD
+    quote streams are the latter; the fallback keeps delta meaningful anyway."""
+    if volume_real > 0.0:
+        return volume_real
+    if volume > 0.0:
+        return volume
+    return 1.0
+
+
 def _read_quote_flow(
     backend: str, broker: str, since_msc: int, last_mid: float | None, tick: float | None
 ) -> tuple[list[dict[str, Any]], int, float | None, tuple[float, float] | None]:
     """Synthesize a buy/sell tape from quote ticks when the broker has no
     times&trades (the common CFD case: COPY_TICKS_TRADE is empty).
 
-    Aggressor is inferred by the tick rule on the mid price: an uptick means
-    buyers are lifting the offer (side=buy at the ask), a downtick means sellers
-    are hitting the bid (side=sell at the bid). Volume is unknown on these feeds,
-    so each directional tick counts as 1 — the *count* of up vs down ticks is the
-    pressure signal (delta), not a traded contract count. Returns
+    Aggressor is inferred per tick by `_classify_quote_tick` (broker flags →
+    last vs bid/ask → mid-price tick test). Volume is the feed's real per-tick
+    volume when it exposes one; otherwise each directional tick counts as 1, in
+    which case the pressure signal (delta) is a tick COUNT, not traded
+    contracts (see `_quote_tick_volume`). Returns
     (trades, new high-water time_msc, new last_mid, latest (bid, ask)).
 
     The latest (bid, ask) is the live top of book — on CFD feeds the broker's DOM
@@ -683,16 +803,21 @@ def _read_quote_flow(
             continue
         last_quote = (bid, ask)  # freshest top of book, regardless of mid move
         mid = (bid + ask) / 2.0
-        if prev is not None and mid != prev:
-            if mid > prev:
-                side, price = "buy", _quantize(ask, tick)
-            else:
-                side, price = "sell", _quantize(bid, tick)
+        last = float(t["last"])
+        flags = int(t["flags"])
+        side = _classify_quote_tick(flags, last, bid, ask, prev, mid)
+        if side is not None:
+            # Print at the traded price only when THIS tick carried a fresh
+            # trade (TICK_FLAG_LAST); otherwise `last` is stale, so price at the
+            # side of the book the aggressor consumed (buy lifts the ask, sell
+            # hits the bid) — matching the backend's delta convention.
+            fresh_last = bool(flags & _TICK_FLAG_LAST) and last > 0.0
+            price = last if fresh_last else (ask if side == "buy" else bid)
             out.append(
                 {
                     "at": datetime.fromtimestamp(tmsc / 1000.0, tz=timezone.utc).isoformat(),
-                    "price": price,
-                    "volume": 1.0,
+                    "price": _quantize(price, tick),
+                    "volume": _quote_tick_volume(float(t["volume_real"]), float(t["volume"])),
                     "side": side,
                 }
             )
@@ -859,10 +984,15 @@ def run(cfg: dict[str, Any]) -> None:
     start_msc = int(time.time() * 1000)
     since: dict[str, int] = {m["mt5"]: start_msc for m in cfg["symbols"]}
     last_book: dict[str, str] = {}  # broker -> last sent book payload (dedup)
-    # When the broker publishes no times&trades, build the tape from quote-tick
-    # direction instead (see _read_quote_flow). `mid` holds the last mid price
-    # per symbol so we can classify the next tick as an up/down move.
-    quote_mode = bool(cfg.get("synthesize_trades_from_quotes", False))
+    # Tape source per symbol: 'real' broker times&trades when the feed has them,
+    # 'synth' quote-tick synthesis otherwise. Auto-detected at startup (unless
+    # the config forces a mode) and re-checked every _TAPE_RECHECK_SECONDS so a
+    # feed that starts publishing trades — or dries up — flips without a
+    # restart. `mid` holds the last mid price per symbol for the synth path's
+    # tick test.
+    tape_mode = _resolve_tape_modes(cfg)
+    force_mode = cfg.get("synthesize_trades_from_quotes")
+    next_mode_at = time.monotonic() + _TAPE_RECHECK_SECONDS
     mid: dict[str, float | None] = {m["mt5"]: None for m in cfg["symbols"]}
     # Liquidity gauge cadence (see _read_session_liquidity). `next_liq_at = 0`
     # forces a reading on the first poll so the dashboard has a baseline fast.
@@ -897,12 +1027,7 @@ def run(cfg: dict[str, Any]) -> None:
             "is_demo=%s; opening is refused unless demo).",
             is_demo,
         )
-    if quote_mode:
-        logger.info(
-            "tape source: quote-tick flow (no real times&trades on this feed); "
-            "footprint ticks: %s",
-            {k: v for k, v in ftick.items()},
-        )
+    logger.info("footprint ticks: %s", {k: v for k, v in ftick.items()})
 
     ws = None
     while True:
@@ -931,7 +1056,7 @@ def run(cfg: dict[str, Any]) -> None:
             _drain_control(ws, broker_to_backend, allow_auto_close, allow_auto_trade, is_demo)
             for m in cfg["symbols"]:
                 backend, broker = m["backend"], m["mt5"]
-                if quote_mode:
+                if tape_mode[broker] == "synth":
                     # CFD feed: the broker's DOM is a frozen mirrored demo book,
                     # so derive the live top of book from the quote tick instead.
                     trades, since[broker], mid[broker], quote = _read_quote_flow(
@@ -960,10 +1085,26 @@ def run(cfg: dict[str, Any]) -> None:
                         ws.send(json.dumps(book))
                 if trades:
                     ws.send(json.dumps({"type": "trades", "symbol": backend, "trades": trades}))
+            now_mono = time.monotonic()
+            # Re-check the tape source periodically (auto mode only): a feed can
+            # start publishing real trades mid-session, or a real tape can dry
+            # up — either way we switch paths and log it, no restart needed.
+            if force_mode is None and now_mono >= next_mode_at:
+                next_mode_at = now_mono + _TAPE_RECHECK_SECONDS
+                for m in cfg["symbols"]:
+                    new_mode = _detect_tape_mode(m["mt5"])
+                    if new_mode != tape_mode[m["mt5"]]:
+                        logger.info(
+                            "tape source for %s switched: %s → %s",
+                            m["mt5"],
+                            tape_mode[m["mt5"]],
+                            new_mode,
+                        )
+                        tape_mode[m["mt5"]] = new_mode
+                        mid[m["mt5"]] = None  # fresh tick-test baseline for synth
             # Periodically recompute + push the session-liquidity reading that
             # feeds the backend's day-outlook gate. Throttled (default 60s) —
             # copy_rates_range over ~3 weeks of M5 bars is heavier than a poll.
-            now_mono = time.monotonic()
             if liq_period > 0 and liq_days > 0 and now_mono >= next_liq_at:
                 next_liq_at = now_mono + liq_period
                 for liq_sym in cfg["symbols"]:

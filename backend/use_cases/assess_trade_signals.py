@@ -18,8 +18,11 @@ The two are mutually exclusive per position: a clear "against" pre-empts the
 softer "take profit". Below a minimum sample of directional prints we stay
 silent rather than fire on noise.
 
-CAVEAT: on CFD feeds the tape is synthesized from quote-tick direction (count,
-not real traded volume), so these are a directional proxy — decision support,
+CAVEAT: the lean is a share of directional VOLUME. When the collector has a
+real tape (broker trade ticks) that volume is real contracts; on quote-only CFD
+feeds it synthesizes the tape and each print's volume falls back to 1 (a tick
+count) unless the tick carries a size. Either way the fraction normalizes, but
+on the count-proxy feeds these remain a directional proxy — decision support,
 not a guarantee.
 """
 

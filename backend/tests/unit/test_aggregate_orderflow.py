@@ -107,6 +107,19 @@ def test_footprint_splits_aggressor_into_bid_ask() -> None:
     assert bar.poc_price == 100.0
 
 
+def test_delta_is_volume_weighted() -> None:
+    """Delta weighs traded size, not print count: one big buy outweighs many
+    small sells (the real-tape / volume-carrying-feed case)."""
+    agg = _agg()
+    agg.ingest_trade(_trade(100.0, 5.0, "buy", 1))
+    for s in range(2, 6):
+        agg.ingest_trade(_trade(100.0, 0.5, "sell", s))
+    bar = agg.snapshot(AssetSymbol.USTEC).footprint[0]
+    assert bar.ask_volume == 5.0  # buy aggressor → ask side (convention)
+    assert bar.bid_volume == 2.0  # sell aggressor → bid side
+    assert bar.delta == 3.0  # positive despite 4 sell prints vs 1 buy print
+
+
 def test_unknown_side_excluded_from_delta_but_on_tape() -> None:
     agg = _agg()
     snap = agg.ingest_trade(_trade(100.0, 4.0, "unknown", 1))

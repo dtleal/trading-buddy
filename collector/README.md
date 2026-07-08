@@ -92,7 +92,7 @@ dashboard keeps working).
 
    ```
    MT5 attached: source=FTMO terminal=... connected=True account=...
-   tape source: quote-tick flow ...        (only if synthesize_trades_from_quotes=true)
+   tape source for US100.cash: quote-tick synthesis (auto-detected)   ← one line per symbol; says "real times&trades" when the feed has a usable tape
    Connected to backend ingest: ws://127.0.0.1:8000/ws/ingest/orderflow
    ```
 
@@ -190,16 +190,20 @@ what you are looking at:
 |---|---|---|
 | **Bid/Ask tick chart** | **live quote tick** (`bid`/`ask`) under quote synthesis; raw DOM top-of-book otherwise | ✅ real (price movement) |
 | **DOM depth (sizes)** | broker book | ⚠️ on demo accounts it is often **mirrored** (bid size = ask size at every level) → imbalance is always 0; worse, it can **freeze** for hours. Not used as the quote source when synthesis is on; the ladder isn't shown |
-| **Tape / Footprint / Pressure** | **derived** from quote-tick direction when there are no real trade ticks | ⚠️ direction is sound; **"volume" is a tick count, not contracts** |
+| **Tape / Footprint / Pressure** | **real times&trades** (flags + `volume_real`) when the feed exposes one (auto-detected); otherwise **derived** from quote ticks | ✅ real when the tape is real; ⚠️ on quote-only feeds direction is sound but **"volume" is a tick count, not contracts** (unless the tick carries a size) |
 | **Open positions** | `mt5.positions_get()` (read-only) | ✅ real (your live entry, P&L, SL/TP, time-in-trade) |
 | **In-trade alerts** | position + flow lean (`pressure_against`, `take_profit`) | ⚠️ deterministic, but only as sound as the synthesized flow it reads — decision support, not advice |
 | **Auto-close / fechar tudo** | `mt5.order_send` (only if `allow_auto_close`) | ✅ real order execution — closes your positions for real |
 | **Breakeven (SL → entry)** | `mt5.order_send` `TRADE_ACTION_SLTP` (only if `allow_auto_close`) | ✅ real order modification — moves your stops for real |
 
-With quote-tick synthesis the aggressor is inferred by the **tick rule** on the
-mid price: an up-tick is a buy (at the ask), a down-tick is a sell (at the bid),
-each counting as 1. That makes footprint **delta** and the **pressure bar** a
-proxy for aggression, not exchange-grade volume.
+With quote-tick synthesis the aggressor is inferred per tick, strongest evidence
+first (Lee-Ready adapted to the feed): broker BUY/SELL flags when present → a
+nonzero `last` vs the quote (at/above the ask = buy, at/below the bid = sell) →
+the **tick rule** on the mid price (up-tick = buy, down-tick = sell). Each print
+is volume-weighted when the tick carries a size; when it doesn't, it counts as 1
+— footprint **delta** and the **pressure bar** are then a tick-count proxy for
+aggression, not exchange-grade volume. `python diag_forces.py` shows which case
+your feed is, per symbol.
 
 For exchange-grade footprint/delta you'd switch the backend to a real CME feed
 (e.g. Databento) — this collector is the zero-cost MT5 path.
@@ -214,7 +218,7 @@ For exchange-grade footprint/delta you'd switch the backend to a real CME feed
 | `token` | Must match `ORDERFLOW_INGEST_TOKEN` in the backend `.env`. |
 | `poll_interval_ms` | How often to poll MT5 (250 ms is a good start). |
 | `book_depth` | Max DOM rungs per side to send (10). |
-| `synthesize_trades_from_quotes` | `true` for feeds with **no** times&trades: builds tape/footprint/pressure from quote-tick direction. `false` only if your broker sends real trade ticks. |
+| `synthesize_trades_from_quotes` | Tape source. **`null`/absent = auto-detect per symbol (recommended)**: uses the broker's real times&trades (aggressor flags + real volume) when `COPY_TICKS_TRADE` has usable prints, else synthesizes from quote ticks (`last` vs bid/ask, mid tick test; volume-weighted when the tick carries a size, else count=1/tick). `true` = force synthesis; `false` = force the real tape. Re-checked every 5 min while running. Run `python diag_forces.py` to see empirically what your feed exposes. |
 | `liquidity_baseline_days` | Sessions used for the **day-outlook liquidity gauge** baseline (default `20`). The collector compares today's cumulative tick volume to the median of the prior N sessions at the same time-of-day and pushes the ratio to the backend, which folds it into the "Perfil do Dia" banner/alert. `0` disables. |
 | `liquidity_poll_seconds` | How often (s) to recompute + push that ratio (default `60`). It reads ~3 weeks of M5 bars, so it is throttled well below the tick poll. `0` disables. |
 | `positions_poll_seconds` | How often (s) to read + push your **open positions** for the live P&L / time-in-trade panel and in-trade alerts (default `0.25`). Reading is always safe. `0` disables position reading entirely. |
@@ -355,7 +359,7 @@ Local: restart the backend container. KVM: redeploy.
 | Connects, but `/api/orderflow` is `[]` | Wrong broker symbols, or attached to a terminal with no data | Map `symbols[].mt5` to your broker's exact names; point `mt5.sources[].path` at the terminal that has the data |
 | Backend up but `/api/orderflow` is `[]` after a restart, no collector in the backend logs | Collector window was closed when the stack restarted (MT5 still up, but no python process) | Relaunch `start_collector.bat`, or install the [watchdog](#keep-it-running-automatically-watchdog) so it comes back on its own |
 | `Order-flow ingest refused` on the backend | `ORDERFLOW_ENABLED=false` or token mismatch | Set the env and make `token` match `ORDERFLOW_INGEST_TOKEN` |
-| DOM fills but tape/footprint/pressure stay empty | Broker sends no real trade ticks | Set `synthesize_trades_from_quotes: true` |
+| DOM fills but tape/footprint/pressure stay empty | Broker sends no real trade ticks AND the config forces the real tape (`false`) | Set `synthesize_trades_from_quotes` to `null` (auto-detect) or `true`; confirm what the feed exposes with `python diag_forces.py` |
 | Flow appears then drops every ~50s | (already fixed) collector now answers backend keepalive pings | Pull latest `mt5_orderflow_collector.py` |
 | Backend hangs / `/api/orderflow` times out under quote synthesis | (already fixed) per-trade snapshot + unbounded footprint cells | Pull latest backend; ensure `footprint_tick` is set per symbol |
 | Bid/Ask chart stuck on "Coletando cotações…" while tape/pressure update | (already fixed) the broker's mirrored DOM **froze** and was the quote source, so the quote never changed | Pull latest `mt5_orderflow_collector.py` (quote synthesis now feeds the chart from the live quote tick). The chart also now shows "cotação parada" instead of failing silently |

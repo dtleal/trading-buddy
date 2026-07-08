@@ -144,6 +144,60 @@ def test_should_not_reverse_when_flow_still_favors_or_weak() -> None:
     assert should_reverse(_snap(2, 3), "buy") is False
 
 
+def _snap_weighted(
+    prints: list[tuple[str, float]],
+    *,
+    window_range: float = 10.0,
+    range_per_bar: float | None = 2.0,
+) -> OrderFlowSnapshot:
+    """Like _snap but with explicit (side, volume) per print, for the
+    volume-weighted lean cases (real-tape feeds)."""
+    trades = [
+        TapeTrade(
+            symbol=AssetSymbol.USTEC,
+            at=_AT,
+            price=100.0 if i % 2 == 0 else 100.0 + window_range,
+            volume=vol,
+            side=side,  # type: ignore[arg-type]
+        )
+        for i, (side, vol) in enumerate(prints)
+    ]
+    live = (
+        None
+        if range_per_bar is None
+        else LiveActivity(
+            range_per_bar=range_per_bar, volume_per_bar=10.0, interval_seconds=60, sampled_bars=5
+        )
+    )
+    return OrderFlowSnapshot(
+        symbol=AssetSymbol.USTEC, asof=_AT, recent_trades=trades, live_activity=live
+    )
+
+
+def test_explosion_lean_is_volume_weighted() -> None:
+    # 12 big buys vs 8 small sells: prints are 60/40 (< STRONG_FRACTION) but
+    # volume is 60/60.8 ≈ 0.99 one-sided → the burst fires on real size.
+    snap = _snap_weighted([("buy", 5.0)] * 12 + [("sell", 0.1)] * 8)
+    assert detect_explosion(snap) == "buy"
+
+
+def test_reverse_reacts_to_volume_not_print_count() -> None:
+    # Holding buys; prints are dead even (10 v 10) but sellers moved 10× the
+    # size → against ≈ 0.41 ≥ REVERSE_LEAN → reverse. A count-based read (0.5)
+    # would have stayed put.
+    snap = _snap_weighted([("buy", 0.1)] * 10 + [("sell", 1.0)] * 10)
+    assert should_reverse(snap, "buy") is True
+    assert should_reverse(snap, "sell") is False
+
+
+def test_min_prints_gate_counts_prints_not_volume() -> None:
+    # A handful of huge prints must not unlock a judgement: the sample gate is
+    # a PRINT count (statistical sufficiency), independent of volume weighting.
+    snap = _snap_weighted([("sell", 500.0)] * (MIN_PRINTS - 1))
+    assert detect_explosion(snap) is None
+    assert should_reverse(snap, "buy") is False
+
+
 def test_grid_levels_below_for_buy_above_for_sell() -> None:
     # range_per_bar 10, step_frac 0.5 → step 5 → 3 levels.
     assert grid_levels(100.0, "buy", 10.0) == [95.0, 90.0, 85.0]

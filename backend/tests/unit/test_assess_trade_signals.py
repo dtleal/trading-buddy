@@ -128,6 +128,35 @@ def test_against_boundary_is_inclusive() -> None:
     assert sig and sig[0].code == "pressure_against" and sig[0].severity == "warn"
 
 
+def test_pressure_is_volume_weighted_not_print_counted() -> None:
+    """With a real tape the lean weighs SIZE: 8 small buys vs 4 big sells is
+    seller control even though buy PRINTS outnumber sell prints 2:1."""
+    trades = [
+        TapeTrade(symbol=AssetSymbol.USTEC, at=_AT, price=100.0, volume=0.1, side="buy")
+        for _ in range(8)
+    ] + [
+        TapeTrade(symbol=AssetSymbol.USTEC, at=_AT, price=100.0, volume=2.0, side="sell")
+        for _ in range(4)
+    ]
+    snap = OrderFlowSnapshot(symbol=AssetSymbol.USTEC, asof=_AT, recent_trades=trades)
+    # buy 0.8 / total 8.8 → buy_pct ≈ 0.091 → lean ≈ -0.41 for a long → urgent.
+    sig = assess_trade_signals(snap, [_pos("buy")])
+    assert len(sig) == 1
+    assert sig[0].code == "pressure_against"
+    assert sig[0].severity == "urgent"
+
+
+def test_min_prints_gate_counts_prints_not_volume() -> None:
+    """The sample gate is a PRINT count: a few huge prints must not unlock a
+    judgement just because their summed volume is large."""
+    trades = [
+        TapeTrade(symbol=AssetSymbol.USTEC, at=_AT, price=100.0, volume=500.0, side="sell")
+        for _ in range(MIN_PRINTS - 1)
+    ]
+    snap = OrderFlowSnapshot(symbol=AssetSymbol.USTEC, asof=_AT, recent_trades=trades)
+    assert assess_trade_signals(snap, [_pos("buy")]) == []
+
+
 def test_multiple_positions_each_judged_independently() -> None:
     # 2 buys / 8 sells: a long is against; a short is favoured (silent).
     snap = _snapshot(2, 8)
