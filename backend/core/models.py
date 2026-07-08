@@ -492,6 +492,43 @@ class TradeSignal(_Frozen):
     message: str
 
 
+FlowSignalAction = Literal["enter_long", "enter_short", "exit", "hold"]
+FlowSignalBasis = Literal["explosion", "lean", "reversal", "against", "exhaustion", "none"]
+
+
+class FlowSignal(_Frozen):
+    """THE per-symbol entry/exit signal derived from the live order flow.
+
+    One signal per symbol per snapshot, computed by
+    `use_cases.trade_signal.compute_flow_signal` from the exact same tape
+    window / thresholds the scalper bot uses (`use_cases.scalper`) plus the
+    in-trade against/stall rules (`use_cases.assess_trade_signals`). It is the
+    single source of truth: the UI renders it as decision support for manual
+    trading, and the armed bot consumes the SAME object for its enter/reverse
+    decisions — the signal shown is the signal acted on.
+
+    - `action` — what the flow says to do right now (relative to the open
+      position, if any). `exit` only appears while holding.
+    - `basis` — which flow evidence produced it: `explosion` (burst entry),
+      `lean` (continuation lean while holding), `reversal` (flow flipped hard
+      against the held side — the bot's stop-and-reverse), `against` (softer
+      contrary pressure, advisory only), `exhaustion` (in profit + momentum
+      stalled, advisory only), `none` (no judgement).
+    - `strength` — 0..1 conviction cue for the UI; it is NOT an execution
+      threshold (the bot keys off action+basis only).
+
+    Like every flow read here, on quote-only CFD feeds this derives from a
+    synthesized tape (tick direction, not real volume) — decision support,
+    never advice.
+    """
+
+    symbol: AssetSymbol
+    action: FlowSignalAction
+    reason: str  # short PT human text for the UI
+    strength: float = Field(ge=0.0, le=1.0)
+    basis: FlowSignalBasis
+
+
 class AutoCloseStatus(_Frozen):
     """State of the whole-account profit-target auto-close.
 
@@ -582,6 +619,10 @@ class OrderFlowSnapshot(_Frozen):
     # Deterministic in-trade alerts about the open positions (pressure turning
     # against you, profit + momentum stalling). Recomputed on every broadcast.
     signals: list[TradeSignal] = Field(default_factory=list)
+    # THE single per-symbol entry/exit signal derived from the flow (see
+    # FlowSignal). Stamped on every broadcast; the armed bot follows the same
+    # object, so what the UI shows is exactly what the bot acts on.
+    flow_signal: FlowSignal | None = None
 
 
 # -----------------------------------------------------------------------------
@@ -660,5 +701,8 @@ __all__ = [
     "OrderFlowSnapshot",
     "SessionLiquidity",
     "LiveActivity",
+    "FlowSignal",
+    "FlowSignalAction",
+    "FlowSignalBasis",
     "DayOutlook",
 ]

@@ -5,6 +5,7 @@ import { LayoutGrid } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { BidAskChart } from "./BidAskChart";
+import { FlowSignalIndicator } from "./FlowSignalIndicator";
 import { PressureGauge } from "./PressureGauge";
 import { PositionPanel } from "./PositionPanel";
 import { PositionControls } from "./PositionControls";
@@ -195,6 +196,9 @@ function SymbolColumn({
               />
             </FlowBlock>
           )}
+          <FlowBlock title="Sinal do fluxo (entrada · saída)">
+            <FlowSignalIndicator signal={flow.flow_signal} />
+          </FlowBlock>
           <FlowBlock title="Pressão (compra · venda)">
             <PressureGauge flow={flow} />
           </FlowBlock>

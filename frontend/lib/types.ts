@@ -303,6 +303,21 @@ export const TradeSignal = z.object({
 });
 export type TradeSignal = z.infer<typeof TradeSignal>;
 
+/**
+ * THE per-symbol entry/exit signal derived from the live flow — the same
+ * object the armed scalper bot acts on (computed once in the backend from the
+ * scalper/assess thresholds). Decision support, not advice: on quote-only CFD
+ * feeds it reads a synthesized tape.
+ */
+export const FlowSignal = z.object({
+  symbol: AssetSymbol,
+  action: z.enum(["enter_long", "enter_short", "exit", "hold"]),
+  reason: z.string(),
+  strength: z.number(), // 0..1 conviction cue (UI only; the bot ignores it)
+  basis: z.enum(["explosion", "lean", "reversal", "against", "exhaustion", "none"]),
+});
+export type FlowSignal = z.infer<typeof FlowSignal>;
+
 /** One per-symbol order-flow message from /ws/orderflow. */
 export const OrderFlowSnapshot = z.object({
   symbol: AssetSymbol,
@@ -316,6 +331,7 @@ export const OrderFlowSnapshot = z.object({
   live_activity: LiveActivity.nullable().default(null),
   positions: z.array(Position).default([]),
   signals: z.array(TradeSignal).default([]),
+  flow_signal: FlowSignal.nullable().default(null),
 });
 export type OrderFlowSnapshot = z.infer<typeof OrderFlowSnapshot>;
 

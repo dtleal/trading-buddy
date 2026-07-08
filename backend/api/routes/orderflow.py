@@ -44,12 +44,16 @@ from use_cases.assess_trade_signals import assess_trade_signals
 from use_cases.autoclose import should_autoclose
 from use_cases.scalper import (
     Direction,
-    detect_explosion,
     grid_breach_price,
     grid_levels,
     region_broken,
     should_open,
-    should_reverse,
+)
+from use_cases.trade_signal import (
+    compute_flow_signal,
+    held_side,
+    signal_entry_direction,
+    signal_says_reverse,
 )
 
 logger = logging.getLogger(__name__)
@@ -281,16 +285,9 @@ def _range_per_bar(snapshot: OrderFlowSnapshot) -> float:
 
 
 def _symbol_side(positions: list[Position]) -> Direction | None:
-    """The net side held on a symbol: 'buy'/'sell', or None when flat or tied
-    (a tie should not happen with direction-consistent entries; treated as
-    'don't add' for safety)."""
-    buys = sum(1 for p in positions if p.side == "buy")
-    sells = sum(1 for p in positions if p.side == "sell")
-    if buys > sells:
-        return "buy"
-    if sells > buys:
-        return "sell"
-    return None
+    """The net side held on a symbol — shared with the flow-signal use case so
+    the signal and the bot always judge the same side (see `held_side`)."""
+    return held_side(positions)
 
 
 def _autoclose_status() -> AutoCloseStatus:
@@ -435,10 +432,13 @@ def _bot_status() -> BotStatus:
     )
 
 
-async def _run_bot(touched: set[AssetSymbol]) -> None:
+async def _run_bot(snaps: dict[AssetSymbol, OrderFlowSnapshot]) -> None:
     """One bot tick: settle a pending close, then account-wide exit, then
     explosion entries on the symbols that just updated. Called from the ingest
-    loop after each message."""
+    loop after each message with the SAME stamped snapshots that were just
+    broadcast to the UI — the bot's enter/reverse decisions read the
+    `flow_signal` on those snapshots, so it acts on exactly what the user sees.
+    """
     if not _bot.armed:
         return
 
@@ -480,10 +480,11 @@ async def _run_bot(touched: set[AssetSymbol]) -> None:
         return
 
     # Entries / reversals: only the symbols whose flow just moved.
-    for symbol in touched:
+    for symbol, snap in snaps.items():
         if symbol not in _bot.lots:
             continue
         positions = _positions_store.get(symbol, [])
+        signal = snap.flow_signal  # the exact signal just broadcast to the UI
 
         # Settling a per-symbol close (reverse or profit-lock): wait until flat,
         # then bank the captured P&L and reset its peak. Re-entry on a later tick.
@@ -501,7 +502,6 @@ async def _run_bot(touched: set[AssetSymbol]) -> None:
             _bot.peak.pop(symbol, None)
             _bot.grid.pop(symbol, None)
 
-        snap = aggregator.snapshot(symbol)
         current_side = _symbol_side(positions)
         sym_pnl = sum(p.profit for p in positions)
 
@@ -532,12 +532,13 @@ async def _run_bot(touched: set[AssetSymbol]) -> None:
         # Hybrid reverse: the grid catches pullbacks, but if price breaks past the
         # whole region (deepest level + buffer) the trade has failed → close (the
         # collector also cancels the unfilled limits) and let it re-enter/flip.
-        # Fall back to the lean-based reverse if no grid region is recorded.
+        # Fall back to the flow-signal reverse if no grid region is recorded.
         # NOTE: manual positions (not opened by the bot) have NO grid region, so
-        # they always take the should_reverse() fallback — a deliberately twitchy
-        # tape-flow signal (12 prints, 0.20 lean against). An armed bot manages
-        # manual trades too; this is how it cuts a short on a buy-side tape burst
-        # even while price drifts the trade's way. See backend/README.md.
+        # they always take the signal's stop-and-reverse fallback — the same
+        # deliberately twitchy tape read shown on the UI (12 prints, 0.20 lean
+        # against, basis="reversal"). An armed bot manages manual trades too;
+        # this is how it cuts a short on a buy-side tape burst even while price
+        # drifts the trade's way. See backend/README.md.
         if current_side is not None:
             grid = _bot.grid.get(symbol)
             mid = _book_mid(snap)
@@ -546,7 +547,7 @@ async def _run_bot(touched: set[AssetSymbol]) -> None:
                 and mid is not None
                 and region_broken(mid, current_side, grid["breach"])
             )
-            if broke or (grid is None and should_reverse(snap, current_side)):
+            if broke or (grid is None and signal_says_reverse(signal)):
                 _bot.closing[symbol] = sym_pnl
                 _bot.cooldown_until[symbol] = now + _bot.cooldown_s
                 why = "região rompida" if broke else "fluxo virou contra"
@@ -570,7 +571,9 @@ async def _run_bot(touched: set[AssetSymbol]) -> None:
             continue
         liq = _liquidity_store.get(symbol)
         liquidity_ok = liq is None or liq.ratio >= _THIN_RATIO
-        direction = detect_explosion(snap)
+        # The entry direction comes from the broadcast flow signal (flat →
+        # explosion-only by construction) — same object the UI is showing.
+        direction = signal_entry_direction(signal)
         cooldown_ok = now >= _bot.cooldown_until.get(symbol, 0.0)
         if not should_open(
             direction=direction,
@@ -743,7 +746,10 @@ async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
 
 
 def _stamp_snapshot(snapshot: "OrderFlowSnapshot") -> "OrderFlowSnapshot":
-    """Return the snapshot with the broker source + latest liquidity baked in."""
+    """Return the snapshot with the broker source + latest liquidity baked in,
+    plus THE per-symbol flow signal (entry/exit decision support). The stamped
+    snapshot is what browsers receive AND what the armed bot reads — one
+    computation, one truth."""
     update: dict[str, Any] = {}
     if _current_source is not None:
         update["source"] = _current_source
@@ -752,14 +758,16 @@ def _stamp_snapshot(snapshot: "OrderFlowSnapshot") -> "OrderFlowSnapshot":
     liq = _liquidity_store.get(snapshot.symbol)
     if liq is not None:
         update["liquidity"] = liq
-    positions = _positions_store.get(snapshot.symbol)
+    positions = _positions_store.get(snapshot.symbol) or []
     if positions:
         update["positions"] = positions
         # Deterministic in-trade alerts from the current flow lean + positions.
         signals = assess_trade_signals(snapshot, positions)
         if signals:
             update["signals"] = signals
-    return snapshot.model_copy(update=update) if update else snapshot
+    # Always computed (an entry signal exists precisely when flat).
+    update["flow_signal"] = compute_flow_signal(snapshot, positions)
+    return snapshot.model_copy(update=update)
 
 
 # --- ingest (collector → backend) -------------------------------------------
@@ -799,13 +807,16 @@ async def ingest_ws(websocket: WebSocket) -> None:
                 # log and keep consuming so the collector stays connected.
                 logger.warning("Skipping malformed order-flow message: %r", msg)
                 continue
-            for symbol in touched:
-                await orderflow_broadcaster.publish(_stamp_snapshot(aggregator.snapshot(symbol)))
+            # Stamp once per touched symbol; the SAME objects are broadcast to
+            # the UI and handed to the bot, so signal shown == signal acted on.
+            stamped = {s: _stamp_snapshot(aggregator.snapshot(s)) for s in touched}
+            for snapshot in stamped.values():
+                await orderflow_broadcaster.publish(snapshot)
             # Evaluate the profit-target auto-close after each message (cheap; the
             # P&L only moves on position updates). Disarms itself on fire.
             await _maybe_autoclose()
             # Run the scalper bot (entries on the touched symbols + account exits).
-            await _run_bot(touched)
+            await _run_bot(stamped)
     except WebSocketDisconnect:
         logger.info("Order-flow collector disconnected: %s", websocket.client)
     except Exception:

@@ -17,6 +17,7 @@ from pydantic import SecretStr
 import api.routes.orderflow as of
 from api.app import create_app
 from api.orderflow_broadcaster import orderflow_broadcaster
+from core.models import FlowSignal
 from settings import Settings
 
 TOKEN = "test-secret-token"
@@ -56,6 +57,25 @@ class _FakeBotTradeRepo:
 
     async def list_recent(self, limit: int = 200) -> list:
         return []
+
+
+def _force_signal(monkeypatch: pytest.MonkeyPatch, action: str, basis: str) -> None:
+    """Force the stamped flow signal (the object the UI sees AND the bot reads).
+
+    The bot consumes the snapshot's `flow_signal`, so tests steer it by
+    patching the shared computation — there is no bot-only knob to patch,
+    which is exactly the point of the consolidation."""
+    monkeypatch.setattr(
+        of,
+        "compute_flow_signal",
+        lambda snapshot, positions: FlowSignal(
+            symbol=snapshot.symbol,
+            action=action,  # type: ignore[arg-type]
+            basis=basis,  # type: ignore[arg-type]
+            strength=0.9,
+            reason="forçado no teste",
+        ),
+    )
 
 
 def _book_msg() -> dict:
@@ -245,6 +265,71 @@ def test_no_signals_without_a_position(client: TestClient) -> None:
         )
     ustec = next(s for s in client.get("/api/orderflow").json() if s["symbol"] == "USTEC")
     assert ustec["signals"] == []
+
+
+def test_flow_signal_stamped_on_every_snapshot(client: TestClient) -> None:
+    # Even with a thin tape, every broadcast snapshot carries THE flow signal
+    # (hold when there's nothing to judge) so the UI always has a read.
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json(_book_msg())
+    ustec = next(s for s in client.get("/api/orderflow").json() if s["symbol"] == "USTEC")
+    sig = ustec["flow_signal"]
+    assert sig is not None
+    assert sig["action"] == "hold" and sig["basis"] == "none"
+    assert 0.0 <= sig["strength"] <= 1.0
+
+
+def _explosion_trades() -> list[dict]:
+    """Real tape that detect_explosion fires on: a completed quiet bar (range
+    0.5) then a fast one-sided burst spanning 10 points in the next bar."""
+    quiet = [
+        {
+            "at": f"2026-06-09T14:00:{i:02d}Z",
+            "price": 100.0 if i % 2 == 0 else 100.5,
+            "volume": 1.0,
+            "side": "buy",
+        }
+        for i in range(12)
+    ]
+    burst = [
+        {
+            "at": "2026-06-09T14:01:05Z",
+            "price": 100.0 + (10.0 * i / 19),
+            "volume": 1.0,
+            "side": "buy",
+        }
+        for i in range(20)
+    ]
+    return quiet + burst
+
+
+def test_shown_signal_is_what_the_bot_acts_on(client: TestClient) -> None:
+    # End to end with REAL flow (no monkeypatching): the buy explosion produces
+    # an enter_long signal on the broadcast snapshot AND the armed bot opens a
+    # buy from that same snapshot — shown == acted.
+    of._bot.enabled = True
+    of._bot.armed = True
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json({"type": "trades", "symbol": "USTEC", "trades": _explosion_trades()})
+        ws.send_json(_book_msg())  # quote arrives → bot can size the grid
+        cmd = ws.receive_json()
+    assert cmd["type"] == "open" and cmd["symbol"] == "USTEC" and cmd["side"] == "buy"
+    ustec = next(s for s in client.get("/api/orderflow").json() if s["symbol"] == "USTEC")
+    sig = ustec["flow_signal"]
+    assert sig["action"] == "enter_long" and sig["basis"] == "explosion"
+
+
+def test_bot_ignores_advisory_exit_signals(client: TestClient, monkeypatch) -> None:
+    # A softer 'against' exit is decision support only — the bot must NOT close
+    # on it (its flow exit remains exclusively the reversal-grade signal).
+    _force_signal(monkeypatch, "exit", "against")
+    of._bot.enabled = True
+    of._bot.armed = True
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json(_positions_msg(side="buy"))
+        ws.send_json(_book_msg())  # keep the stream flowing
+    assert not of._bot.closing  # no close was issued
+    assert "reversão" not in (client.get("/api/orderflow/bot").json()["last_result"] or "")
 
 
 def test_ingest_ignores_untracked_symbol(client: TestClient) -> None:
@@ -437,9 +522,9 @@ def test_bot_arm_and_disarm(client: TestClient) -> None:
 def test_bot_opens_market_plus_grid_on_explosion(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Force a flat-entry explosion + a quote + range; assert it opens 1 market
-    # order WITH a grid of limit levels attached.
-    monkeypatch.setattr(of, "detect_explosion", lambda snap: "buy")
+    # Force a flat-entry explosion signal + a quote + range; assert it opens 1
+    # market order WITH a grid of limit levels attached.
+    _force_signal(monkeypatch, "enter_long", "explosion")
     monkeypatch.setattr(of, "_book_bid_ask", lambda snap: (100.0, 100.5))
     monkeypatch.setattr(of, "_range_per_bar", lambda snap: 10.0)
     of._bot.enabled = True
@@ -459,7 +544,7 @@ def test_bot_grid_region_survives_fill_lag(
 ) -> None:
     # After a grid entry, a flat tick during the fill lag (within cooldown) must
     # NOT wipe the just-recorded region (else the break-reverse loses its level).
-    monkeypatch.setattr(of, "detect_explosion", lambda snap: "buy")
+    _force_signal(monkeypatch, "enter_long", "explosion")
     monkeypatch.setattr(of, "_book_bid_ask", lambda snap: (100.0, 100.5))
     monkeypatch.setattr(of, "_range_per_bar", lambda snap: 10.0)
     of._bot.enabled = True
@@ -472,9 +557,9 @@ def test_bot_grid_region_survives_fill_lag(
 
 
 def test_bot_reverses_on_flow_flip(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    # Holding a buy on USTEC; force a reversal signal → closes that symbol and
-    # stays armed (it re-enters the new side via the normal path once flat).
-    monkeypatch.setattr(of, "should_reverse", lambda snap, side: True)
+    # Holding a buy on USTEC; force the bot-grade reversal signal → closes that
+    # symbol and stays armed (it re-enters the new side once flat).
+    _force_signal(monkeypatch, "exit", "reversal")
     of._bot.enabled = True
     of._bot.armed = True
     with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
@@ -563,7 +648,7 @@ def test_bot_does_not_open_in_thin_session(
     from core.enums import AssetSymbol
     from core.models import SessionLiquidity
 
-    monkeypatch.setattr(of, "detect_explosion", lambda snap: "buy")
+    _force_signal(monkeypatch, "enter_long", "explosion")
     of._bot.enabled = True
     of._bot.armed = True
     # Thin session for USTEC (ratio below the 0.75 floor) → no entry.

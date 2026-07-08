@@ -89,13 +89,29 @@ The non-obvious part is the **reverse** path. Bot-opened trades carry a grid
 *region* (`_bot.grid[symbol]`, set only on a bot entry); the reverse first tests
 `region_broken(...)`, which only fires when price breaks past the whole grid
 region. A **manual** position has *no* grid recorded, so that branch is skipped
-and it falls straight to the lean-based `should_reverse(snap, side)` — which is
+and it falls straight to the flow signal's stop-and-reverse — which is
 intentionally twitchy: just `MIN_PRINTS = 12` directional prints with a
 `REVERSE_LEAN = 0.20` lean against the held side (≈70 % of the recent aggressor
 prints on the opposite side). That reads **aggressor order flow on the tape, not
 price direction** — so a short can be cut on a brief burst of buy-side prints
 even while price is still drifting down. Each symbol triggers independently, so
 several manual positions can be closed a few seconds apart rather than at once.
+
+### One flow signal — shown == acted on
+
+`use_cases/trade_signal.py :: compute_flow_signal` produces a **single**
+`FlowSignal` per symbol (`enter_long` / `enter_short` / `exit` / `hold`, with a
+`reason`, `basis`, and a 0–1 `strength` cue). It is stamped onto every
+`OrderFlowSnapshot` in `_stamp_snapshot`, so the **same object** is broadcast to
+the dashboard and handed to `_run_bot` — the signal the user sees is exactly the
+one the armed bot acts on. It is a consolidation, not a new strategy: it imports
+and calls the existing `scalper` (`decide_entry`/`should_reverse`) and
+`assess_trade_signals` functions and their constants, never re-declaring a
+threshold. The bot reads it via `signal_entry_direction` (flat → explosion-only,
+identical to the old `detect_explosion` gate) and `signal_says_reverse`
+(`basis == "reversal"`, identical to the old `should_reverse`); the softer
+`against`/`exhaustion` exits are **advisory** UI alerts the bot does not trade
+on. `strength` is a UI conviction cue only — the bot ignores it.
 
 Closes the bot issues are tagged `origin:"bot"` and persisted to `bot_trades`
 with a `reason` (`lock` / `reverse` / `target` / `stop`); manual closes are
