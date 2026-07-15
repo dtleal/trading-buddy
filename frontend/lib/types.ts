@@ -349,6 +349,16 @@ export const AutoCloseStatus = z.object({
 });
 export type AutoCloseStatus = z.infer<typeof AutoCloseStatus>;
 
+/** Realized account P&L over calendar day/week/month (/api/orderflow/pnl). */
+export const AccountPnl = z.object({
+  day: z.number(),
+  week: z.number(),
+  month: z.number(),
+  currency: z.string().nullable().default(null),
+  asof: z.string().nullable().default(null),
+});
+export type AccountPnl = z.infer<typeof AccountPnl>;
+
 /** State of the explosion-scalper bot (/api/orderflow/bot). */
 export const BotStatus = z.object({
   enabled: z.boolean(), // collector allow_auto_trade AND demo account

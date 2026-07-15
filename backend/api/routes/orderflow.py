@@ -28,6 +28,7 @@ from pydantic import BaseModel
 from api.orderflow_broadcaster import orderflow_broadcaster
 from core.enums import AssetSymbol
 from core.models import (
+    AccountPnl,
     AutoCloseStatus,
     BotStatus,
     BotTrade,
@@ -213,6 +214,9 @@ def _parse_trade(msg: dict[str, Any], symbol: AssetSymbol) -> TapeTrade:
 # multiplex collectors per-symbol we'd promote this into the aggregator.
 _current_source: str | None = None
 _current_account: int | None = None
+# Latest realized account P&L (day/week/month) pushed by the collector. None
+# until the first `account_pnl` message arrives.
+_account_pnl: AccountPnl | None = None
 
 
 class _AutoCloseState:
@@ -612,7 +616,7 @@ async def _run_bot(snaps: dict[AssetSymbol, OrderFlowSnapshot]) -> None:
 
 async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
     """Feed one ingest message into the aggregator. Returns symbols touched."""
-    global _current_source, _current_account
+    global _current_source, _current_account, _account_pnl
     mtype = msg.get("type")
 
     if mtype == "hello":
@@ -655,6 +659,18 @@ async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
             _bot.armed = False
             _bot.last_result = "desarmado: collector sem auto_trade+auto_close/conta demo"
         logger.info("Execution capability — auto_close=%s bot=%s", _autoclose.enabled, _bot.enabled)
+        return set()
+
+    if mtype == "account_pnl":
+        # Realized P&L (day/week/month) from the broker's deal history — all
+        # closed trades, manual and bot. Latest push wins; served over REST.
+        _account_pnl = AccountPnl(
+            day=float(msg.get("day", 0.0) or 0.0),
+            week=float(msg.get("week", 0.0) or 0.0),
+            month=float(msg.get("month", 0.0) or 0.0),
+            currency=msg.get("currency") if isinstance(msg.get("currency"), str) else None,
+            asof=datetime.now(timezone.utc),
+        )
         return set()
 
     if mtype == "autoclose_result":
@@ -864,6 +880,13 @@ async def get_orderflow() -> list[OrderFlowSnapshot]:
     if cached:
         return cached
     return [_stamp_snapshot(s) for s in aggregator.all_snapshots()]
+
+
+@router.get("/api/orderflow/pnl", response_model=AccountPnl, tags=["orderflow"])
+async def get_account_pnl() -> AccountPnl:
+    """Realized account P&L over the calendar day / week / month (all closed
+    trades — manual and bot). All-zero until the collector's first push."""
+    return _account_pnl or AccountPnl()
 
 
 # --- auto-close (whole-account profit target) --------------------------------

@@ -2,6 +2,7 @@
  * HTTP client. Validates every response against the Zod schemas in `types.ts`.
  */
 import {
+  AccountPnl,
   AutoCloseStatus,
   BotStatus,
   BriefResponse,
@@ -105,6 +106,7 @@ export const api = {
   deleteQA: (id: number) => fetchVoid(`/api/qa/${id}`, { method: "DELETE" }),
 
   // --- order-flow execution (auto-close + manual per-asset close) ---
+  getAccountPnl: () => fetchJson("/api/orderflow/pnl", AccountPnl),
   getAutoClose: () => fetchJson("/api/orderflow/autoclose", AutoCloseStatus),
   setAutoClose: (armed: boolean, targetUsd: number | null) =>
     fetchJson("/api/orderflow/autoclose", AutoCloseStatus, {

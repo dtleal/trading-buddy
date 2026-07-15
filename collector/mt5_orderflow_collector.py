@@ -71,6 +71,54 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# --- broker server clock vs true UTC -----------------------------------------
+# MT5 tick/bar times (`time`, `time_msc`) are in the broker's *server* timezone
+# (FTMO runs GMT+2/+3 with EU DST), NOT UTC — and MT5 exposes no API to report
+# that zone. Left uncorrected, a print made now is stamped hours in the future,
+# which desyncs the tape/footprint from real time and from every `now()`-based
+# comparison downstream. We infer the whole-hour offset by comparing a fresh
+# tick's server time to the machine's true UTC clock, rounded to the nearest
+# hour (broker offsets are always whole hours; rounding absorbs tick lag and
+# network latency up to ±30min). Cached and refreshed periodically so a DST
+# switch is picked up without a restart. NOTE: this is only for OUTBOUND
+# timestamps we stamp as UTC; the `since_msc`/high-water logic stays entirely in
+# server-ms and is internally consistent, so it is deliberately left untouched.
+_HOUR_MS = 3_600_000
+# How often to recompute the offset. DST switches are twice a year, so this only
+# needs to be "sometime within the session"; 10 min keeps it cheap and prompt.
+_SERVER_OFFSET_REFRESH_SECONDS = 600.0
+# Account P&L (day/week/month) refresh cadence. Cheap — one history_deals_get
+# over the current month — but banked P&L only moves when a trade closes, so a
+# ~30s lag on the top-of-screen cards is fine.
+_PNL_REFRESH_SECONDS = 30.0
+_server_offset_ms: int = 0
+
+
+def _refresh_server_offset(brokers: list[str]) -> None:
+    """Recompute the server→UTC offset (ms) from the freshest tick across symbols."""
+    if mt5 is None:
+        return
+    now_utc_ms = time.time() * 1000.0
+    freshest: float | None = None
+    for broker in brokers:
+        tick = mt5.symbol_info_tick(broker)
+        tmsc = float(getattr(tick, "time_msc", 0.0) or 0.0)
+        if tmsc > 0 and (freshest is None or tmsc > freshest):
+            freshest = tmsc
+    if freshest is None:
+        return
+    global _server_offset_ms
+    offset = round((freshest - now_utc_ms) / _HOUR_MS) * _HOUR_MS
+    if offset != _server_offset_ms:
+        logger.info("broker server→UTC offset: %+d h", offset // _HOUR_MS)
+    _server_offset_ms = offset
+
+
+def _server_ms_to_utc_iso(tmsc: int) -> str:
+    """Convert a broker-server epoch (ms) to a true-UTC ISO-8601 timestamp."""
+    return datetime.fromtimestamp((tmsc - _server_offset_ms) / 1000.0, tz=timezone.utc).isoformat()
+
+
 def _load_config(path: str) -> dict[str, Any]:
     with open(path, "r", encoding="utf-8") as fh:
         cfg = json.load(fh)
@@ -271,7 +319,7 @@ def _read_trades(
         side = _tick_side(int(t["flags"]), last, float(t["bid"]), float(t["ask"]))
         out.append(
             {
-                "at": datetime.fromtimestamp(tmsc / 1000.0, tz=timezone.utc).isoformat(),
+                "at": _server_ms_to_utc_iso(tmsc),
                 "price": last,
                 "volume": vol,
                 "side": side,
@@ -483,6 +531,63 @@ def _deal_realized(result: Any) -> float:
         time.sleep(0.03)  # deal not in history yet — brief wait (closes are rare)
     logger.warning("Realized P&L unavailable for deal %s (history lag)", deal_id)
     return 0.0
+
+
+def _read_account_pnl() -> dict[str, Any] | None:
+    """Realized account P&L over the calendar day / week / month, ready to send.
+
+    Reads the broker's DEAL history (`history_deals_get`), so it covers EVERY
+    closed trade on the account — manual and bot alike — not just what this
+    collector opened. Each closed deal's net = profit + commission + swap + fee,
+    which is exactly what MetaTrader books. Only BUY/SELL deals count; balance,
+    credit and correction operations (deposits, etc.) are skipped.
+
+    Boundaries are in the broker's SERVER time (day rolls at server midnight,
+    week starts Monday), matching how MetaTrader reports the account. Returns
+    None on an MT5 read error so the caller just retries next cycle."""
+    acct = mt5.account_info()
+    currency = getattr(acct, "currency", None) if acct is not None else None
+    # server wall-clock now = UTC + the broker offset we already track.
+    server_now = (
+        datetime.now(timezone.utc) + timedelta(milliseconds=_server_offset_ms)
+    ).replace(tzinfo=None)
+    day_start = server_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_start = day_start - timedelta(days=day_start.weekday())  # back to Monday
+    month_start = day_start.replace(day=1)
+    # Fetch the widest window once (the month); day/week are filtered from it.
+    try:
+        deals = mt5.history_deals_get(month_start, server_now + timedelta(minutes=1))
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("history_deals_get failed: %s", exc)
+        return None
+    if deals is None:
+        return None
+    # deal.time is a POSIX stamp of the server wall-clock; compare against the
+    # boundaries stamped the same way (naive server dt read as if it were UTC).
+    day_epoch = day_start.replace(tzinfo=timezone.utc).timestamp()
+    week_epoch = week_start.replace(tzinfo=timezone.utc).timestamp()
+    day = week = month = 0.0
+    for d in deals:
+        if d.type not in (mt5.DEAL_TYPE_BUY, mt5.DEAL_TYPE_SELL):
+            continue  # skip balance / credit / correction operations
+        net = (
+            float(getattr(d, "profit", 0.0) or 0.0)
+            + float(getattr(d, "commission", 0.0) or 0.0)
+            + float(getattr(d, "swap", 0.0) or 0.0)
+            + float(getattr(d, "fee", 0.0) or 0.0)
+        )
+        month += net
+        if d.time >= week_epoch:
+            week += net
+        if d.time >= day_epoch:
+            day += net
+    return {
+        "type": "account_pnl",
+        "day": round(day, 2),
+        "week": round(week, 2),
+        "month": round(month, 2),
+        "currency": currency,
+    }
 
 
 def _close_all_positions(broker_symbols: set[str] | None = None) -> dict[str, Any]:
@@ -815,7 +920,7 @@ def _read_quote_flow(
             price = last if fresh_last else (ask if side == "buy" else bid)
             out.append(
                 {
-                    "at": datetime.fromtimestamp(tmsc / 1000.0, tz=timezone.utc).isoformat(),
+                    "at": _server_ms_to_utc_iso(tmsc),
                     "price": _quantize(price, tick),
                     "volume": _quote_tick_volume(float(t["volume_real"]), float(t["volume"])),
                     "side": side,
@@ -993,12 +1098,21 @@ def run(cfg: dict[str, Any]) -> None:
     tape_mode = _resolve_tape_modes(cfg)
     force_mode = cfg.get("synthesize_trades_from_quotes")
     next_mode_at = time.monotonic() + _TAPE_RECHECK_SECONDS
+    # Broker→UTC clock offset (see _refresh_server_offset). Refreshed on its own
+    # cadence — independent of the tape/liquidity toggles — so tape & footprint
+    # timestamps stay true-UTC and a DST switch is absorbed without a restart.
+    # `next_offset_at = 0` forces a reading on the first poll.
+    all_brokers = [m["mt5"] for m in cfg["symbols"]]
+    next_offset_at = 0.0
     mid: dict[str, float | None] = {m["mt5"]: None for m in cfg["symbols"]}
     # Liquidity gauge cadence (see _read_session_liquidity). `next_liq_at = 0`
     # forces a reading on the first poll so the dashboard has a baseline fast.
     liq_days = int(cfg.get("liquidity_baseline_days", 20))
     liq_period = float(cfg.get("liquidity_poll_seconds", 60))
     next_liq_at = 0.0
+    # Account P&L (day/week/month) cadence. `next_pnl_at = 0` forces a first read
+    # so the top-of-screen cards populate as soon as the stream is up.
+    next_pnl_at = 0.0
     # Optional per-symbol footprint row size; falls back to the broker tick size.
     ftick: dict[str, float | None] = {
         m["mt5"]: (m.get("footprint_tick") or _broker_tick(m["mt5"])) for m in cfg["symbols"]
@@ -1054,6 +1168,10 @@ def run(cfg: dict[str, Any]) -> None:
             # Keep the socket alive by replying to server pings before polling,
             # and handle any control command (close_all / close_symbol / open).
             _drain_control(ws, broker_to_backend, allow_auto_close, allow_auto_trade, is_demo)
+            # Keep the server→UTC offset fresh before stamping this poll's tape.
+            if time.monotonic() >= next_offset_at:
+                next_offset_at = time.monotonic() + _SERVER_OFFSET_REFRESH_SECONDS
+                _refresh_server_offset(all_brokers)
             for m in cfg["symbols"]:
                 backend, broker = m["backend"], m["mt5"]
                 if tape_mode[broker] == "synth":
@@ -1117,6 +1235,17 @@ def run(cfg: dict[str, Any]) -> None:
                         liq = None
                     if liq:
                         ws.send(json.dumps(liq))
+            # Push realized account P&L (day/week/month). Own slow cadence — it
+            # only moves when a trade closes, and the read scans the whole month.
+            if now_mono >= next_pnl_at:
+                next_pnl_at = now_mono + _PNL_REFRESH_SECONDS
+                try:
+                    pnl = _read_account_pnl()
+                except Exception as exc:  # never let the P&L read break the stream
+                    logger.debug("account P&L read failed: %s", exc)
+                    pnl = None
+                if pnl is not None:
+                    ws.send(json.dumps(pnl))
             # Push open positions (live P&L). Throttled below the tick poll. While
             # a symbol has positions we send every period so P&L stays live; when
             # it goes flat we send one empty list to clear, then stay quiet.

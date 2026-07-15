@@ -548,6 +548,23 @@ class AutoCloseStatus(_Frozen):
     last_result: str | None = None
 
 
+class AccountPnl(_Frozen):
+    """Realized account P&L over the calendar day / week / month.
+
+    Sourced from the broker's DEAL history (all closed trades — manual and bot),
+    pushed by the collector on the `account_pnl` ingest message. Figures are net
+    of commission + swap + fee, in `currency` (the account currency). `asof` is
+    when the backend last received a push; all-zero defaults until the first one
+    arrives (or when no collector is connected).
+    """
+
+    day: float = 0.0
+    week: float = 0.0
+    month: float = 0.0
+    currency: str | None = None
+    asof: datetime | None = None
+
+
 class BotStatus(_Frozen):
     """State of the explosion-scalper bot (opens AND closes, demo only).
 
