@@ -6,7 +6,7 @@ entry gate are pinned down at their thresholds and on every refusal reason.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from core.enums import AssetSymbol
 from core.models import LiveActivity, OrderFlowSnapshot, TapeTrade
@@ -26,6 +26,18 @@ from use_cases.scalper import (
 )
 
 _AT = datetime(2026, 6, 9, 14, 0, 0, tzinfo=timezone.utc)
+# Default test window span == the baseline interval (60s), so the speed-scaled
+# threshold reduces to `window_range >= EXPANSION_MULT * range_per_bar` — the
+# clean per-bar contract these boundary tests pin. Cases that exercise the
+# time-scaling itself pass an explicit `span_seconds`.
+_SPAN = 60.0
+
+
+def _spread_at(i: int, n: int, span_seconds: float) -> datetime:
+    """Timestamp for print `i` of `n`, spread evenly across `span_seconds`."""
+    if n <= 1:
+        return _AT
+    return _AT + timedelta(seconds=span_seconds * i / (n - 1))
 
 
 def _snap(
@@ -34,12 +46,14 @@ def _snap(
     *,
     window_range: float = 10.0,
     range_per_bar: float | None = 2.0,
+    span_seconds: float = _SPAN,
 ) -> OrderFlowSnapshot:
     sides = ["buy"] * buys + ["sell"] * sells
+    n = len(sides)
     trades = [
         TapeTrade(
             symbol=AssetSymbol.USTEC,
-            at=_AT,
+            at=_spread_at(i, n, span_seconds),
             # Alternate lo/hi so the window's price travel == window_range.
             price=100.0 if i % 2 == 0 else 100.0 + window_range,
             volume=1.0,
@@ -98,6 +112,18 @@ def test_expansion_threshold() -> None:
     assert detect_explosion(_snap(20, 3, window_range=3.5, range_per_bar=2.0)) is None
 
 
+def test_expansion_is_speed_not_raw_travel() -> None:
+    # Identical price travel + strong buy lean, but over different elapsed time.
+    # The window is judged by SPEED (travel vs the baseline scaled to the window's
+    # span), so a fast 30s burst fires while the SAME travel dragged over 90s is
+    # half the speed and is not chased. A fixed print-COUNT window (the old bug)
+    # measured only ~3s of a fast tape and could tell neither apart from noise.
+    fast = _snap(20, 3, window_range=4.0, range_per_bar=2.0, span_seconds=30.0)
+    slow = _snap(20, 3, window_range=4.0, range_per_bar=2.0, span_seconds=90.0)
+    assert detect_explosion(fast) == "buy"  # 4.0 >= 1.8 * (2.0 * 30/60) = 1.8
+    assert detect_explosion(slow) is None  # 4.0 <  1.8 * (2.0 * 90/60) = 5.4
+
+
 def test_decide_entry_flat_requires_explosion() -> None:
     # Flat: a burst opens; a calm/weak window does not.
     assert decide_entry(_snap(20, 3), current_side=None, open_on_symbol=0) == "buy"
@@ -152,10 +178,11 @@ def _snap_weighted(
 ) -> OrderFlowSnapshot:
     """Like _snap but with explicit (side, volume) per print, for the
     volume-weighted lean cases (real-tape feeds)."""
+    n = len(prints)
     trades = [
         TapeTrade(
             symbol=AssetSymbol.USTEC,
-            at=_AT,
+            at=_spread_at(i, n, _SPAN),
             price=100.0 if i % 2 == 0 else 100.0 + window_range,
             volume=vol,
             side=side,  # type: ignore[arg-type]

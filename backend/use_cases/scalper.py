@@ -6,10 +6,11 @@ positions, cooldown, daily limits) live in the route; here we keep only pure,
 unit-testable decisions, since this logic *opens real trades*.
 
 Two entry modes, both one-directional per symbol:
-- **Initial** (symbol flat) = an "explosion": the short tape window is BOTH
-  strongly one-directional AND moving fast (range expansion vs the recent
-  baseline). Both required — a drift that isn't moving, or a fast wiggle with no
-  lean, is not a burst we chase.
+- **Initial** (symbol flat) = an "explosion": the recent tape window (a rolling
+  span of seconds, not a fixed print count) is BOTH strongly one-directional AND
+  moving fast (range expansion vs the recent baseline, judged as travel-per-time
+  so a burst that builds over a minute still counts). Both required — a drift
+  that isn't moving, or a fast wiggle with no lean, is not a burst we chase.
 - **Continuation add** (already holding) = keep adding *in the same direction*
   while the flow still leans that way. This does NOT require a fresh range
   explosion (the baseline rises with the move and would suppress re-triggers), so
@@ -25,20 +26,35 @@ below are starting points to TUNE on demo, not a validated edge.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import timedelta
 from typing import Literal
 
 from core.models import OrderFlowSnapshot, TapeTrade
 
 Direction = Literal["buy", "sell"]
 
-# Short tape window that defines "right now".
+# Count-based window for the directional lean behind the continuation-add and
+# the stop-and-reverse: "the recent prints" right now. Kept a fixed COUNT (not
+# time) so those two reads stay exactly as the original engine tuned them.
 RECENT_PRINTS = 30
+# Time window (seconds) for the INITIAL burst detection ONLY. Sliced by
+# timestamp, never by a fixed print COUNT: on a fast feed (hundreds of prints/
+# min) a fixed count is only a few seconds wide and cannot see a burst that
+# unfolds over a minute — the reason a big multi-minute candle slipped past the
+# old detector. Capped in practice by the tape's own length (see `tape_maxlen`).
+WINDOW_SECONDS = 90.0
+# Floor for the burst window's measured span when scaling the baseline (below).
+# Guards the divide when the whole window landed within a heartbeat of prints.
+MIN_SPAN_SECONDS = 10.0
 # Need at least this many directional prints before judging (else it's noise).
 MIN_PRINTS = 12
 # Initial-entry conviction: this share of the window's volume must be one side.
 STRONG_FRACTION = 0.70
-# Range expansion: the window's price travel must be at least this multiple of
-# the recent baseline per-bar range (from live_activity) to count as a burst.
+# Range expansion judged as SPEED: the window's price travel must be at least
+# this multiple of the NORMAL travel for the same elapsed time — range_per_bar
+# scaled from its interval down to the window's actual span (from live_activity).
+# Comparing travel-per-time (not raw travel) makes the test independent of tick
+# rate and window length, so a move that unfolds over a minute still registers.
 EXPANSION_MULT = 1.8
 # Continuation-add conviction: a lower bar than the initial burst — we only need
 # the flow to still lean in the held direction (lean = fraction − 0.5) to add.
@@ -49,10 +65,22 @@ ADD_LEAN = 0.10
 REVERSE_LEAN = 0.20
 
 
-def _buy_fraction(trades: Sequence[TapeTrade]) -> tuple[float, int]:
-    """Buy share of directional volume in the recent window + directional count.
+def _recent_window(trades: Sequence[TapeTrade], seconds: float) -> list[TapeTrade]:
+    """The tail of `trades` printed within `seconds` of the latest print.
+
+    A real span of market time, not a fixed print count (see WINDOW_SECONDS).
+    The tape is time-ordered, so this is the trailing slice at/after the cutoff.
+    Empty in, empty out. Used by the burst detector only.
+    """
+    if not trades:
+        return []
+    cutoff = trades[-1].at - timedelta(seconds=seconds)
+    return [t for t in trades if t.at >= cutoff]
+
+
+def _directional_fraction(window: Sequence[TapeTrade]) -> tuple[float, int]:
+    """Buy share of directional volume in `window` + directional print count.
     Returns (0.5, 0) when there's no directional volume (divide-by-zero guard)."""
-    window = trades[-RECENT_PRINTS:]
     buy = sell = 0.0
     count = 0
     for t in window:
@@ -68,6 +96,12 @@ def _buy_fraction(trades: Sequence[TapeTrade]) -> tuple[float, int]:
     return buy / total, count
 
 
+def _buy_fraction(trades: Sequence[TapeTrade]) -> tuple[float, int]:
+    """Buy share + count over the last RECENT_PRINTS (the continuation-add and
+    stop-and-reverse lean). The burst detector uses a time window instead."""
+    return _directional_fraction(trades[-RECENT_PRINTS:])
+
+
 def detect_explosion(snapshot: OrderFlowSnapshot) -> Direction | None:
     """Return 'buy'/'sell' if a fresh directional burst is firing, else None.
 
@@ -75,17 +109,23 @@ def detect_explosion(snapshot: OrderFlowSnapshot) -> Direction | None:
     sample of directional prints.
     """
     live = snapshot.live_activity
-    if live is None or live.range_per_bar <= 0:
+    if live is None or live.range_per_bar <= 0 or live.interval_seconds <= 0:
         return None
 
-    buy_frac, count = _buy_fraction(snapshot.recent_trades)
+    window = _recent_window(snapshot.recent_trades, WINDOW_SECONDS)
+    buy_frac, count = _directional_fraction(window)
     if count < MIN_PRINTS:
         return None
 
-    window = snapshot.recent_trades[-RECENT_PRINTS:]
     prices = [t.price for t in window]
     window_range = (max(prices) - min(prices)) if prices else 0.0
-    if window_range < EXPANSION_MULT * live.range_per_bar:
+    # Scale the per-bar baseline down to the window's ACTUAL elapsed span, so we
+    # compare like-for-like travel-per-time (not a full bar's travel against a
+    # sub-bar window). A move stretched over the whole span now counts as a
+    # burst if it's moving ≥ EXPANSION_MULT× faster than normal for that time.
+    span = max((window[-1].at - window[0].at).total_seconds(), MIN_SPAN_SECONDS)
+    baseline_travel = live.range_per_bar * (span / live.interval_seconds)
+    if window_range < EXPANSION_MULT * baseline_travel:
         return None
 
     if buy_frac >= STRONG_FRACTION:

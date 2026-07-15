@@ -9,7 +9,7 @@ the signal shown on the UI can never diverge from what the armed bot does.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from core.enums import AssetSymbol
 from core.models import LiveActivity, OrderFlowSnapshot, Position, TapeTrade
@@ -27,10 +27,14 @@ _AT = datetime(2026, 6, 9, 14, 0, 0, tzinfo=timezone.utc)
 
 def _trades(buys: int, sells: int, *, window_range: float = 10.0) -> list[TapeTrade]:
     sides = ["buy"] * buys + ["sell"] * sells
+    n = len(sides)
+    # Spread prints across 60s (== the baseline interval) so the burst detector's
+    # speed-scaled expansion test reduces to `window_range vs EXPANSION_MULT *
+    # range_per_bar` — the per-bar contract these cases assume.
     return [
         TapeTrade(
             symbol=AssetSymbol.USTEC,
-            at=_AT,
+            at=_AT + timedelta(seconds=60.0 * i / (n - 1)) if n > 1 else _AT,
             # Alternate lo/hi so the window's price travel == window_range.
             price=100.0 if i % 2 == 0 else 100.0 + window_range,
             volume=1.0,

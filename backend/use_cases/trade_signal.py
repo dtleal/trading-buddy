@@ -5,7 +5,7 @@ in two places:
 
 - `use_cases.scalper` — the bot's brain: explosion entries
   (`detect_explosion` / `decide_entry`) and the stop-and-reverse
-  (`should_reverse`), on the short 30-print window.
+  (`should_reverse`), on the recent tape window (WINDOW_SECONDS of market time).
 - `use_cases.assess_trade_signals` — the in-trade exit alerts: pressure
   turned *against* the position and profit + momentum *stall* (take profit),
   on the 50-print window.
@@ -93,7 +93,7 @@ def compute_flow_signal(
     symbol = snapshot.symbol
     side = held_side(positions)
 
-    # Scalper window (30 prints): drives entries and the stop-and-reverse.
+    # Scalper window (WINDOW_SECONDS of tape): entries and the stop-and-reverse.
     buy30, _count30 = _scalper_buy_fraction(snapshot.recent_trades)
 
     if positions and side is None:
