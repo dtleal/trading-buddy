@@ -729,9 +729,12 @@ async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
         ok = bool(msg.get("ok"))
         sym = msg.get("symbol")
         if ok:
+            replaced = msg.get("replaced") or 0
             _mark_last_result = (
                 f"marcador {msg.get('side')} {sym} @{msg.get('price')} "
-                f"({msg.get('lots')} lt, ticket {msg.get('ticket')})"
+                f"({msg.get('lots')} lt, ticket {msg.get('ticket')}"
+                + (f", substituiu {replaced}" if replaced else "")
+                + ")"
             )
         else:
             _mark_last_result = f"falha ao marcar {sym}: {msg.get('error')}"

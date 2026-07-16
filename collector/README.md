@@ -300,8 +300,17 @@ curl -X POST http://localhost:8000/api/orderflow/mark/GOLD \
 - The collector snaps the price to the symbol tick, clears the broker's minimum
   stop distance, and picks **LIMIT vs STOP automatically** by side + whether the
   target sits above/below the market, so the order is always accepted.
+- **One marker per symbol**: each new marker first cancels the previous one, so
+  the auto-placing analysis (`/5min-analysis` fires a marker on every
+  comprar/vender verdict) never stacks 0.01 orders. Markers are matched by a
+  **magic number** (`770077`), *not* the comment — the broker truncates order
+  comments to ~16 chars, so only the magic reliably identifies our own markers;
+  hand-placed orders (no magic) are never touched.
 - It **can fill** at 0.01 — it's a real (negligible) order, not a pure annotation.
-  Cancel it in MT5, or it rides the per-asset close which also cancels pendings.
+  A marker placed **at/near the current price is ephemeral** (price crosses it and
+  it fills or is dropped in seconds); one at a genuine distance (a "repique"
+  entry away from market) rests as a visible line. Cancel it in MT5, or it rides
+  the per-asset close which also cancels pendings.
 
 ### Explosion-scalper bot (opens AND closes — demo only)
 

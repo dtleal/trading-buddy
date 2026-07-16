@@ -716,6 +716,31 @@ def _marker_order_type(side: str, target: float, market: float) -> Any:
     return mt5.ORDER_TYPE_BUY_LIMIT if target <= market else mt5.ORDER_TYPE_BUY_STOP
 
 
+_MARKER_COMMENT = "trading-buddy mark"
+# Magic number stamped on every marker so we can find + replace our OWN markers
+# reliably. We can't match on the comment: the broker truncates it to ~16 chars
+# (FTMO stores "trading-buddy ma"), but `magic` is a full integer it never alters.
+_MARKER_MAGIC = 770077
+
+
+def _cancel_markers_for(broker: str) -> int:
+    """Cancel this collector's own resting MARKERS on one symbol (pending orders
+    stamped with `_MARKER_MAGIC`), leaving any hand-placed orders untouched.
+    Called before dropping a fresh marker so the auto-placing analysis keeps
+    exactly one marker per symbol instead of stacking 0.01 orders each run."""
+    raw = mt5.orders_get(symbol=broker)
+    if not raw:
+        return 0
+    cancelled = 0
+    for o in raw:
+        if int(getattr(o, "magic", 0) or 0) != _MARKER_MAGIC:
+            continue  # not ours — never cancel the user's own pendings
+        r = mt5.order_send({"action": mt5.TRADE_ACTION_REMOVE, "order": int(o.ticket)})
+        if r is not None and getattr(r, "retcode", None) == mt5.TRADE_RETCODE_DONE:
+            cancelled += 1
+    return cancelled
+
+
 def _place_marker(
     broker: str, side: str, price: float | None, offset: float | None, lots: float
 ) -> tuple[Any, float]:
@@ -753,7 +778,8 @@ def _place_marker(
         "type": _marker_order_type(side, target, market),
         "price": float(target),
         "deviation": 50,
-        "comment": "trading-buddy mark",
+        "magic": _MARKER_MAGIC,
+        "comment": _MARKER_COMMENT,
         "type_time": mt5.ORDER_TIME_GTC,
         "type_filling": mt5.ORDER_FILLING_RETURN,
     }
@@ -1085,6 +1111,9 @@ def _drain_control(
             ws.send(json.dumps({"type": "mark_result", "ok": False, "symbol": backend_sym,
                                 "error": "allow_auto_trade=false no collector"}))
             return
+        # Replace any prior marker on this symbol so repeated analysis runs keep a
+        # single marker (never touches the user's own pending orders).
+        replaced = _cancel_markers_for(brokers[0])
         result, target = _place_marker(
             brokers[0], side,
             float(price) if price is not None else None,
@@ -1092,9 +1121,10 @@ def _drain_control(
             lots,
         )
         ok = result is not None and getattr(result, "retcode", None) == mt5.TRADE_RETCODE_DONE
-        logger.info("Mark %s %s @%.5g lots=%s → ok=%s", side, brokers[0], target, lots, ok)
+        logger.info("Mark %s %s @%.5g lots=%s replaced=%d → ok=%s",
+                    side, brokers[0], target, lots, replaced, ok)
         ws.send(json.dumps({"type": "mark_result", "ok": ok, "symbol": backend_sym, "side": side,
-                            "price": target, "lots": lots,
+                            "price": target, "lots": lots, "replaced": replaced,
                             "ticket": getattr(result, "order", None) if ok else None,
                             "error": None if ok else f"retcode={getattr(result,'retcode','?')} "
                                                      f"{getattr(result,'comment','')}"}))
