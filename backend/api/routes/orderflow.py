@@ -20,7 +20,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, status
 from pydantic import BaseModel
@@ -214,6 +214,13 @@ def _parse_trade(msg: dict[str, Any], symbol: AssetSymbol) -> TapeTrade:
 # multiplex collectors per-symbol we'd promote this into the aggregator.
 _current_source: str | None = None
 _current_account: int | None = None
+# Whether the collector permits opening orders (allow_auto_trade in its config).
+# Gates the manual chart-marker endpoint — a marker is an order_send that can
+# fill, so it needs the same open capability the scalper does (but, being
+# user-initiated and min-lot, it is NOT demo-restricted). Mirrored from `hello`.
+_auto_trade_enabled: bool = False
+# Last chart-marker outcome reported by the collector (for logs / status).
+_mark_last_result: str | None = None
 # Latest realized account P&L (day/week/month) pushed by the collector. None
 # until the first `account_pnl` message arrives.
 _account_pnl: AccountPnl | None = None
@@ -616,7 +623,8 @@ async def _run_bot(snaps: dict[AssetSymbol, OrderFlowSnapshot]) -> None:
 
 async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
     """Feed one ingest message into the aggregator. Returns symbols touched."""
-    global _current_source, _current_account, _account_pnl
+    global _current_source, _current_account, _account_pnl, _auto_trade_enabled
+    global _mark_last_result
     mtype = msg.get("type")
 
     if mtype == "hello":
@@ -650,8 +658,10 @@ async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
         # Scalper bot needs to BOTH open and close, on a demo account: it requires
         # auto-trade AND auto-close capability (else it could open and never be
         # able to exit — the −loss_stop guard would be unable to close).
+        # Raw open capability, used by the manual chart-marker (no demo gate).
+        _auto_trade_enabled = bool(msg.get("auto_trade_enabled", False))
         _bot.enabled = (
-            bool(msg.get("auto_trade_enabled", False))
+            _auto_trade_enabled
             and bool(msg.get("auto_close_enabled", False))
             and bool(msg.get("account_is_demo", False))
         )
@@ -711,6 +721,21 @@ async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
         else:
             _bot.last_result = f"falha ao abrir {sym}: {msg.get('error')}"
         logger.info("Bot open result: %s", _bot.last_result)
+        return set()
+
+    if mtype == "mark_result":
+        # Outcome of a chart-marker pending order the collector placed. Not a
+        # bot trade — just surfaced in logs / status, never recorded.
+        ok = bool(msg.get("ok"))
+        sym = msg.get("symbol")
+        if ok:
+            _mark_last_result = (
+                f"marcador {msg.get('side')} {sym} @{msg.get('price')} "
+                f"({msg.get('lots')} lt, ticket {msg.get('ticket')})"
+            )
+        else:
+            _mark_last_result = f"falha ao marcar {sym}: {msg.get('error')}"
+        logger.info("Mark result: %s", _mark_last_result)
         return set()
 
     if mtype == "breakeven_result":
@@ -978,6 +1003,62 @@ async def breakeven_symbol(symbol: str) -> dict[str, Any]:
         raise HTTPException(status_code=503, detail="Collector não conectado.")
     logger.info("Breakeven requested for %s", sym.value)
     return {"ok": True, "detail": f"Breakeven de {sym.value} enviado ao collector."}
+
+
+# --- chart marker (min-lot pending order to mark an entry zone) --------------
+
+
+class MarkRequest(BaseModel):
+    """Place a min-lot pending order to draw an entry line on the MT5 chart.
+
+    Give the target as EITHER `price` (an absolute price on the collector's
+    broker feed) OR `offset` (signed price-points from the current market —
+    the safe form, since it never mixes the yfinance level scale with the FTMO
+    tape scale). LIMIT vs STOP is picked by the collector so it's always valid.
+    """
+
+    side: Literal["buy", "sell"]
+    price: float | None = None
+    offset: float | None = None
+    lots: float = 0.01
+
+
+@router.post("/api/orderflow/mark/{symbol}", tags=["orderflow"])
+async def mark_symbol(symbol: str, body: MarkRequest) -> dict[str, Any]:
+    """Drop a 0.01-lot pending order at a recommended entry zone so it shows as
+    a line on the chart. Requires the collector's open capability
+    (`allow_auto_trade`). The order can fill (it's real, min-lot); it is a
+    marker, not a pure annotation — the MT5 Python API can't draw objects.
+    The place result comes back async from the collector."""
+    sym = _parse_symbol(symbol)
+    if sym is None or not aggregator.tracks(sym):
+        raise HTTPException(status_code=404, detail=f"Símbolo não rastreado: {symbol}")
+    if body.price is None and body.offset is None:
+        raise HTTPException(
+            status_code=422, detail="Informe 'price' (absoluto) ou 'offset' (pontos do mercado)."
+        )
+    if body.lots <= 0:
+        raise HTTPException(status_code=422, detail="lots deve ser > 0.")
+    if not _auto_trade_enabled:
+        raise HTTPException(
+            status_code=409,
+            detail="O collector não habilitou allow_auto_trade=true no config.json.",
+        )
+    sent = await _send_to_collector(
+        {
+            "type": "mark",
+            "symbol": sym.value,
+            "side": body.side,
+            "price": body.price,
+            "offset": body.offset,
+            "lots": body.lots,
+        }
+    )
+    if not sent:
+        raise HTTPException(status_code=503, detail="Collector não conectado.")
+    logger.info("Chart marker requested: %s %s price=%s offset=%s lots=%s",
+                body.side, sym.value, body.price, body.offset, body.lots)
+    return {"ok": True, "detail": f"Marcador {body.side} de {sym.value} enviado ao collector."}
 
 
 # --- scalper bot (opens AND closes; demo only) -------------------------------

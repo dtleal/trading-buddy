@@ -195,6 +195,7 @@ what you are looking at:
 | **In-trade alerts** | position + flow lean (`pressure_against`, `take_profit`) | ⚠️ deterministic, but only as sound as the synthesized flow it reads — decision support, not advice |
 | **Auto-close / fechar tudo** | `mt5.order_send` (only if `allow_auto_close`) | ✅ real order execution — closes your positions for real |
 | **Breakeven (SL → entry)** | `mt5.order_send` `TRADE_ACTION_SLTP` (only if `allow_auto_close`) | ✅ real order modification — moves your stops for real |
+| **Chart marker** | `mt5.order_send` `TRADE_ACTION_PENDING` at min lot (only if `allow_auto_trade`) | ✅ real pending order — draws the entry line on the chart and **can fill** (0.01 lot) |
 
 With quote-tick synthesis the aggressor is inferred per tick, strongest evidence
 first (Lee-Ready adapted to the feed): broker BUY/SELL flags when present → a
@@ -223,7 +224,7 @@ For exchange-grade footprint/delta you'd switch the backend to a real CME feed
 | `liquidity_poll_seconds` | How often (s) to recompute + push that ratio (default `60`). It reads ~3 weeks of M5 bars, so it is throttled well below the tick poll. `0` disables. |
 | `positions_poll_seconds` | How often (s) to read + push your **open positions** for the live P&L / time-in-trade panel and in-trade alerts (default `0.25`). Reading is always safe. `0` disables position reading entirely. |
 | `allow_auto_close` | **Execution gate** (default `false` = strictly read-only). `true` lets this collector place **closing** orders when the backend profit target fires or you click "fechar tudo". Only enable on a machine/account where you accept automated execution — **test on DEMO first**. Never opens positions. |
-| `allow_auto_trade` | **OPENING gate** for the explosion-scalper bot (default `false`). `true` lets the bot OPEN positions on bursts — but the collector **refuses to open unless the account is DEMO**, no matter this flag, and the bot also requires `allow_auto_close: true` (it must be able to close to exit/stop) or the backend won't arm it. Requires AutoTrading on in MT5. |
+| `allow_auto_trade` | **OPENING gate** for the explosion-scalper bot (default `false`). `true` lets the bot OPEN positions on bursts — but the collector **refuses to open unless the account is DEMO**, no matter this flag, and the bot also requires `allow_auto_close: true` (it must be able to close to exit/stop) or the backend won't arm it. Requires AutoTrading on in MT5. **Also gates the [chart marker](#chart-marker-mark-a-recommended-entry)** — a user-initiated min-lot pending order which, unlike the bot, is **not** demo-restricted. |
 | `symbols[]` | Map each backend symbol to **your broker's exact MT5 name**. `backend` must be one of `USTEC` / `SPX` / `GOLD`. `mt5` is whatever your broker calls it (`US100.cash`, `Usa500`, `XAUUSD`, …). |
 | `symbols[].footprint_tick` | Optional price step used to group footprint rows (e.g. `1.0` for an index ~28000, `0.1` for gold). Omit to auto-derive from the broker tick size. Keeps a continuous quote feed from fragmenting into thousands of cells. |
 | `mt5.sources[]` | Priority list of terminals; each `{name, path}` is tried in order until one attaches. `path` is the `terminal64.exe`. Add `login`/`password`/`server` only to drive a specific account. |
@@ -275,6 +276,32 @@ off until you opt in.**
    `allow_auto_close` gate — it's still an `order_send`.)
 5. The brain (the target decision) lives in the backend and is unit-tested; the
    collector is a thin executor gated by step 1.
+
+### Chart marker (mark a recommended entry)
+
+When the analysis calls a level ("GOLD — vender no repique 4000–4004"), you can
+drop a **min-lot (0.01) pending order** at that zone so the entry shows as a line
+on the MT5 chart — the MetaTrader5 Python API can't draw chart objects, so a
+resting order is the only way to mark a price from code.
+
+```bash
+# offset = price-points from the CURRENT market (the safe form — never mixes the
+# yfinance level scale with the FTMO tape scale). Positive = above market.
+curl -X POST http://localhost:8000/api/orderflow/mark/GOLD \
+  -H 'Content-Type: application/json' -d '{"side":"sell","offset":5.7}'
+# or an absolute price on the broker's feed:
+curl -X POST http://localhost:8000/api/orderflow/mark/GOLD \
+  -H 'Content-Type: application/json' -d '{"side":"buy","price":3985.0}'
+```
+
+- **Gated by `allow_auto_trade`** (it's an `order_send` that can fill), but —
+  unlike the scalper bot — it is **user-initiated and NOT demo-restricted**, and
+  defaults to `lots: 0.01`.
+- The collector snaps the price to the symbol tick, clears the broker's minimum
+  stop distance, and picks **LIMIT vs STOP automatically** by side + whether the
+  target sits above/below the market, so the order is always accepted.
+- It **can fill** at 0.01 — it's a real (negligible) order, not a pure annotation.
+  Cancel it in MT5, or it rides the per-asset close which also cancels pendings.
 
 ### Explosion-scalper bot (opens AND closes — demo only)
 

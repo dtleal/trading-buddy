@@ -34,6 +34,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     of._positions_store.clear()
     of._liquidity_store.clear()
     of._autoclose = of._AutoCloseState()
+    of._auto_trade_enabled = False
     of._bot = of._BotState()
     of._bot.lots = dict(of._DEFAULT_LOTS)
     orderflow_broadcaster._latest.clear()
@@ -469,6 +470,42 @@ def test_manual_close_unknown_symbol(client: TestClient) -> None:
 def test_manual_close_without_collector_connected(client: TestClient) -> None:
     of._autoclose.enabled = True  # capable, but no live socket
     assert client.post("/api/orderflow/close/USTEC").status_code == 503
+
+
+def test_mark_sends_command_with_offset(client: TestClient) -> None:
+    of._auto_trade_enabled = True
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        resp = client.post("/api/orderflow/mark/GOLD", json={"side": "sell", "offset": 3.8})
+        cmd = ws.receive_json()
+    assert resp.status_code == 200
+    assert cmd["type"] == "mark" and cmd["symbol"] == "GOLD"
+    assert cmd["side"] == "sell" and cmd["offset"] == 3.8 and cmd["lots"] == 0.01
+
+
+def test_mark_refused_when_auto_trade_disabled(client: TestClient) -> None:
+    of._auto_trade_enabled = False
+    assert client.post(
+        "/api/orderflow/mark/GOLD", json={"side": "sell", "offset": 3.8}
+    ).status_code == 409
+
+
+def test_mark_requires_price_or_offset(client: TestClient) -> None:
+    of._auto_trade_enabled = True
+    assert client.post("/api/orderflow/mark/GOLD", json={"side": "sell"}).status_code == 422
+
+
+def test_mark_unknown_symbol(client: TestClient) -> None:
+    of._auto_trade_enabled = True
+    assert client.post(
+        "/api/orderflow/mark/DOGE", json={"side": "buy", "price": 1.0}
+    ).status_code == 404
+
+
+def test_mark_without_collector_connected(client: TestClient) -> None:
+    of._auto_trade_enabled = True  # capable, but no live socket
+    assert client.post(
+        "/api/orderflow/mark/GOLD", json={"side": "sell", "offset": 3.8}
+    ).status_code == 503
 
 
 def test_autoclose_result_recorded(client: TestClient) -> None:

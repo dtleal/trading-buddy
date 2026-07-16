@@ -707,6 +707,59 @@ def _place_grid(broker: str, side: str, lots: float, levels: list[float]) -> dic
     return {"placed": placed, "errors": errors}
 
 
+def _marker_order_type(side: str, target: float, market: float) -> Any:
+    """Pick the pending order type so the marker is valid on WHICHEVER side of
+    the market it sits: a sell above market is a SELL_LIMIT, below is a
+    SELL_STOP; a buy below is a BUY_LIMIT, above is a BUY_STOP."""
+    if side == "sell":
+        return mt5.ORDER_TYPE_SELL_LIMIT if target >= market else mt5.ORDER_TYPE_SELL_STOP
+    return mt5.ORDER_TYPE_BUY_LIMIT if target <= market else mt5.ORDER_TYPE_BUY_STOP
+
+
+def _place_marker(
+    broker: str, side: str, price: float | None, offset: float | None, lots: float
+) -> tuple[Any, float]:
+    """Place one tiny pending order PURELY to draw the entry line on the MT5
+    chart (the MetaTrader5 Python API can't draw chart objects, so a resting
+    order at min lot is the visual marker). Resolves the target from an absolute
+    `price` or a signed `offset` in price-points from the current market, snaps
+    it to the symbol's tick grid, clears the broker's minimum stop distance, and
+    picks LIMIT vs STOP so it's always accepted. Returns (order_send result,
+    resolved target price)."""
+    info = mt5.symbol_info(broker)
+    tick = mt5.symbol_info_tick(broker)
+    bid = float(getattr(tick, "bid", 0.0) or 0.0)
+    ask = float(getattr(tick, "ask", 0.0) or 0.0)
+    market = (bid + ask) / 2.0 if (bid and ask) else (bid or ask)
+    target = float(price) if price is not None else market + float(offset or 0.0)
+    tsize = float(getattr(info, "trade_tick_size", 0.0) or getattr(info, "point", 0.0) or 0.0)
+    point = float(getattr(info, "point", 0.0) or 0.0)
+
+    def _snap(p: float) -> float:
+        return round(round(p / tsize) * tsize, 10) if tsize > 0 else p
+
+    target = _snap(target)
+    # A pending order must clear the broker's minimum stop distance from market;
+    # a marker too close would be rejected, so nudge it just past that gap
+    # (keeping the side the caller intended).
+    min_gap = float(getattr(info, "trade_stops_level", 0.0) or 0.0) * point
+    if min_gap > 0 and abs(target - market) < min_gap:
+        direction = 1.0 if target >= market else -1.0
+        target = _snap(market + direction * (min_gap + (tsize or point)))
+    req = {
+        "action": mt5.TRADE_ACTION_PENDING,
+        "symbol": broker,
+        "volume": float(lots),
+        "type": _marker_order_type(side, target, market),
+        "price": float(target),
+        "deviation": 50,
+        "comment": "trading-buddy mark",
+        "type_time": mt5.ORDER_TIME_GTC,
+        "type_filling": mt5.ORDER_FILLING_RETURN,
+    }
+    return mt5.order_send(req), target
+
+
 def _cancel_pending_for(broker_symbols: set[str] | None) -> dict[str, Any]:
     """Cancel resting (pending) orders. With `broker_symbols`, only those; None =
     all. Used to clean up unfilled grid orders when a trade exits."""
@@ -961,6 +1014,7 @@ def _drain_control(
     Commands the backend sends down this socket:
       - `close_all` / `close_symbol` — gated by `allow_auto_close`.
       - `open` (the scalper bot) — gated by `allow_auto_trade` AND a DEMO account.
+      - `mark` (a min-lot entry marker on the chart) — gated by `allow_auto_trade`.
     On refusal we report back so the UI never shows a phantom action. Any
     non-timeout socket error propagates so the outer loop reconnects.
     """
@@ -1006,6 +1060,41 @@ def _drain_control(
         ws.send(json.dumps({"type": "open_result", "ok": ok, "symbol": backend_sym, "side": side,
                             "lots": float(lots),
                             "price": fill_price,
+                            "ticket": getattr(result, "order", None) if ok else None,
+                            "error": None if ok else f"retcode={getattr(result,'retcode','?')} "
+                                                     f"{getattr(result,'comment','')}"}))
+        return
+
+    if ctype == "mark":
+        # Draw an entry-marker line on the chart: a min-lot pending order at the
+        # recommended zone. Rides the OPEN gate (it's an order_send that can
+        # fill), but — unlike the autonomous scalper — is user-initiated and NOT
+        # demo-restricted: Diego asks for it explicitly, at 0.01.
+        backend_sym = cmd.get("symbol")
+        side = cmd.get("side")
+        lots = float(cmd.get("lots", 0.01) or 0.01)
+        price = cmd.get("price")
+        offset = cmd.get("offset")
+        brokers = [b for b, be in broker_to_backend.items() if be == backend_sym]
+        if not brokers or side not in ("buy", "sell") or lots <= 0 or (price is None and offset is None):
+            ws.send(json.dumps({"type": "mark_result", "ok": False, "symbol": backend_sym,
+                                "error": f"comando mark inválido: {cmd}"}))
+            return
+        if not allow_auto_trade:
+            logger.warning("Refusing mark: allow_auto_trade is false on this collector")
+            ws.send(json.dumps({"type": "mark_result", "ok": False, "symbol": backend_sym,
+                                "error": "allow_auto_trade=false no collector"}))
+            return
+        result, target = _place_marker(
+            brokers[0], side,
+            float(price) if price is not None else None,
+            float(offset) if offset is not None else None,
+            lots,
+        )
+        ok = result is not None and getattr(result, "retcode", None) == mt5.TRADE_RETCODE_DONE
+        logger.info("Mark %s %s @%.5g lots=%s → ok=%s", side, brokers[0], target, lots, ok)
+        ws.send(json.dumps({"type": "mark_result", "ok": ok, "symbol": backend_sym, "side": side,
+                            "price": target, "lots": lots,
                             "ticket": getattr(result, "order", None) if ok else None,
                             "error": None if ok else f"retcode={getattr(result,'retcode','?')} "
                                                      f"{getattr(result,'comment','')}"}))
