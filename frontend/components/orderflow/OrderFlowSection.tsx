@@ -186,6 +186,12 @@ function SymbolColumn({
             onBreakeven={onBreakevenSymbol}
           />
           <LiquidityChip liquidity={flow.liquidity} live={flow.live_activity} />
+          {/* Pressão fica FIXA logo abaixo da Atividade: as posições abertas
+              (que crescem com cada ordem) vão abaixo dela, então a pressão
+              nunca é empurrada pra fora da tela por ter muitas ordens. */}
+          <FlowBlock title="Pressão (compra · venda)">
+            <PressureGauge flow={flow} />
+          </FlowBlock>
           {flow.positions.length > 0 && (
             <FlowBlock title="Posição aberta (MT5)">
               <PositionPanel
@@ -198,9 +204,6 @@ function SymbolColumn({
           )}
           <FlowBlock title="Sinal do fluxo (entrada · saída)">
             <FlowSignalIndicator signal={flow.flow_signal} />
-          </FlowBlock>
-          <FlowBlock title="Pressão (compra · venda)">
-            <PressureGauge flow={flow} />
           </FlowBlock>
           <FlowBlock title="Bid · Ask (tempo real)">
             <BidAskChart flow={flow} now={now} />
