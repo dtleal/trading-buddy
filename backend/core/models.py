@@ -582,6 +582,7 @@ class BotStatus(_Frozen):
     realized: float = 0.0  # banked P&L this session (sum of closed cycles)
     open_count: int = 0
     last_result: str | None = None
+    lots: dict[str, float] = Field(default_factory=dict)  # per-symbol trade size
 
 
 class BotTrade(_Frozen):

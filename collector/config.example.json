@@ -12,8 +12,10 @@
   "positions_poll_seconds": 0.25,
   "_comment_allow_auto_close": "EXECUTION GATE. false = strictly read-only (default). true = this collector WILL place closing orders when the backend's profit target fires OR you click 'fechar tudo' in the UI. Only set true on a machine/account where you accept automated order execution (test on DEMO first).",
   "allow_auto_close": false,
-  "_comment_allow_auto_trade": "OPENING gate for the explosion-scalper bot. false = bot can't open (default). true = bot may OPEN positions on bursts — but ONLY on a DEMO account (the collector refuses to open on a live account regardless). The bot ALSO needs allow_auto_close=true (it must be able to close to exit/stop), else the backend won't arm it. Separate flag because opening is far riskier than closing. Requires AutoTrading on in the MT5 terminal (Ctrl+E).",
+  "_comment_allow_auto_trade": "OPENING gate for the explosion-scalper bot. false = bot can't open (default). true = bot may OPEN positions on bursts — but ONLY on a DEMO account (the collector refuses to open on a live account regardless, unless allow_live_auto_trade=true below). The bot ALSO needs allow_auto_close=true (it must be able to close to exit/stop), else the backend won't arm it. Separate flag because opening is far riskier than closing. Requires AutoTrading on in the MT5 terminal (Ctrl+E).",
   "allow_auto_trade": false,
+  "_comment_allow_live_auto_trade": "LIVE OVERRIDE for the scalper bot. false = demo-only (default, safe). true = allow the bot to OPEN REAL positions on a NON-demo account (e.g. an FTMO challenge, which MT5 reports as CONTEST/REAL — not DEMO). Only meaningful with allow_auto_trade=true. DANGER: real orders on a funded/challenge account can count against its rules. Start with 0.01 lots (configurable in the UI).",
+  "allow_live_auto_trade": false,
   "symbols": [
     { "backend": "USTEC", "mt5": "USTEC" },
     { "backend": "SPX",   "mt5": "USA500" },

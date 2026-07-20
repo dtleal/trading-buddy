@@ -71,7 +71,7 @@ export default function Home() {
         </Card>
 
         {/* Row 0b: live order flow — each column carries its pressure marker on top */}
-        <OrderFlowSection />
+        <OrderFlowSection tick={tick} />
 
         {/* Briefing panel — collapsed by default, full-width */}
         <BriefingPanel />

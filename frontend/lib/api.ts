@@ -119,11 +119,21 @@ export const api = {
   breakevenSymbol: (symbol: string) =>
     fetchVoid(`/api/orderflow/breakeven/${symbol}`, { method: "POST" }),
   getBot: () => fetchJson("/api/orderflow/bot", BotStatus),
-  setBot: (armed: boolean, profitTarget: number | null, lossStop: number | null) =>
+  setBot: (
+    armed: boolean,
+    profitTarget: number | null,
+    lossStop: number | null,
+    lots?: Record<string, number> | null,
+  ) =>
     fetchJson("/api/orderflow/bot", BotStatus, {
       method: "POST",
       headers: JSON_HEADERS,
-      body: JSON.stringify({ armed, profit_target: profitTarget, loss_stop: lossStop }),
+      body: JSON.stringify({
+        armed,
+        profit_target: profitTarget,
+        loss_stop: lossStop,
+        lots: lots ?? null,
+      }),
     }),
 };
 

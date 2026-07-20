@@ -52,7 +52,7 @@ export type AlertTone = "info" | "warning" | "danger";
 export type AlertEvent = {
   id: string;
   ruleId: string;
-  ruleKind: AlertRule["kind"];
+  ruleKind: AlertRule["kind"] | "level_proximity";
   title: string;
   detail: string;
   tone: AlertTone;

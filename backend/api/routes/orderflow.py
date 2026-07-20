@@ -440,6 +440,7 @@ def _bot_status() -> BotStatus:
         realized=_bot.realized,
         open_count=sum(len(ps) for ps in _positions_store.values()),
         last_result=_bot.last_result,
+        lots={sym.value: lot for sym, lot in _bot.lots.items()},
     )
 
 
@@ -660,10 +661,15 @@ async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
         # able to exit — the −loss_stop guard would be unable to close).
         # Raw open capability, used by the manual chart-marker (no demo gate).
         _auto_trade_enabled = bool(msg.get("auto_trade_enabled", False))
+        # Demo-only by default; `auto_trade_live_ok` is the collector's explicit
+        # opt-in to open REAL positions on a non-demo account (e.g. FTMO).
         _bot.enabled = (
             _auto_trade_enabled
             and bool(msg.get("auto_close_enabled", False))
-            and bool(msg.get("account_is_demo", False))
+            and (
+                bool(msg.get("account_is_demo", False))
+                or bool(msg.get("auto_trade_live_ok", False))
+            )
         )
         if not _bot.enabled and _bot.armed:
             _bot.armed = False
@@ -1073,6 +1079,7 @@ class BotRequest(BaseModel):
     armed: bool
     profit_target: float | None = None
     loss_stop: float | None = None
+    lots: dict[str, float] | None = None  # per-symbol trade size (e.g. {"USTEC": 0.01})
 
 
 @router.get("/api/orderflow/bot", response_model=BotStatus, tags=["orderflow"])
@@ -1086,6 +1093,18 @@ async def set_bot(body: BotRequest) -> BotStatus:
     auto-trade on a DEMO account, and positive profit target / loss stop.
     Disarming always succeeds (kill switch); it does NOT close open positions —
     use the per-asset button or auto-close for that."""
+    # Per-symbol lot sizes can be updated on any request (armed or not) so the
+    # user can dial size down to the 0.01 minimum before/while testing.
+    if body.lots is not None:
+        for key, lot in body.lots.items():
+            try:
+                sym = AssetSymbol(key)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=f"símbolo inválido: {key}") from exc
+            if not lot > 0:
+                raise HTTPException(status_code=422, detail=f"lote de {key} deve ser > 0.")
+            _bot.lots[sym] = float(lot)
+
     if body.armed:
         if not _bot.enabled:
             raise HTTPException(

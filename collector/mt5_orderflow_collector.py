@@ -138,8 +138,12 @@ def _load_config(path: str) -> dict[str, Any]:
     cfg.setdefault("allow_auto_close", False)
     # Auto-TRADE gate (the explosion-scalper bot OPENING positions). Strictly
     # separate from allow_auto_close because opening is far riskier than closing.
-    # Even when true, the collector refuses to open unless the account is a DEMO.
+    # By default the collector refuses to open unless the account is a DEMO.
     cfg.setdefault("allow_auto_trade", False)
+    # LIVE override: allow the scalper bot to open on a NON-demo account (e.g. an
+    # FTMO challenge, which reports CONTEST/REAL — not DEMO). Real orders. Only
+    # meaningful together with allow_auto_trade. Default false = demo-only.
+    cfg.setdefault("allow_live_auto_trade", False)
     if not cfg.get("backend_ws_url"):
         raise SystemExit("config: 'backend_ws_url' is required")
     if not cfg.get("symbols"):
@@ -1028,6 +1032,7 @@ def _drain_control(
     allow_auto_close: bool,
     allow_auto_trade: bool,
     is_demo: bool,
+    allow_live: bool = False,
 ) -> None:
     """Answer the backend's keepalive pings AND handle control commands.
 
@@ -1067,8 +1072,12 @@ def _drain_control(
             ws.send(json.dumps({"type": "open_result", "ok": False,
                                 "error": f"comando open inválido: {cmd}"}))
             return
-        if not (allow_auto_trade and is_demo):
-            reason = "allow_auto_trade=false" if not allow_auto_trade else "conta não é demo"
+        if not (allow_auto_trade and (is_demo or allow_live)):
+            reason = (
+                "allow_auto_trade=false"
+                if not allow_auto_trade
+                else "conta não é demo (use allow_live_auto_trade=true pra liberar)"
+            )
             logger.warning("Refusing open: %s", reason)
             ws.send(json.dumps({"type": "open_result", "ok": False, "symbol": backend_sym,
                                 "error": reason}))
@@ -1253,12 +1262,20 @@ def run(cfg: dict[str, Any]) -> None:
             "the backend's profit target fires."
         )
     allow_auto_trade = bool(cfg.get("allow_auto_trade", False))
+    allow_live = bool(cfg.get("allow_live_auto_trade", False))
     is_demo = _account_is_demo()
     if allow_auto_trade:
         logger.warning(
             "allow_auto_trade=TRUE — the scalper bot may OPEN positions (account "
-            "is_demo=%s; opening is refused unless demo).",
+            "is_demo=%s, allow_live_auto_trade=%s; opening is refused unless demo "
+            "OR the live override is on).",
             is_demo,
+            allow_live,
+        )
+    if allow_auto_trade and allow_live and not is_demo:
+        logger.warning(
+            "allow_live_auto_trade=TRUE on a NON-demo account — the bot will open "
+            "REAL positions on this account."
         )
     logger.info("footprint ticks: %s", {k: v for k, v in ftick.items()})
 
@@ -1277,6 +1294,7 @@ def run(cfg: dict[str, Any]) -> None:
                     "auto_close_enabled": allow_auto_close,
                     "auto_trade_enabled": allow_auto_trade,
                     "account_is_demo": is_demo,
+                    "auto_trade_live_ok": allow_live,
                 }))
                 # Force a full position resync on (re)connect: mark every symbol
                 # not-flat so the next poll reports its true state once (an open
@@ -1286,7 +1304,9 @@ def run(cfg: dict[str, Any]) -> None:
                 next_pos_at = 0.0
             # Keep the socket alive by replying to server pings before polling,
             # and handle any control command (close_all / close_symbol / open).
-            _drain_control(ws, broker_to_backend, allow_auto_close, allow_auto_trade, is_demo)
+            _drain_control(
+                ws, broker_to_backend, allow_auto_close, allow_auto_trade, is_demo, allow_live
+            )
             # Keep the server→UTC offset fresh before stamping this poll's tape.
             if time.monotonic() >= next_offset_at:
                 next_offset_at = time.monotonic() + _SERVER_OFFSET_REFRESH_SECONDS

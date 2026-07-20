@@ -11,7 +11,8 @@ const POLL_MS = 1500;
 
 export function useScalperBot(): {
   status: BotStatus | null;
-  arm: (profitTarget: number, lossStop: number) => Promise<void>;
+  arm: (profitTarget: number, lossStop: number, lots?: Record<string, number>) => Promise<void>;
+  saveLots: (lots: Record<string, number>) => Promise<void>;
   disarm: () => Promise<void>;
 } {
   const [status, setStatus] = useState<BotStatus | null>(null);
@@ -33,13 +34,21 @@ export function useScalperBot(): {
     };
   }, [refresh]);
 
-  const arm = useCallback(async (profitTarget: number, lossStop: number) => {
-    setStatus(await api.setBot(true, profitTarget, lossStop));
+  const arm = useCallback(
+    async (profitTarget: number, lossStop: number, lots?: Record<string, number>) => {
+      setStatus(await api.setBot(true, profitTarget, lossStop, lots ?? null));
+    },
+    [],
+  );
+
+  // Update lot sizes without arming (armed:false is a no-op when already off).
+  const saveLots = useCallback(async (lots: Record<string, number>) => {
+    setStatus(await api.setBot(false, null, null, lots));
   }, []);
 
   const disarm = useCallback(async () => {
     setStatus(await api.setBot(false, null, null));
   }, []);
 
-  return { status, arm, disarm };
+  return { status, arm, saveLots, disarm };
 }

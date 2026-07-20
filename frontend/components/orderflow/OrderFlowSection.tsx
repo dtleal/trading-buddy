@@ -13,11 +13,20 @@ import { AutoCloseControl } from "./AutoCloseControl";
 import { ScalperBotControl } from "./ScalperBotControl";
 import { FootprintPanel } from "./FootprintPanel";
 import { TapePanel } from "./TapePanel";
+import { LevelProximityBanner } from "./LevelProximityBanner";
 import { useOrderFlow } from "@/hooks/useOrderFlow";
 import { useAutoClose } from "@/hooks/useAutoClose";
 import { useScalperBot } from "@/hooks/useScalperBot";
+import { useLevelAlerts } from "@/hooks/useLevelAlerts";
+import { computeProximity, livePrice, type LevelProximity } from "@/lib/alerts/levels";
 import { cn } from "@/lib/utils";
-import type { AssetSymbol, LiveActivity, OrderFlowSnapshot, SessionLiquidity } from "@/lib/types";
+import type {
+  AssetSymbol,
+  DashboardTick,
+  LiveActivity,
+  OrderFlowSnapshot,
+  SessionLiquidity,
+} from "@/lib/types";
 
 const FLOW_ASSETS: { key: AssetSymbol; label: string }[] = [
   { key: "USTEC", label: "USTEC" },
@@ -30,19 +39,19 @@ const FLOW_ASSETS: { key: AssetSymbol; label: string }[] = [
  * column (DOM ladder on top, footprint in the middle, tape at the bottom).
  * Designed to sit above the VIX hero so it is the first thing on screen.
  */
-export function OrderFlowSection() {
+export function OrderFlowSection({ tick }: { tick: DashboardTick | null }) {
   const { flows, status } = useOrderFlow();
   const { status: autoClose, arm, disarm, closeSymbol, breakevenSymbol } = useAutoClose();
-  const { status: bot, arm: armBot, disarm: disarmBot } = useScalperBot();
+  const { status: bot, arm: armBot, saveLots: saveBotLots, disarm: disarmBot } = useScalperBot();
   const executionEnabled = autoClose?.enabled ?? false;
 
   // Ticking clock so per-symbol staleness is reactive without calling Date.now()
   // during render.
   const [now, setNow] = useState(0);
   useEffect(() => {
-    const tick = () => setNow(Date.now());
-    const first = setTimeout(tick, 0);
-    const id = setInterval(tick, 1_000);
+    const tickNow = () => setNow(Date.now());
+    const first = setTimeout(tickNow, 0);
+    const id = setInterval(tickNow, 1_000);
     return () => {
       clearTimeout(first);
       clearInterval(id);
@@ -63,6 +72,14 @@ export function OrderFlowSection() {
     FLOW_ASSETS.map((a) => flows[a.key]?.source).find((s): s is string => !!s) ?? null;
   const account =
     FLOW_ASSETS.map((a) => flows[a.key]?.account).find((n): n is number => n != null) ?? null;
+
+  // Live price vs yesterday's high/low (PDH/PDL). PDH/PDL come from the 5m tick;
+  // the price comes from the real-time book. Fires a loud alert on approach.
+  const proximities: LevelProximity[] = FLOW_ASSETS.map((a) => {
+    const levels = tick?.intraday_levels?.[a.key];
+    return computeProximity(a.key, a.label, levels, livePrice(flows[a.key], levels));
+  }).filter((p): p is LevelProximity => p != null);
+  useLevelAlerts(proximities);
 
   return (
     <Card>
@@ -97,7 +114,8 @@ export function OrderFlowSection() {
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        <ScalperBotControl status={bot} arm={armBot} disarm={disarmBot} />
+        <LevelProximityBanner proximities={proximities} />
+        <ScalperBotControl status={bot} arm={armBot} saveLots={saveBotLots} disarm={disarmBot} />
         <AutoCloseControl status={autoClose} arm={arm} disarm={disarm} />
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
           {FLOW_ASSETS.map((a) => (

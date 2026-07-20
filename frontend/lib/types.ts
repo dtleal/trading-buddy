@@ -369,6 +369,7 @@ export const BotStatus = z.object({
   realized: z.number().default(0),
   open_count: z.number(),
   last_result: z.string().nullable().default(null),
+  lots: z.record(z.string(), z.number()).default({}), // per-symbol trade size
 });
 export type BotStatus = z.infer<typeof BotStatus>;
 
