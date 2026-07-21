@@ -635,6 +635,36 @@ def test_bot_reverses_when_region_breaks(client: TestClient) -> None:
     assert cmd["type"] == "close_symbol" and cmd["symbol"] == "USTEC"
 
 
+def test_bot_symbol_stop_cuts_the_symbol(client: TestClient) -> None:
+    # Per-symbol hard stop: floating −120 ≤ −100 → close THAT symbol, stay
+    # armed. Off by default (0), so it must be configured to fire.
+    of._bot.enabled = True
+    of._bot.armed = True
+    of._bot.symbol_stop_usd = 100.0
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json(_positions_msg(side="buy", profit=-120.0))
+        cmd = ws.receive_json()
+    assert cmd["type"] == "close_symbol" and cmd["symbol"] == "USTEC"
+    assert cmd["reason"] == "stop"
+    assert of._bot.armed is True
+
+
+def test_bot_symbol_stop_off_by_default(client: TestClient) -> None:
+    of._bot.enabled = True
+    of._bot.armed = True
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json(_positions_msg(side="buy", profit=-120.0))
+    assert not of._bot.closing  # no per-symbol stop unless configured
+
+
+def test_bot_arm_sets_symbol_stop(client: TestClient) -> None:
+    of._bot.enabled = True
+    res = client.post("/api/orderflow/bot", json={"armed": True, "symbol_stop_usd": 150.0})
+    assert res.status_code == 200
+    assert res.json()["symbol_stop_usd"] == 150.0
+    assert of._bot.symbol_stop_usd == 150.0
+
+
 def test_bot_profit_lock_closes_on_giveback(client: TestClient) -> None:
     # Peak +100, then gives back to +50 (≤ 60% of peak) while still positive →
     # the trailing lock banks it instead of letting it round-trip.

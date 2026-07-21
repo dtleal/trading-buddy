@@ -25,7 +25,9 @@ below are starting points to TUNE on demo, not a validated edge.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import sys
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from datetime import timedelta
 from typing import Literal
 
@@ -80,6 +82,41 @@ REARM_COOLDOWN_S = 5.0
 # breakeven (the "perfect short that came all the way back" case).
 LOCK_MIN_USD = 40.0
 LOCK_GIVEBACK = 0.40
+# Per-symbol hard stop: close a symbol when its floating P&L reaches −this many
+# USD — the per-trade risk cap the grid breach alone can't give (a breach is
+# price-based; this caps the DOLLAR damage of a scaled-in position that keeps
+# leaning). 0 disables it, which is the live default until a swept value proves
+# itself on recorded tape.
+SYMBOL_STOP_USD = 0.0
+
+
+def symbol_stopped(sym_pnl: float, stop_usd: float) -> bool:
+    """True when a symbol's floating loss has hit the per-symbol hard stop.
+    Disabled (always False) when `stop_usd` is 0 or negative."""
+    return stop_usd > 0 and sym_pnl <= -stop_usd
+
+
+@contextmanager
+def tuned(**overrides: float) -> Iterator[None]:
+    """Temporarily override tuning constants by NAME (e.g. STRONG_FRACTION=0.6).
+
+    For backtest parameter sweeps ONLY — never call while a live bot is armed:
+    the live route reads these same globals mid-tick. Values are restored on
+    exit even if the body raises. Unknown names are rejected so a typo can't
+    silently sweep nothing.
+    """
+    module = sys.modules[__name__]
+    unknown = [n for n in overrides if not (n.isupper() and hasattr(module, n))]
+    if unknown:
+        raise ValueError(f"unknown tuning constant(s): {', '.join(unknown)}")
+    saved = {name: getattr(module, name) for name in overrides}
+    for name, value in overrides.items():
+        setattr(module, name, value)
+    try:
+        yield
+    finally:
+        for name, value in saved.items():
+            setattr(module, name, value)
 
 
 def _recent_window(trades: Sequence[TapeTrade], seconds: float) -> list[TapeTrade]:
@@ -191,11 +228,15 @@ def grid_levels(
     side: Direction,
     range_per_bar: float,
     *,
-    levels: int = GRID_LEVELS,
-    step_frac: float = GRID_STEP_FRAC,
+    levels: int | None = None,
+    step_frac: float | None = None,
 ) -> list[float]:
     """Limit-order prices below a buy entry (or above a sell entry), ATR-spaced.
-    Empty when there's no usable range (can't size the grid)."""
+    Empty when there's no usable range (can't size the grid). None params fall
+    back to the module constants AT CALL TIME so `tuned()` sweeps reach them
+    (a `= GRID_LEVELS` default would freeze the value at import)."""
+    levels = GRID_LEVELS if levels is None else levels
+    step_frac = GRID_STEP_FRAC if step_frac is None else step_frac
     step = range_per_bar * step_frac
     if step <= 0:
         return []
@@ -208,12 +249,16 @@ def grid_breach_price(
     side: Direction,
     range_per_bar: float,
     *,
-    levels: int = GRID_LEVELS,
-    step_frac: float = GRID_STEP_FRAC,
-    breach_frac: float = GRID_BREACH_FRAC,
+    levels: int | None = None,
+    step_frac: float | None = None,
+    breach_frac: float | None = None,
 ) -> float | None:
     """Price beyond which the whole grid region has failed (→ cut/reverse).
-    For a buy it's below the deepest limit; for a sell, above. None if no range."""
+    For a buy it's below the deepest limit; for a sell, above. None if no range.
+    None params fall back to the module constants at call time (see grid_levels)."""
+    levels = GRID_LEVELS if levels is None else levels
+    step_frac = GRID_STEP_FRAC if step_frac is None else step_frac
+    breach_frac = GRID_BREACH_FRAC if breach_frac is None else breach_frac
     step = range_per_bar * step_frac
     if step <= 0:
         return None
@@ -271,6 +316,9 @@ __all__ = [
     "REARM_COOLDOWN_S",
     "LOCK_MIN_USD",
     "LOCK_GIVEBACK",
+    "SYMBOL_STOP_USD",
+    "symbol_stopped",
+    "tuned",
     "detect_explosion",
     "decide_entry",
     "should_reverse",

@@ -54,12 +54,14 @@ from use_cases.scalper import (
     LOCK_GIVEBACK,
     LOCK_MIN_USD,
     REARM_COOLDOWN_S,
+    SYMBOL_STOP_USD,
     THIN_RATIO,
     Direction,
     grid_breach_price,
     grid_levels,
     region_broken,
     should_open,
+    symbol_stopped,
 )
 from use_cases.trade_signal import (
     compute_flow_signal,
@@ -303,6 +305,8 @@ class _BotState:
         self.loss_stop: float = 900.0  # hard stop for the day at −this (session)
         self.max_per_symbol: int = 6
         self.cooldown_s: float = 2.0  # min gap between adds on a symbol (paces scale-in)
+        # Per-symbol hard USD stop (0 = off; see scalper.SYMBOL_STOP_USD).
+        self.symbol_stop_usd: float = SYMBOL_STOP_USD
         self.lots: dict[AssetSymbol, float] = {}  # per-symbol size; defaults below
         self.cooldown_until: dict[AssetSymbol, float] = {}
         self.realized: float = 0.0  # banked P&L this session
@@ -357,6 +361,7 @@ def _bot_status() -> BotStatus:
         armed=_bot.armed,
         profit_target=_bot.profit_target,
         loss_stop=_bot.loss_stop,
+        symbol_stop_usd=_bot.symbol_stop_usd,
         open_profit=_open_profit(),
         realized=_bot.realized,
         open_count=sum(len(ps) for ps in _positions_store.values()),
@@ -437,6 +442,27 @@ async def _run_bot(snaps: dict[AssetSymbol, OrderFlowSnapshot]) -> None:
 
         current_side = _symbol_side(positions)
         sym_pnl = sum(p.profit for p in positions)
+
+        # Per-symbol hard stop (checked before the lock/reverse reads): caps the
+        # DOLLAR damage of one scaled-in symbol without waiting for the price to
+        # break the grid region or the whole session to hit the daily stop.
+        if current_side is not None and symbol_stopped(sym_pnl, _bot.symbol_stop_usd):
+            _bot.closing[symbol] = sym_pnl
+            _bot.cooldown_until[symbol] = now + _bot.cooldown_s
+            _bot.last_result = (
+                f"stop {symbol.value}: {sym_pnl:.2f} <= -{_bot.symbol_stop_usd:.2f} — cortando"
+            )
+            logger.info("Bot symbol stop: %s", _bot.last_result)
+            await _send_to_collector(
+                {
+                    "type": "close_symbol",
+                    "symbol": symbol.value,
+                    "origin": "bot",
+                    "reason": "stop",
+                    "side": current_side,
+                }
+            )
+            continue
 
         # Trailing profit lock: track the peak unrealized P&L; if a meaningful
         # gain gives back too much while still positive, bank it now instead of
@@ -1010,6 +1036,7 @@ class BotRequest(BaseModel):
     profit_target: float | None = None
     loss_stop: float | None = None
     lots: dict[str, float] | None = None  # per-symbol trade size (e.g. {"USTEC": 0.01})
+    symbol_stop_usd: float | None = None  # per-symbol hard USD stop (0 = off)
 
 
 @router.get("/api/orderflow/bot", response_model=BotStatus, tags=["orderflow"])
@@ -1052,6 +1079,10 @@ async def set_bot(body: BotRequest) -> BotStatus:
             if body.loss_stop <= 0:
                 raise HTTPException(status_code=422, detail="loss_stop deve ser > 0.")
             _bot.loss_stop = body.loss_stop
+        if body.symbol_stop_usd is not None:
+            if body.symbol_stop_usd < 0:
+                raise HTTPException(status_code=422, detail="symbol_stop_usd deve ser >= 0.")
+            _bot.symbol_stop_usd = body.symbol_stop_usd
         # Fresh session: clear cooldowns, banked P&L and any settling state.
         _bot.cooldown_until.clear()
         _bot.closing.clear()

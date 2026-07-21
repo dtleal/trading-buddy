@@ -28,6 +28,11 @@ from typing import Any, Iterable, Iterator
 
 from core.enums import AssetSymbol
 from core.models import Position, SessionLiquidity
+
+# Policy constants are read via the MODULE (scalper.LOCK_MIN_USD, …), never
+# imported by value: a `tuned()` sweep overrides the module globals, and an
+# import-time copy would silently ignore the override.
+from use_cases import scalper
 from use_cases.aggregate_orderflow import OrderFlowAggregator
 from use_cases.orderflow_wire import (
     parse_book,
@@ -37,15 +42,12 @@ from use_cases.orderflow_wire import (
     parse_trade,
 )
 from use_cases.scalper import (
-    LOCK_GIVEBACK,
-    LOCK_MIN_USD,
-    REARM_COOLDOWN_S,
-    THIN_RATIO,
     Direction,
     grid_breach_price,
     grid_levels,
     region_broken,
     should_open,
+    symbol_stopped,
 )
 from use_cases.trade_signal import (
     compute_flow_signal,
@@ -80,6 +82,7 @@ class ReplayParams:
     cooldown_s: float = 2.0
     max_per_symbol: int = 6
     rearm: bool = True
+    symbol_stop_usd: float = 0.0  # per-symbol hard USD stop (0 = off, live default)
     lots: dict[AssetSymbol, float] = field(default_factory=lambda: dict(DEFAULT_LOTS))
     usd_per_point: dict[AssetSymbol, float] = field(
         default_factory=lambda: dict(DEFAULT_USD_PER_POINT)
@@ -345,7 +348,7 @@ class ScalperReplay:
             self._close_all("target")
             if self.params.rearm:
                 self.flattening = True
-                self.resume_at = now + REARM_COOLDOWN_S
+                self.resume_at = now + scalper.REARM_COOLDOWN_S
             else:
                 self.armed = False
             return
@@ -362,11 +365,17 @@ class ScalperReplay:
         current_side = held_side(positions)
         sym_pnl = sum(p.profit for p in positions)
 
+        # Per-symbol hard stop — same order as the live tick: before lock/reverse.
+        if current_side is not None and symbol_stopped(sym_pnl, self.params.symbol_stop_usd):
+            self._close_symbol(symbol, "stop")
+            self.cooldown_until[symbol] = now + self.params.cooldown_s
+            return
+
         # Trailing profit lock (same constants the live bot imports).
         if current_side is not None:
             peak = max(self.peak.get(symbol, 0.0), sym_pnl)
             self.peak[symbol] = peak
-            if peak >= LOCK_MIN_USD and 0 < sym_pnl <= peak * (1.0 - LOCK_GIVEBACK):
+            if peak >= scalper.LOCK_MIN_USD and 0 < sym_pnl <= peak * (1.0 - scalper.LOCK_GIVEBACK):
                 self._close_symbol(symbol, "lock")
                 self.cooldown_until[symbol] = now + self.params.cooldown_s
                 return
@@ -390,7 +399,7 @@ class ScalperReplay:
         if self.positions[symbol] or symbol in self.grid:
             return
         liq = self.liquidity.get(symbol)
-        liquidity_ok = liq is None or liq.ratio >= THIN_RATIO
+        liquidity_ok = liq is None or liq.ratio >= scalper.THIN_RATIO
         direction = signal_entry_direction(signal)
         cooldown_ok = now >= self.cooldown_until.get(symbol, 0.0)
         if not should_open(

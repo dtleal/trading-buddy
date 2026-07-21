@@ -578,6 +578,7 @@ class BotStatus(_Frozen):
     armed: bool = False
     profit_target: float = 350.0
     loss_stop: float = 900.0
+    symbol_stop_usd: float = 0.0  # per-symbol hard USD stop (0 = off)
     open_profit: float = 0.0  # current floating P&L (open positions)
     realized: float = 0.0  # banked P&L this session (sum of closed cycles)
     open_count: int = 0

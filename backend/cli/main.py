@@ -26,8 +26,10 @@ from use_cases.generate_briefing import (
     SYSTEM_PROMPT_PT,
     format_tick_payload,
 )
-from use_cases.replay_scalper import ReplayParams
+from use_cases.replay_scalper import ReplayParams, iter_tape
 from use_cases.replay_scalper import replay as replay_tape_files
+from use_cases.sweep_scalper import DEFAULT_GRID, axis_summary
+from use_cases.sweep_scalper import sweep as sweep_grid
 
 # $ per point per contract. Used for position sizing in `dtb signal`.
 # Pass --multiplier to override if you trade a different instrument.
@@ -359,6 +361,67 @@ def replay(
             console.print(f"{c.at}  {c.scope:<8} {c.reason:<8} {c.pnl:+10.2f}")
     console.print(f"[bold]{report.events}[/bold] eventos replayed")
     console.print(report.summary())
+
+
+@app.command()
+def sweep(
+    files: list[Path] = typer.Argument(
+        ..., help="Tape JSONL files (data/orderflow_tape/tape-YYYY-MM-DD.jsonl), in order."
+    ),
+    set_axis: list[str] = typer.Option(
+        [],
+        "--set",
+        help="Sweep axis NAME=v1,v2,... (repeatable). UPPERCASE = scalper constant "
+        "(STRONG_FRACTION=0.6,0.7); lowercase = replay param (symbol_stop_usd=0,150). "
+        "Without --set, a curated 4-axis default grid runs (81 replays).",
+    ),
+    top: int = typer.Option(10, "--top", help="How many best runs to print."),
+) -> None:
+    """Sweep scalper parameters over a recorded tape, ranking robust regions.
+
+    Each grid point replays the whole tape. Read the per-axis means at the end:
+    pick values whose whole row is healthy, not a single lucky combo.
+    """
+    _configure_logging("WARNING")
+    missing = [str(f) for f in files if not f.is_file()]
+    if missing:
+        raise typer.BadParameter(f"tape file(s) not found: {', '.join(missing)}")
+    grid: dict[str, list[float]] = {}
+    for item in set_axis:
+        name, _, raw_values = item.partition("=")
+        try:
+            grid[name.strip()] = [float(v) for v in raw_values.split(",") if v.strip()]
+        except ValueError as exc:
+            raise typer.BadParameter(f"expected NAME=v1,v2,..., got {item!r}") from exc
+        if not grid[name.strip()]:
+            raise typer.BadParameter(f"axis {name!r} has no values")
+    if not grid:
+        grid = dict(DEFAULT_GRID)
+    # GRID_LEVELS is consumed by range() — keep integral axes as ints.
+    if "GRID_LEVELS" in grid:
+        grid["GRID_LEVELS"] = [int(v) for v in grid["GRID_LEVELS"]]
+
+    records = list(iter_tape(files))
+    combos = 1
+    for values in grid.values():
+        combos *= len(values)
+    console.print(f"{len(records)} eventos × {combos} combinações…")
+    runs = sweep_grid(records, grid)
+
+    names = list(grid)
+    console.print("\n[bold]Melhores combinações[/bold]")
+    for run in runs[:top]:
+        knobs = "  ".join(f"{n}={run.overrides[n]:g}" for n in names)
+        rep = run.report
+        pf = f"{rep.profit_factor:.2f}" if rep.profit_factor is not None else "n/a"
+        console.print(
+            f"P&L {rep.total_pnl:+9.2f}  DD {rep.max_drawdown:8.2f}  PF {pf:>5}  "
+            f"{rep.wins}W/{rep.losses}L  ent {rep.entries:3d}   {knobs}"
+        )
+    console.print("\n[bold]Média de P&L por valor (leitura de robustez)[/bold]")
+    for name, values in axis_summary(runs).items():
+        row = "  ".join(f"{value:g}: {pnl:+.2f}" for value, pnl in sorted(values.items()))
+        console.print(f"{name}:  {row}")
 
 
 def main() -> None:

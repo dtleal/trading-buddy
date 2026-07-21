@@ -115,6 +115,18 @@ live bot, with only order fills simulated. `--lot SYM=..`, `--target`, `--stop`
 override the bot knobs; check `--usd-per-point` against the broker's contract
 spec before trusting absolute USD numbers.
 
+`uv run dtb sweep tape-*.jsonl` replays the tape once per parameter combination
+(`use_cases/sweep_scalper.py`; UPPERCASE axes = scalper constants via
+`scalper.tuned()`, lowercase = replay params). Read the per-axis P&L means at
+the end and pick values whose whole row is healthy — a value that only wins in
+one combo is curve-fitting. Sweeps mutate the scalper globals during a run, so
+never sweep inside a process with a live armed bot.
+
+The bot also has a per-symbol hard stop (`symbol_stop_usd` on
+`POST /api/orderflow/bot`, default 0 = off): closes one symbol when its
+floating loss reaches −N USD, capping the dollar damage of a scaled-in grid
+without waiting for the region breach or the whole-session loss stop.
+
 ### One flow signal — shown == acted on
 
 `use_cases/trade_signal.py :: compute_flow_signal` produces a **single**
