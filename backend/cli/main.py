@@ -6,6 +6,7 @@ import asyncio
 import logging
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Literal, cast
 
 import typer
@@ -25,6 +26,8 @@ from use_cases.generate_briefing import (
     SYSTEM_PROMPT_PT,
     format_tick_payload,
 )
+from use_cases.replay_scalper import ReplayParams
+from use_cases.replay_scalper import replay as replay_tape_files
 
 # $ per point per contract. Used for position sizing in `dtb signal`.
 # Pass --multiplier to override if you trade a different instrument.
@@ -307,6 +310,55 @@ async def _signal(
         )
     finally:
         await container.aclose()
+
+
+@app.command()
+def replay(
+    files: list[Path] = typer.Argument(
+        ..., help="Tape JSONL files (data/orderflow_tape/tape-YYYY-MM-DD.jsonl), in order."
+    ),
+    target: float = typer.Option(350.0, "--target", help="Profit target USD (bank + re-arm)."),
+    stop: float = typer.Option(900.0, "--stop", help="Daily loss stop USD (session)."),
+    cooldown: float = typer.Option(2.0, "--cooldown", help="Seconds between entries per symbol."),
+    one_shot: bool = typer.Option(
+        False, "--one-shot", help="Stop after the first banked target (no 24h re-arm)."
+    ),
+    lot: list[str] = typer.Option(
+        [], "--lot", help="Override lots per symbol, e.g. --lot USTEC=1.0 (repeatable)."
+    ),
+    usd_per_point: list[str] = typer.Option(
+        [],
+        "--usd-per-point",
+        help="USD per 1.0 point per lot, e.g. --usd-per-point GOLD=100 (repeatable). "
+        "Defaults assume FTMO .cash (indices 1.0, gold 100).",
+    ),
+    detail: bool = typer.Option(False, "--detail", help="Also list every close event."),
+) -> None:
+    """Backtest the explosion scalper by replaying a recorded ingest tape.
+
+    Runs the recorded session through the SAME aggregator/signal/policy code as
+    the live bot; only order execution is simulated (see use_cases/replay_scalper).
+    """
+    _configure_logging("WARNING")
+    params = ReplayParams(
+        profit_target=target, loss_stop=stop, cooldown_s=cooldown, rearm=not one_shot
+    )
+    for raw, table in ((lot, params.lots), (usd_per_point, params.usd_per_point)):
+        for item in raw:
+            sym_name, _, value = item.partition("=")
+            try:
+                table[AssetSymbol(sym_name.upper())] = float(value)
+            except ValueError as exc:
+                raise typer.BadParameter(f"expected SYMBOL=NUMBER, got {item!r}") from exc
+    missing = [str(f) for f in files if not f.is_file()]
+    if missing:
+        raise typer.BadParameter(f"tape file(s) not found: {', '.join(missing)}")
+    report = replay_tape_files(files, params)
+    if detail:
+        for c in report.closes:
+            console.print(f"{c.at}  {c.scope:<8} {c.reason:<8} {c.pnl:+10.2f}")
+    console.print(f"[bold]{report.events}[/bold] eventos replayed")
+    console.print(report.summary())
 
 
 def main() -> None:

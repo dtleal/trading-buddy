@@ -34,18 +34,27 @@ from core.models import (
     AutoCloseStatus,
     BotStatus,
     BotTrade,
-    OrderBookLevel,
-    OrderBookSnapshot,
     OrderFlowSnapshot,
     Position,
     SessionLiquidity,
-    TapeTrade,
 )
 from settings import get_settings
 from use_cases.aggregate_orderflow import OrderFlowAggregator
 from use_cases.assess_trade_signals import assess_trade_signals
 from use_cases.autoclose import should_autoclose
+from use_cases.orderflow_wire import (
+    parse_book,
+    parse_dt,
+    parse_liquidity,
+    parse_position,
+    parse_symbol,
+    parse_trade,
+)
 from use_cases.scalper import (
+    LOCK_GIVEBACK,
+    LOCK_MIN_USD,
+    REARM_COOLDOWN_S,
+    THIN_RATIO,
     Direction,
     grid_breach_price,
     grid_levels,
@@ -117,108 +126,14 @@ def latest_liquidity() -> dict[AssetSymbol, SessionLiquidity]:
 # --- wire-format parsing -----------------------------------------------------
 
 
-def _parse_dt(value: Any) -> datetime:
-    """Parse an ISO-8601 string (with optional trailing Z) to aware UTC."""
-    if isinstance(value, (int, float)):
-        return datetime.fromtimestamp(float(value), tz=timezone.utc)
-    text = str(value).replace("Z", "+00:00")
-    dt = datetime.fromisoformat(text)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
-
-
-def _parse_symbol(value: Any) -> AssetSymbol | None:
-    try:
-        return AssetSymbol(str(value).upper())
-    except ValueError:
-        return None
-
-
-def _parse_levels(raw: Any) -> list[OrderBookLevel]:
-    levels: list[OrderBookLevel] = []
-    for item in raw or ():
-        # accept [price, volume] pairs or {"price":..,"volume":..}
-        price: Any
-        volume: Any
-        if isinstance(item, dict):
-            price, volume = item["price"], item["volume"]
-        else:
-            price, volume = item[0], item[1]
-        levels.append(OrderBookLevel(price=float(price), volume=float(volume)))
-    return levels
-
-
-def _parse_book(msg: dict[str, Any], symbol: AssetSymbol) -> OrderBookSnapshot:
-    return OrderBookSnapshot(
-        symbol=symbol,
-        asof=_parse_dt(msg.get("asof") or msg.get("at")),
-        bids=_parse_levels(msg.get("bids")),
-        asks=_parse_levels(msg.get("asks")),
-    )
-
-
-def _parse_liquidity(msg: dict[str, Any], symbol: AssetSymbol) -> SessionLiquidity:
-    realized = float(msg["realized_volume"])
-    baseline = float(msg["baseline_volume"])
-    # Prefer the collector's own ratio, but recompute defensively when absent.
-    ratio = msg.get("ratio")
-    ratio = float(ratio) if ratio is not None else (realized / baseline if baseline > 0 else 0.0)
-    realized_range = msg.get("realized_range")
-    baseline_range = msg.get("baseline_range")
-    range_ratio = msg.get("range_ratio")
-    if range_ratio is None and realized_range is not None and baseline_range:
-        range_ratio = float(realized_range) / float(baseline_range)
-    return SessionLiquidity(
-        symbol=symbol,
-        asof=_parse_dt(msg.get("asof") or msg.get("at")),
-        realized_volume=realized,
-        baseline_volume=baseline,
-        ratio=ratio,
-        sample_days=int(msg.get("sample_days", 0)),
-        realized_range=float(realized_range) if realized_range is not None else None,
-        baseline_range=float(baseline_range) if baseline_range is not None else None,
-        range_ratio=float(range_ratio) if range_ratio is not None else None,
-    )
-
-
-def _nonzero_price(value: Any) -> float | None:
-    """MT5 reports an unset SL/TP as 0.0; treat that as 'no level'."""
-    if value is None:
-        return None
-    price = float(value)
-    return price if price != 0.0 else None
-
-
-def _parse_position(raw: dict[str, Any], symbol: AssetSymbol) -> Position:
-    side = str(raw.get("side", "")).lower()
-    if side not in ("buy", "sell"):
-        raise ValueError(f"position side must be buy/sell, got {side!r}")
-    return Position(
-        symbol=symbol,
-        ticket=int(raw["ticket"]),
-        side=side,  # type: ignore[arg-type]
-        volume=float(raw["volume"]),
-        price_open=float(raw["price_open"]),
-        price_current=float(raw["price_current"]),
-        profit=float(raw["profit"]),
-        sl=_nonzero_price(raw.get("sl")),
-        tp=_nonzero_price(raw.get("tp")),
-        seconds_open=float(raw.get("seconds_open", 0.0)),
-    )
-
-
-def _parse_trade(msg: dict[str, Any], symbol: AssetSymbol) -> TapeTrade:
-    side = str(msg.get("side", "unknown")).lower()
-    if side not in ("buy", "sell", "unknown"):
-        side = "unknown"
-    return TapeTrade(
-        symbol=symbol,
-        at=_parse_dt(msg.get("at") or msg.get("asof")),
-        price=float(msg["price"]),
-        volume=float(msg.get("volume", 0.0)),
-        side=side,  # type: ignore[arg-type]
-    )
+# The wire parsers moved to `use_cases/orderflow_wire.py` so the tape replay
+# (backtest) parses recorded sessions exactly like the live ingest does.
+_parse_dt = parse_dt
+_parse_symbol = parse_symbol
+_parse_book = parse_book
+_parse_liquidity = parse_liquidity
+_parse_position = parse_position
+_parse_trade = parse_trade
 
 
 # Connection-level state set by the collector's `hello` message. One collector
@@ -363,18 +278,12 @@ async def _maybe_autoclose() -> None:
 # --- explosion-scalper bot (opens AND closes; demo only) ---------------------
 
 
-# Session is thin (skip entries) when realized participation is below this share
-# of the same-time-of-day baseline — matches the dashboard's "thin" threshold.
-_THIN_RATIO = 0.75
-# After banking a win we wait for positions to flatten AND this long before the
-# bot opens again, so it doesn't immediately re-enter the exhausted move.
-_REARM_COOLDOWN_S = 5.0
-# Trailing profit lock (per symbol): once a symbol's unrealized gain has peaked
-# at >= _BOT_LOCK_MIN_USD, close it if it gives back more than _BOT_LOCK_GIVEBACK
-# of that peak while still positive — banks the move instead of round-tripping
-# back to breakeven (the "perfect short that came all the way back" case).
-_BOT_LOCK_MIN_USD = 40.0
-_BOT_LOCK_GIVEBACK = 0.40
+# Execution policy constants (thin gate, re-arm cooldown, profit lock) live in
+# `use_cases/scalper.py` so the tape replay runs the exact same policy.
+_THIN_RATIO = THIN_RATIO
+_REARM_COOLDOWN_S = REARM_COOLDOWN_S
+_BOT_LOCK_MIN_USD = LOCK_MIN_USD
+_BOT_LOCK_GIVEBACK = LOCK_GIVEBACK
 
 
 class _BotState:

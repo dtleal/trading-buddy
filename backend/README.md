@@ -109,6 +109,12 @@ snapshots the bot saw, which is what makes the scalper backtestable. Command
 echoes and position/P&L mirrors are deliberately not recorded (a replay
 simulates execution itself). Disable by setting `ORDERFLOW_RECORD_DIR=""`.
 
+Backtest a recorded day with `uv run dtb replay data/orderflow_tape/tape-*.jsonl`
+(`use_cases/replay_scalper.py`): the same aggregator/signal/policy code as the
+live bot, with only order fills simulated. `--lot SYM=..`, `--target`, `--stop`
+override the bot knobs; check `--usd-per-point` against the broker's contract
+spec before trusting absolute USD numbers.
+
 ### One flow signal — shown == acted on
 
 `use_cases/trade_signal.py :: compute_flow_signal` produces a **single**

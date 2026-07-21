@@ -64,6 +64,23 @@ ADD_LEAN = 0.10
 # chop around neutral doesn't whipsaw us in and out.
 REVERSE_LEAN = 0.20
 
+# --- execution policy (shared by the live bot route AND the tape replay) -----
+# These gate/manage real entries in `api/routes/orderflow.py::_run_bot`; they
+# live here so the backtest replays the exact same policy without re-declaring
+# a threshold.
+# Session is thin (skip entries) when realized participation is below this
+# share of the same-time-of-day baseline — matches the dashboard's "thin" gate.
+THIN_RATIO = 0.75
+# After banking a win we wait for positions to flatten AND this long before the
+# bot opens again, so it doesn't immediately re-enter the exhausted move.
+REARM_COOLDOWN_S = 5.0
+# Trailing profit lock (per symbol): once a symbol's unrealized gain has peaked
+# at >= LOCK_MIN_USD, close it if it gives back more than LOCK_GIVEBACK of that
+# peak while still positive — banks the move instead of round-tripping back to
+# breakeven (the "perfect short that came all the way back" case).
+LOCK_MIN_USD = 40.0
+LOCK_GIVEBACK = 0.40
+
 
 def _recent_window(trades: Sequence[TapeTrade], seconds: float) -> list[TapeTrade]:
     """The tail of `trades` printed within `seconds` of the latest print.
@@ -250,6 +267,10 @@ def should_open(
 
 
 __all__ = [
+    "THIN_RATIO",
+    "REARM_COOLDOWN_S",
+    "LOCK_MIN_USD",
+    "LOCK_GIVEBACK",
     "detect_explosion",
     "decide_entry",
     "should_reverse",
