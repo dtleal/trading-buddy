@@ -16,7 +16,10 @@ explosion-scalper bot that opens and closes positions. Execution requires explic
 local gates on the collector (`allow_auto_close` / `allow_auto_trade`) and the bot
 only opens on a **demo** account. See [`collector/README.md`](collector/README.md).
 It is **not** a proven money-maker — the bot is a tunable mechanism to forward-test
-on demo, not financial advice.
+on demo, not financial advice. To validate it on data instead of vibes, the ingest
+records every collector message to `data/orderflow_tape/` (JSONL per UTC day) and
+`dtb replay` / `dtb sweep` backtest the exact live decision code over those
+recordings — see "Raw tape recording" in [`backend/README.md`](backend/README.md).
 
 ## What it does
 
@@ -333,6 +336,10 @@ dtb snapshot [--with-prompt|--no-prompt]   Tick payload, no LLM
 dtb signal --asset USTEC|SPX|GOLD          Intraday levels + structure stop
     [--interval 5m] [--lookback 5]
     [--risk-pct 2.0] [--account-size 50000] [--multiplier 20]
+dtb replay data/orderflow_tape/tape-*.jsonl   Backtest the scalper on a recorded tape
+    [--target 350] [--stop 900] [--lot SYM=2.0] [--usd-per-point SYM=1.0] [--detail]
+dtb sweep tape-*.jsonl [--set NAME=v1,v2]     Parameter sweep over a tape; per-axis
+    [--top 10]                                P&L means expose robust regions
 ```
 
 ## Tunable knobs (`.env`)
