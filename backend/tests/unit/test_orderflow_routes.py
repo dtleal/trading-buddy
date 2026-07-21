@@ -37,6 +37,8 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     of._auto_trade_enabled = False
     of._bot = of._BotState()
     of._bot.lots = dict(of._DEFAULT_LOTS)
+    # Recording is a live-only concern — no tape files as a test side effect.
+    monkeypatch.setattr(of, "_tape_recorder", None)
     orderflow_broadcaster._latest.clear()
 
     app = create_app()

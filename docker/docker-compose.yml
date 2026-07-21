@@ -22,6 +22,10 @@ services:
     restart: unless-stopped
     tty: true
     stdin_open: true
+    volumes:
+      # Raw order-flow tape (JSONL per UTC day) recorded by the ingest route —
+      # bind-mounted so backtest data survives image rebuilds.
+      - ../data/orderflow_tape:/app/data/orderflow_tape
 
   postgres:
     image: postgres:16-alpine

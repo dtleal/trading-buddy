@@ -20,11 +20,13 @@ import asyncio
 import logging
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, status
 from pydantic import BaseModel
 
+from adapters.tape_recorder import TapeRecorder
 from api.orderflow_broadcaster import orderflow_broadcaster
 from core.enums import AssetSymbol
 from core.models import (
@@ -80,6 +82,16 @@ def _build_aggregator() -> OrderFlowAggregator:
 
 # Process-wide singleton. The ingest handler mutates it; the REST route reads it.
 aggregator = _build_aggregator()
+
+
+def _build_recorder() -> TapeRecorder | None:
+    """Raw-tape recorder (backtest input), or None when disabled in settings."""
+    raw = get_settings().orderflow_record_dir.strip()
+    return TapeRecorder(Path(raw)) if raw else None
+
+
+# Records every data message the collector pushes (see TapeRecorder docstring).
+_tape_recorder = _build_recorder()
 
 # Latest per-symbol session-liquidity reading pushed by the collector. Lives in
 # the same process as the tick loop (API + loop share a process), so the
@@ -849,6 +861,10 @@ async def ingest_ws(websocket: WebSocket) -> None:
     try:
         while True:
             msg = await websocket.receive_json()
+            # Record the raw message BEFORE parsing: the tape must contain the
+            # session exactly as received, and the recorder never raises.
+            if _tape_recorder is not None:
+                _tape_recorder.record(msg)
             try:
                 touched = await _handle_message(msg)
             except (KeyError, ValueError, TypeError):

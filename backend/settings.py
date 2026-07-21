@@ -121,6 +121,12 @@ class Settings(BaseSettings):
     # UI refreshes / backend restarts). 0 disables auto-arming. A manual disarm
     # in the UI turns auto-arming off until you arm again.
     orderflow_autoclose_default_usd: float = 500.0
+    # Directory for the raw ingest tape: every book/trades/liquidity message is
+    # appended verbatim to one JSONL file per UTC day, so real sessions can be
+    # replayed through the aggregator to backtest the scalper. Relative paths
+    # resolve against the backend working dir (in Docker: /app, bind-mounted to
+    # the repo's ./data/orderflow_tape). Empty string disables recording.
+    orderflow_record_dir: str = "data/orderflow_tape"
 
     # --- Breakout detector tuning -----------------------------------------
 

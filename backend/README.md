@@ -97,6 +97,18 @@ price direction** — so a short can be cut on a brief burst of buy-side prints
 even while price is still drifting down. Each symbol triggers independently, so
 several manual positions can be closed a few seconds apart rather than at once.
 
+### Raw tape recording — the scalper's backtest input
+
+The ingest route appends every data message the collector pushes (`hello` /
+`book` / `trade` / `trades` / `liquidity`) verbatim to
+`data/orderflow_tape/tape-YYYY-MM-DD.jsonl` (UTC day, bind-mounted in
+docker-compose so it survives rebuilds). This exists because MT5 CFD feeds
+cannot rewind synthesized ticks — without the recording there is no history to
+replay. A recorded session fed back through the aggregator reproduces the exact
+snapshots the bot saw, which is what makes the scalper backtestable. Command
+echoes and position/P&L mirrors are deliberately not recorded (a replay
+simulates execution itself). Disable by setting `ORDERFLOW_RECORD_DIR=""`.
+
 ### One flow signal — shown == acted on
 
 `use_cases/trade_signal.py :: compute_flow_signal` produces a **single**
