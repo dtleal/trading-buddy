@@ -196,16 +196,39 @@ def _init_mt5(cfg: dict[str, Any]) -> tuple[str, int | None]:
         kwargs: dict[str, Any] = {}
         if src.get("path"):
             kwargs["path"] = src["path"]
-        if src.get("login"):
+        # Explicit credentials in the config go straight into initialize().
+        # A bare "login" (no password) is handled AFTER attach: mt5.login()
+        # without a password reuses the credentials saved in the terminal's
+        # own database, so the config never needs to hold a secret.
+        if src.get("login") and src.get("password"):
             kwargs.update(
                 login=int(src["login"]),
-                password=src.get("password", ""),
+                password=src["password"],
                 server=src.get("server", ""),
             )
         if mt5.initialize(**kwargs):
             term = mt5.terminal_info()
             acct = mt5.account_info()
             login = getattr(acct, "login", None)
+
+            want = int(src["login"]) if src.get("login") else None
+            if want is not None and login != want:
+                logger.info("MT5 account is %s; switching to configured %s", login, want)
+                if mt5.login(want):
+                    acct = mt5.account_info()
+                    login = getattr(acct, "login", None)
+                if login != want:
+                    errors.append(
+                        f"{name}: attached to account {login} but could not switch to "
+                        f"{want} ({mt5.last_error()}) — log that account into the "
+                        "terminal once so its credentials are saved"
+                    )
+                    try:
+                        mt5.shutdown()
+                    except Exception:  # pragma: no cover - best-effort cleanup
+                        pass
+                    continue
+
             logger.info(
                 "MT5 attached: source=%s terminal=%s connected=%s account=%s",
                 name,
