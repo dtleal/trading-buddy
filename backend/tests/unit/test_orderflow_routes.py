@@ -484,9 +484,10 @@ def test_mark_sends_command_with_offset(client: TestClient) -> None:
 
 def test_mark_refused_when_auto_trade_disabled(client: TestClient) -> None:
     of._auto_trade_enabled = False
-    assert client.post(
-        "/api/orderflow/mark/GOLD", json={"side": "sell", "offset": 3.8}
-    ).status_code == 409
+    assert (
+        client.post("/api/orderflow/mark/GOLD", json={"side": "sell", "offset": 3.8}).status_code
+        == 409
+    )
 
 
 def test_mark_requires_price_or_offset(client: TestClient) -> None:
@@ -496,16 +497,18 @@ def test_mark_requires_price_or_offset(client: TestClient) -> None:
 
 def test_mark_unknown_symbol(client: TestClient) -> None:
     of._auto_trade_enabled = True
-    assert client.post(
-        "/api/orderflow/mark/DOGE", json={"side": "buy", "price": 1.0}
-    ).status_code == 404
+    assert (
+        client.post("/api/orderflow/mark/DOGE", json={"side": "buy", "price": 1.0}).status_code
+        == 404
+    )
 
 
 def test_mark_without_collector_connected(client: TestClient) -> None:
     of._auto_trade_enabled = True  # capable, but no live socket
-    assert client.post(
-        "/api/orderflow/mark/GOLD", json={"side": "sell", "offset": 3.8}
-    ).status_code == 503
+    assert (
+        client.post("/api/orderflow/mark/GOLD", json={"side": "sell", "offset": 3.8}).status_code
+        == 503
+    )
 
 
 def test_autoclose_result_recorded(client: TestClient) -> None:

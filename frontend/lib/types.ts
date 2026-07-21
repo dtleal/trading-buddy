@@ -185,6 +185,27 @@ export const DayOutlook = z.object({
 });
 export type DayOutlook = z.infer<typeof DayOutlook>;
 
+/** Per-asset stance from correlating the VIX 5m path with the asset's 5m tape. */
+export const VixPriceSignal = z.object({
+  asset: AssetSymbol,
+  asof: z.string(),
+  stance: z.enum(["sell_rallies", "buy_dips", "stay_out", "neutral"]),
+  caution: z.enum(["exit_longs", "exit_shorts"]).nullable().default(null),
+  trigger: z.boolean().default(false), // price is AT the actionable band right now
+  headline: z.string(),
+  rationale: z.array(z.string()).default([]),
+  vix_value: z.number(),
+  vix_trend: z.enum(["rising", "falling", "flat"]),
+  vix_change_pct: z.number().nullable().default(null),
+  vix_range_pos: z.number().nullable().default(null), // 0..1 in the lookback range
+  price_trend: z.enum(["up", "down", "flat"]),
+  weak_trend: z.boolean().default(false), // small / overlapping candles
+  bb_pos: z.number().nullable().default(null), // %B (0 = lower band, 1 = upper)
+  bb_width_pct: z.number().nullable().default(null),
+  chop: z.boolean().default(false),
+});
+export type VixPriceSignal = z.infer<typeof VixPriceSignal>;
+
 /** Latest DashboardTick from /api/tick or /ws/ticks. */
 export const DashboardTick = z.object({
   timestamp: z.string(),
@@ -202,6 +223,7 @@ export const DashboardTick = z.object({
   intraday_bias: z.record(AssetSymbol, IntradayBiasReport).default({}),
   breakouts_recent: z.array(Breakout).default([]),
   day_outlook: DayOutlook.nullable().default(null),
+  vix_price: z.record(AssetSymbol, VixPriceSignal).default({}),
 });
 export type DashboardTick = z.infer<typeof DashboardTick>;
 

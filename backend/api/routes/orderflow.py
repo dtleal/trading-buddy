@@ -754,9 +754,8 @@ async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
         skipped = msg.get("skipped")
         err = msg.get("error") or msg.get("errors")
         if ok:
-            _autoclose.last_result = (
-                f"breakeven: {moved} movida(s)"
-                + (f", {skipped} sem lucro ainda" if skipped else "")
+            _autoclose.last_result = f"breakeven: {moved} movida(s)" + (
+                f", {skipped} sem lucro ainda" if skipped else ""
             )
         else:
             _autoclose.last_result = f"falha no breakeven: {err}"
@@ -1065,8 +1064,14 @@ async def mark_symbol(symbol: str, body: MarkRequest) -> dict[str, Any]:
     )
     if not sent:
         raise HTTPException(status_code=503, detail="Collector não conectado.")
-    logger.info("Chart marker requested: %s %s price=%s offset=%s lots=%s",
-                body.side, sym.value, body.price, body.offset, body.lots)
+    logger.info(
+        "Chart marker requested: %s %s price=%s offset=%s lots=%s",
+        body.side,
+        sym.value,
+        body.price,
+        body.offset,
+        body.lots,
+    )
     return {"ok": True, "detail": f"Marcador {body.side} de {sym.value} enviado ao collector."}
 
 

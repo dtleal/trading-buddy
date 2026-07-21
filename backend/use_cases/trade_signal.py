@@ -51,10 +51,12 @@ from use_cases.assess_trade_signals import STALL as ASSESS_STALL
 from use_cases.assess_trade_signals import _buy_fraction as _assess_buy_fraction
 from use_cases.scalper import (
     Direction,
+)
+from use_cases.scalper import _buy_fraction as _scalper_buy_fraction
+from use_cases.scalper import (
     decide_entry,
     should_reverse,
 )
-from use_cases.scalper import _buy_fraction as _scalper_buy_fraction
 
 
 def held_side(positions: Sequence[Position]) -> Direction | None:
@@ -86,9 +88,7 @@ def _enter_action(direction: Direction) -> str:
     return "enter_long" if direction == "buy" else "enter_short"
 
 
-def compute_flow_signal(
-    snapshot: OrderFlowSnapshot, positions: Sequence[Position]
-) -> FlowSignal:
+def compute_flow_signal(snapshot: OrderFlowSnapshot, positions: Sequence[Position]) -> FlowSignal:
     """The single per-symbol signal for this snapshot (see module docstring)."""
     symbol = snapshot.symbol
     side = held_side(positions)

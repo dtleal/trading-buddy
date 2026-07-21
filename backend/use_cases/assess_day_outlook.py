@@ -152,9 +152,7 @@ class AssessDayOutlookUseCase:
         s.add(-self._t.holiday_penalty, f"Feriado nos EUA ({holiday.name}) — liquidez reduzida")
         return True
 
-    def _apply_catalysts(
-        self, s: _Score, events: Sequence[EconomicEvent], now: datetime
-    ) -> int:
+    def _apply_catalysts(self, s: _Score, events: Sequence[EconomicEvent], now: datetime) -> int:
         high = [e for e in events if e.impact is ImpactLevel.HIGH]
         count = len(high)
         if count == 0:
@@ -183,7 +181,9 @@ class AssessDayOutlookUseCase:
         elif vix.regime is VixRegime.HIGH:
             s.add(self._t.vix_high_bonus, f"VIX em regime alto ({vix.vix:.1f}) — ranges amplos")
         if vix.term_structure is TermStructure.BACKWARDATION:
-            s.add(self._t.backwardation_bonus, "Estrutura a termo do VIX em backwardation (estresse)")
+            s.add(
+                self._t.backwardation_bonus, "Estrutura a termo do VIX em backwardation (estresse)"
+            )
 
     def _apply_opening_range(
         self, s: _Score, levels: dict[AssetSymbol, IntradayLevels] | None
@@ -219,9 +219,7 @@ class AssessDayOutlookUseCase:
         if not liquidity:
             return None
         vol_ratios = [lq.ratio for lq in liquidity.values() if lq.baseline_volume > 0]
-        range_ratios = [
-            lq.range_ratio for lq in liquidity.values() if lq.range_ratio is not None
-        ]
+        range_ratios = [lq.range_ratio for lq in liquidity.values() if lq.range_ratio is not None]
         if not vol_ratios:
             return None
         vol = median(vol_ratios)
@@ -272,7 +270,11 @@ class AssessDayOutlookUseCase:
                 why = "baixa participação"
             return f"⚠️ Dia FRACO — {why}. Risco de chop, opere pequeno ou fique de fora."
         if regime is DayRegime.EXPANSION:
-            why = "catalisador de alto impacto à frente" if high_impact_count else "participação elevada"
+            why = (
+                "catalisador de alto impacto à frente"
+                if high_impact_count
+                else "participação elevada"
+            )
             return f"🚀 Dia de EXPANSÃO — {why}. Espere movimento."
         return "Dia NORMAL — movimento dentro do comum."
 

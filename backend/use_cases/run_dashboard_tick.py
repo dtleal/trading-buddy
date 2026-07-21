@@ -19,14 +19,17 @@ from core.models import (
     Breakout,
     DashboardTick,
     DayOutlook,
+    IntradayBar,
     IntradayBiasReport,
     IntradayLevels,
+    MarketSnapshot,
     NewsItem,
     SessionLiquidity,
     TradeSetup,
+    VixPriceSignal,
 )
 from use_cases.assess_day_outlook import AssessDayOutlookUseCase
-from use_cases.push_day_outlook_alerts import PushDayOutlookAlertsUseCase
+from use_cases.assess_vix_price import AssessVixPriceUseCase
 from use_cases.compute_combined_bias import ComputeCombinedBiasUseCase
 from use_cases.compute_intraday_bias import ComputeIntradayBiasUseCase
 from use_cases.compute_intraday_levels import ComputeIntradayLevelsUseCase
@@ -40,6 +43,8 @@ from use_cases.fetch_macro import FetchMacroIndicatorsUseCase
 from use_cases.fetch_market import FetchMarketSnapshotUseCase
 from use_cases.fetch_news import FetchNewsHeadlinesUseCase
 from use_cases.push_breakout_alerts import PushBreakoutAlertsUseCase
+from use_cases.push_day_outlook_alerts import PushDayOutlookAlertsUseCase
+from use_cases.push_vix_price_alerts import PushVixPriceAlertsUseCase
 from use_cases.resample_bars import resample_to
 
 # Timeframes the dashboard surfaces for breakout alerts.
@@ -58,6 +63,11 @@ BREAKOUT_TIMEFRAMES: tuple[Timeframe, ...] = (
 # (N=20 in the Donchian) + ATR window + room for the scan. 15 days of RTH is
 # comfortably enough for indices; futures (GC=F, 23h) get even more bars.
 BREAKOUT_LOOKBACK_DAYS = 15
+
+# Lookback for the VIX 5m bars feeding the VIX×price stance. Two sessions give
+# the trend window plus a meaningful "position in recent range" read without
+# dragging in week-old vol levels.
+VIX_PRICE_LOOKBACK_DAYS = 2
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +95,8 @@ class RunDashboardTickUseCase:
         push_breakout_alerts: PushBreakoutAlertsUseCase | None = None,
         assess_day_outlook: AssessDayOutlookUseCase | None = None,
         push_day_outlook_alerts: PushDayOutlookAlertsUseCase | None = None,
+        assess_vix_price: AssessVixPriceUseCase | None = None,
+        push_vix_price_alerts: PushVixPriceAlertsUseCase | None = None,
         liquidity_provider: Callable[[], dict[AssetSymbol, SessionLiquidity]] | None = None,
         intraday_assets: tuple[AssetSymbol, ...] = (
             AssetSymbol.USTEC,
@@ -112,6 +124,8 @@ class RunDashboardTickUseCase:
         self._push_breakout_alerts = push_breakout_alerts
         self._assess_day_outlook = assess_day_outlook
         self._push_day_outlook_alerts = push_day_outlook_alerts
+        self._assess_vix_price = assess_vix_price
+        self._push_vix_price_alerts = push_vix_price_alerts
         self._liquidity_provider = liquidity_provider
         self._intraday_assets = intraday_assets
 
@@ -138,7 +152,12 @@ class RunDashboardTickUseCase:
             sentiment=sentiment_by_asset,
         )
 
-        intraday_levels, setups, breakouts = await self._compute_intraday_setups_breakouts(bias)
+        (
+            intraday_levels,
+            setups,
+            breakouts,
+            bars_by_asset,
+        ) = await self._compute_intraday_setups_breakouts(bias)
 
         # Per-asset intraday bias is derived from the same intraday levels —
         # no extra API calls. Built here (vs inside the gather helper) so the
@@ -166,6 +185,15 @@ class RunDashboardTickUseCase:
             except Exception:
                 logger.exception("Day-outlook push dispatch failed (tick continues)")
 
+        # VIX×price stance: reuse the 5m bars already fetched above, pull the
+        # VIX's own 5m path, and correlate them into a per-asset playbook.
+        vix_price = await self._assess_vix_price_signals(market, bars_by_asset)
+        if vix_price and self._push_vix_price_alerts is not None:
+            try:
+                await self._push_vix_price_alerts.execute(vix_price)
+            except Exception:
+                logger.exception("VIX×price push dispatch failed (tick continues)")
+
         tick = DashboardTick(
             timestamp=datetime.now(timezone.utc),
             market=market,
@@ -178,6 +206,7 @@ class RunDashboardTickUseCase:
             intraday_bias=intraday_bias_map,
             breakouts_recent=breakouts,
             day_outlook=day_outlook,
+            vix_price=vix_price,
         )
 
         await asyncio.gather(
@@ -212,12 +241,46 @@ class RunDashboardTickUseCase:
             logger.exception("Day-outlook assessment failed (tick continues)")
             return None
 
+    async def _assess_vix_price_signals(
+        self,
+        market: MarketSnapshot,
+        bars_by_asset: dict[AssetSymbol, list[IntradayBar]],
+    ) -> dict[AssetSymbol, VixPriceSignal]:
+        """Fetch the VIX 5m path and run the VIX×price stance matrix.
+
+        Best-effort like everything else in the tick: any failure (yfinance
+        throttle, market closed) logs and yields an empty map."""
+        if self._assess_vix_price is None or self._prices is None or not bars_by_asset:
+            return {}
+        try:
+            vix_bars = await self._prices.get_intraday_bars("VIX", "5m", VIX_PRICE_LOOKBACK_DAYS)
+        except Exception:
+            logger.exception("VIX 5m bars fetch failed (tick continues)")
+            return {}
+        try:
+            return self._assess_vix_price.execute(
+                now=datetime.now(timezone.utc),
+                vix=market.vix,
+                vix_bars=vix_bars,
+                bars_by_asset=bars_by_asset,
+            )
+        except Exception:
+            logger.exception("VIX×price assessment failed (tick continues)")
+            return {}
+
     async def _compute_intraday_setups_breakouts(
         self,
         bias: dict[AssetSymbol, BiasReport],
-    ) -> tuple[dict[AssetSymbol, IntradayLevels], list[TradeSetup], list[Breakout]]:
+    ) -> tuple[
+        dict[AssetSymbol, IntradayLevels],
+        list[TradeSetup],
+        list[Breakout],
+        dict[AssetSymbol, list[IntradayBar]],
+    ]:
         """Best-effort: pull 5m bars per asset, compute intraday levels, trade
-        setups, and breakout signals across all configured timeframes.
+        setups, and breakout signals across all configured timeframes. The raw
+        5m bars are also returned so downstream reads (VIX×price stance) reuse
+        them without a second yfinance round-trip.
 
         Failures on a single asset (rate limit, missing bars) are logged but
         do not break the tick — the dashboard simply omits that asset's data.
@@ -227,11 +290,17 @@ class RunDashboardTickUseCase:
         detect_setup = self._detect_setup
         detect_breakouts = self._detect_breakouts
         if prices is None or compute_intraday is None or detect_setup is None:
-            return {}, [], []
+            return {}, [], [], {}
 
         async def _one(
             asset: AssetSymbol,
-        ) -> tuple[AssetSymbol, IntradayLevels | None, TradeSetup | None, list[Breakout]]:
+        ) -> tuple[
+            AssetSymbol,
+            IntradayLevels | None,
+            TradeSetup | None,
+            list[Breakout],
+            list[IntradayBar],
+        ]:
             try:
                 bars = await prices.get_intraday_bars(asset.value, "5m", BREAKOUT_LOOKBACK_DAYS)
                 levels = compute_intraday.execute(asset.value, bars)
@@ -244,24 +313,27 @@ class RunDashboardTickUseCase:
                     for tf in BREAKOUT_TIMEFRAMES:
                         tf_bars = resample_to(bars, tf)
                         asset_breakouts.extend(detect_breakouts.execute(asset, tf, tf_bars))
-                return asset, levels, setup, asset_breakouts
+                return asset, levels, setup, asset_breakouts, list(bars)
             except Exception:
                 logger.exception("Intraday/setup/breakout failed for %s", asset.value)
-                return asset, None, None, []
+                return asset, None, None, [], []
 
         results = await asyncio.gather(*(_one(a) for a in self._intraday_assets))
         levels_map: dict[AssetSymbol, IntradayLevels] = {}
         setups: list[TradeSetup] = []
         breakouts: list[Breakout] = []
-        for asset, lv, sp, bk in results:
+        bars_map: dict[AssetSymbol, list[IntradayBar]] = {}
+        for asset, lv, sp, bk, bars in results:
             if lv is not None:
                 levels_map[asset] = lv
             if sp is not None:
                 setups.append(sp)
             breakouts.extend(bk)
+            if bars:
+                bars_map[asset] = bars
         # Most recent first — frontend slices for display.
         breakouts.sort(key=lambda b: b.signal_bar_at, reverse=True)
-        return levels_map, setups, breakouts
+        return levels_map, setups, breakouts, bars_map
 
 
 def _with_neutral_default(items: list[NewsItem]) -> list[NewsItem]:

@@ -3,6 +3,7 @@
 import { Header } from "@/components/shared/Header";
 import { VixChart } from "@/components/vix/VixChart";
 import { VixAlertsPanel } from "@/components/vix/VixAlertsPanel";
+import { VixPricePanel } from "@/components/vix/VixPricePanel";
 import { PricesPanel } from "@/components/market/PricesPanel";
 import { IntradayLevelsPanel } from "@/components/market/IntradayLevelsPanel";
 import { BiasPanel } from "@/components/bias/BiasPanel";
@@ -18,6 +19,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { useLiveTick } from "@/hooks/useLiveTick";
 import { useVixAlerts } from "@/hooks/useVixAlerts";
+import { useVixPriceAlerts } from "@/hooks/useVixPriceAlerts";
 import { useBreakoutAlerts } from "@/hooks/useBreakoutAlerts";
 import { fmtPrice } from "@/lib/utils";
 
@@ -25,6 +27,7 @@ export default function Home() {
   const { tick, status } = useLiveTick();
   const vix = tick?.market.vix.vix ?? null;
   useVixAlerts(tick);
+  useVixPriceAlerts(tick);
   useBreakoutAlerts(tick);
 
   return (
@@ -69,6 +72,10 @@ export default function Home() {
             <VixChart liveVix={vix} height={200} />
           </CardContent>
         </Card>
+
+        {/* Row 0a: VIX × price stance — per-asset playbook derived from the VIX
+            path vs the 5m tape (sell rallies / buy dips / stay out / close) */}
+        <VixPricePanel tick={tick} />
 
         {/* Row 0b: live order flow — each column carries its pressure marker on top */}
         <OrderFlowSection tick={tick} />

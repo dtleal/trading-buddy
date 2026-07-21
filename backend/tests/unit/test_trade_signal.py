@@ -62,7 +62,9 @@ def _snap(
     return OrderFlowSnapshot(
         symbol=AssetSymbol.USTEC,
         asof=_AT,
-        recent_trades=trades if trades is not None else _trades(buys, sells, window_range=window_range),
+        recent_trades=(
+            trades if trades is not None else _trades(buys, sells, window_range=window_range)
+        ),
         live_activity=live,
     )
 

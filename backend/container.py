@@ -23,6 +23,8 @@ from adapters.prices_yfinance import YFinancePricesGateway
 from adapters.sentiment_keyword import KeywordSentimentClassifier
 from core.interfaces import NewsGateway
 from settings import Settings
+from use_cases.assess_day_outlook import AssessDayOutlookUseCase
+from use_cases.assess_vix_price import AssessVixPriceUseCase
 from use_cases.compute_combined_bias import (
     BiasThresholds,
     BiasWeights,
@@ -40,10 +42,10 @@ from use_cases.fetch_calendar import FetchEconomicCalendarUseCase
 from use_cases.fetch_macro import FetchMacroIndicatorsUseCase
 from use_cases.fetch_market import FetchMarketSnapshotUseCase
 from use_cases.fetch_news import FetchNewsHeadlinesUseCase
-from use_cases.assess_day_outlook import AssessDayOutlookUseCase
 from use_cases.generate_briefing import GenerateBriefingUseCase
 from use_cases.push_breakout_alerts import PushBreakoutAlertsUseCase
 from use_cases.push_day_outlook_alerts import PushDayOutlookAlertsUseCase
+from use_cases.push_vix_price_alerts import PushVixPriceAlertsUseCase
 from use_cases.run_dashboard_tick import RunDashboardTickUseCase
 
 logger = logging.getLogger(__name__)
@@ -159,6 +161,8 @@ async def build_container(settings: Settings) -> Container:
 
     assess_day_outlook = AssessDayOutlookUseCase()
     push_day_outlook_alerts = PushDayOutlookAlertsUseCase(notifier=ntfy, cache=cache)
+    assess_vix_price = AssessVixPriceUseCase()
+    push_vix_price_alerts = PushVixPriceAlertsUseCase(notifier=ntfy, cache=cache)
     # The MT5 collector pushes liquidity readings into the order-flow route's
     # in-process store; the tick loop reads the latest snapshot from there.
     # Imported lazily to keep the composition root free of an api→container
@@ -183,6 +187,8 @@ async def build_container(settings: Settings) -> Container:
         push_breakout_alerts=push_breakout_alerts,
         assess_day_outlook=assess_day_outlook,
         push_day_outlook_alerts=push_day_outlook_alerts,
+        assess_vix_price=assess_vix_price,
+        push_vix_price_alerts=push_vix_price_alerts,
         liquidity_provider=latest_liquidity,
     )
 

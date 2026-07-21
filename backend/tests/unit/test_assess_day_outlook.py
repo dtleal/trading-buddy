@@ -13,7 +13,9 @@ from use_cases.assess_day_outlook import AssessDayOutlookUseCase
 NOW = datetime(2026, 6, 19, 13, 0, tzinfo=timezone.utc)
 
 
-def _event(name: str, impact: ImpactLevel, *, currency: str = "USD", hour: int = 12) -> EconomicEvent:
+def _event(
+    name: str, impact: ImpactLevel, *, currency: str = "USD", hour: int = 12
+) -> EconomicEvent:
     return EconomicEvent(
         name=name,
         currency=currency,
@@ -32,9 +34,7 @@ def _vix(regime: VixRegime, value: float = 18.0) -> VixSnapshot:
     )
 
 
-def _liq(
-    symbol: AssetSymbol, ratio: float, range_ratio: float | None = None
-) -> SessionLiquidity:
+def _liq(symbol: AssetSymbol, ratio: float, range_ratio: float | None = None) -> SessionLiquidity:
     return SessionLiquidity(
         symbol=symbol,
         asof=NOW,

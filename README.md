@@ -143,6 +143,36 @@ added once the collector's baseline is in. See `collector/README.md`.
 The verdict is pushed to your phone once per day (and again if the regime
 genuinely changes mid-session) — see [phone push](#phone-push-notifications-ntfysh).
 
+### VIX × Preço — per-asset stance from the VIX path vs the 5m tape (dashboard + push)
+
+A panel under the VIX chart that turns "where is implied vol and what is the 5m
+chart doing" into a **per-asset playbook**, recomputed every 5-minute tick by
+`assess_vix_price` (pure, unit-tested). Per asset it emits:
+
+- **`stance`** — the standing read: `VENDER REPIQUE` (sell rallies), `COMPRAR
+  RECUO` (buy dips), `FICAR DE FORA` (stay out) or `NEUTRO`.
+- **`trigger`** — flips on when price is AT the actionable Bollinger(20,2) band
+  *right now* (the "zona de VENDA/COMPRA agora" moment). Pulses in the UI.
+- **`caution`** — divergence reads that argue for **closing open positions**:
+  price rising WITH the VIX rising (fragile rally → `ENCERRAR COMPRAS`), price
+  falling with the VIX bleeding off (selloff losing fuel → `ENCERRAR VENDAS`).
+
+The matrix it encodes: VIX spiking near the top of its 2-day range → don't buy,
+sell the rally into the upper band; VIX drifting up while price grinds down in
+small overlapping candles between the bands → sell the tops of that range; VIX
+rolling over from a spike → relief, buy pullbacks; VIX low and dead-flat with
+squeezed bands and overlapping candles → no energy, stay out. **Gold is treated
+as the risk-off asset** — a rising VIX supports it, so the direction is
+inverted (and the rationale says so).
+
+Inputs: VIX 5m bars (yfinance, 2-day lookback: trend over ~1h, spike over
+~30 min, position in the recent range) × each asset's 5m bars already fetched
+for the breakout scan (SMA20 slope, candle body/overlap quality, %B and band
+width vs its own recent median). Alerts fire as browser toast/sound/desktop
+notification on stance changes and zone triggers (edge-triggered, no storm on
+reload) and as **ntfy pushes** (stance changes dedup'd on state in Redis; zone
+triggers re-arm every 30 min).
+
 ### LLM features (need `CLAUDE_API_KEY`)
 
 - `dtb brief` — pre-market briefing in PT-BR via Claude Opus 4.7.
@@ -256,6 +286,7 @@ Protocol interfaces in `core/interfaces.py`.
 | `compute_intraday_levels` | Pure function: bars → HOD/LOD/VWAP/OR/PDH/EMAs/ATR/swings. |
 | `detect_trade_setup` | Pure heuristic: levels + bias → `TradeSetup` or `None`. |
 | `assess_day_outlook` | Pure gate: calendar + VIX + opening range + MT5 activity → `DayOutlook` (score/regime). |
+| `assess_vix_price` | Pure matrix: VIX 5m path × asset 5m tape (trend, candle quality, Bollinger) → per-asset `VixPriceSignal` (stance/trigger/caution). |
 | `aggregate_orderflow` | Rolling DOM/footprint/tape state + real-time `LiveActivity` per symbol. |
 | `assess_trade_signals` | Pure: open position + flow lean → in-trade alerts (pressure-against / take-profit). |
 | `autoclose` / `scalper` | Pure decision logic for the opt-in execution layer: whole-account profit-target close, and the explosion-scalper bot's entries (`detect_explosion` / `decide_entry`), reversal (`should_reverse`) and gating (`should_open`). Demo-gated; off by default. |

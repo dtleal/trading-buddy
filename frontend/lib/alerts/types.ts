@@ -52,7 +52,7 @@ export type AlertTone = "info" | "warning" | "danger";
 export type AlertEvent = {
   id: string;
   ruleId: string;
-  ruleKind: AlertRule["kind"] | "level_proximity";
+  ruleKind: AlertRule["kind"] | "level_proximity" | "vix_price";
   title: string;
   detail: string;
   tone: AlertTone;

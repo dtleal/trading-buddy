@@ -55,7 +55,9 @@ class PushDayOutlookAlertsUseCase:
         )
         if ok:
             await self._cache.set(CACHE_KEY, stamp, ttl_seconds=CACHE_TTL_SECONDS)
-            logger.info("ntfy: pushed day-outlook (%s, score=%.0f)", outlook.regime.value, outlook.score)
+            logger.info(
+                "ntfy: pushed day-outlook (%s, score=%.0f)", outlook.regime.value, outlook.score
+            )
         return ok
 
 
@@ -65,7 +67,11 @@ _REGIME_EMOJI = {DayRegime.THIN: "⚠️", DayRegime.EXPANSION: "🚀", DayRegim
 
 
 def _title(o: DayOutlook) -> str:
-    label = {DayRegime.THIN: "Dia FRACO", DayRegime.EXPANSION: "Dia de EXPANSÃO", DayRegime.NORMAL: "Dia normal"}
+    label = {
+        DayRegime.THIN: "Dia FRACO",
+        DayRegime.EXPANSION: "Dia de EXPANSÃO",
+        DayRegime.NORMAL: "Dia normal",
+    }
     return f"{_REGIME_EMOJI[o.regime]} {label[o.regime]} · potencial {o.score:.0f}/100"
 
 

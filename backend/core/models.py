@@ -644,6 +644,52 @@ class OrderFlowSnapshot(_Frozen):
 
 
 # -----------------------------------------------------------------------------
+# VIX × price stance (5m correlation read)
+# -----------------------------------------------------------------------------
+
+
+VixTrendDir = Literal["rising", "falling", "flat"]
+PriceTrendDir = Literal["up", "down", "flat"]
+VixStance = Literal["sell_rallies", "buy_dips", "stay_out", "neutral"]
+VixCaution = Literal["exit_longs", "exit_shorts"]
+
+
+class VixPriceSignal(_Frozen):
+    """Per-asset stance from correlating the VIX 5m path with the asset's 5m tape.
+
+    Produced once per tick by `AssessVixPriceUseCase`, which reads the VIX's
+    short-term direction + position in its recent range against the asset's 5m
+    trend, candle quality (small/overlapping = weak) and Bollinger(20,2)
+    position. `stance` is the standing playbook ("only sell rallies", "buy
+    dips", "stay out"); `trigger` flips True when price is AT the actionable
+    band right now; `caution` fires on divergences that argue for closing an
+    open position (e.g. price rising while VIX rises = fragile rally).
+    Decision support, never advice — same caveat as every other read here.
+    """
+
+    asset: AssetSymbol
+    asof: datetime
+    stance: VixStance
+    caution: VixCaution | None = None
+    trigger: bool = False  # price is in the actionable Bollinger zone right now
+    headline: str
+    rationale: list[str] = Field(default_factory=list)
+
+    # VIX side of the read
+    vix_value: float
+    vix_trend: VixTrendDir
+    vix_change_pct: float | None = None  # % move over the trend window (~1h)
+    vix_range_pos: float | None = None  # 0..1 within the lookback range (1 = at top)
+
+    # Price side of the read (5m)
+    price_trend: PriceTrendDir
+    weak_trend: bool = False  # small / overlapping candles
+    bb_pos: float | None = None  # %B: 0 = lower band, 1 = upper band
+    bb_width_pct: float | None = None  # band width as % of the middle band
+    chop: bool = False  # weak candles + flat trend (range trap)
+
+
+# -----------------------------------------------------------------------------
 # Day outlook (movement-potential / liquidity gate)
 # -----------------------------------------------------------------------------
 
@@ -688,6 +734,7 @@ class DashboardTick(_Frozen):
     intraday_bias: dict[AssetSymbol, IntradayBiasReport] = Field(default_factory=dict)
     breakouts_recent: list[Breakout] = Field(default_factory=list)
     day_outlook: DayOutlook | None = None
+    vix_price: dict[AssetSymbol, VixPriceSignal] = Field(default_factory=dict)
 
 
 __all__ = [
@@ -723,4 +770,9 @@ __all__ = [
     "FlowSignalAction",
     "FlowSignalBasis",
     "DayOutlook",
+    "VixPriceSignal",
+    "VixTrendDir",
+    "PriceTrendDir",
+    "VixStance",
+    "VixCaution",
 ]
