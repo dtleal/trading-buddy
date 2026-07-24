@@ -26,6 +26,17 @@ for s in ['USTEC','SPX','GOLD']:
         print(f"ema9={L.get('ema_9'):.1f} ema20={L.get('ema_20'):.1f} ema50={L.get('ema_50'):.1f} "
               f"ema200={L.get('ema_200')} atr14={L.get('atr_14'):.1f} "
               f"swingH={L.get('last_swing_high')} swingL={L.get('last_swing_low')}")
+        # --- proximidade dos EXTREMOS do dia anterior (SEMPRE medir em %/amplitude, NUNCA em ATR 5m) ---
+        px=L.get('last_price'); pdh=L.get('pdh'); pdl=L.get('pdl'); pdc=L.get('pdc')
+        if px and pdh and pdl:
+            rng=pdh-pdl  # amplitude de ontem
+            def prox(px, ref, rng):
+                dp=(px-ref)/ref*100; frac=abs(px-ref)/rng*100 if rng else 0
+                tag="🎯ENCOSTADO" if abs(dp)<=0.35 else ("perto" if abs(dp)<=0.8 else "longe")
+                return f"{px-ref:+.1f}pts ({dp:+.2f}%, {frac:.0f}% da amplit.) {tag}"
+            print(f"vs MÁX ontem (pdh {pdh}): {prox(px,pdh,rng)}")
+            print(f"vs MÍN ontem (pdl {pdl}): {prox(px,pdl,rng)}")
+            if pdc: print(f"vs FECH ontem (pdc {pdc}): {(px-pdc)/pdc*100:+.2f}%")
     print(f"bias={B.get('level')} score={B.get('score')} :: {', '.join(B.get('signals',[]))}")
     fb=[b for b in bk if b.get('asset')==s]
     for b in fb[:4]:
@@ -54,6 +65,7 @@ Se `localhost:8000` falhar, tente `TB_BASE=http://72.62.15.111:8057`.
 **Estrutura do dia (candles 5m — via `intraday_levels`/`intraday_bias`/`breakouts_recent`, fonte yfinance ~15min atraso):**
 - **Tendência vs lateral:** preço vs VWAP e stack de EMAs (9>20>50 alinhado = tendência; entrelaçadas + preço colado na VWAP = lateral). Range do dia (hod-lod) vs ATR14: <~3×ATR = dia estreito/lateral.
 - **Onde está no range:** posição do px entre lod↔hod, ORH/ORL (abertura), e níveis do dia anterior (pdh/pdc/pdl) como ímãs/alvos.
+- 🚨 **REGRA DURA — proximidade de MÁX/MÍN do dia anterior (pdh/pdl):** SEMPRE meça em **% do preço** e em **% da amplitude de ontem** (as linhas `vs MÁX/MÍN ontem` já vêm calculadas no passo 1). **NUNCA** julgue "perto/longe" da máx/mín de ontem usando ATR de 5min — o Diego olha o gráfico DIÁRIO, então ≤0,35% = ENCOSTADO (é teste de nível), ≤0,8% = perto. Ex.: 0,41% do pdl num dia que ontem andou 850pts é "encostado na mínima", não "longe". Se errar isso, a análise inteira sai errada.
 - **breakouts_recent:** rompimentos Donchian por timeframe com força/expansão — confirma quebra de lateralidade.
 - `intraday_bias.signals` já resume o alinhamento (em PT).
 
