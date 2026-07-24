@@ -565,6 +565,44 @@ class AccountPnl(_Frozen):
     asof: datetime | None = None
 
 
+class BalanceStep(_Frozen):
+    """One closed-trade step in the account balance curve.
+
+    Reconstructed by the collector from the broker's DEAL history (every closed
+    trade of the month — manual AND bot), so `balance` is the running account
+    balance right after that deal and `pnl` is that deal's realized net. The
+    curve is anchored so the last step equals the account's current balance.
+    """
+
+    ts: datetime
+    balance: float  # running balance after this deal
+    pnl: float  # this deal's realized net (profit + commission + swap + fee)
+
+
+class EquityPoint(_Frozen):
+    """One live sample of account equity (balance + floating P&L of open
+    positions). Forward-only: sampled on the collector's ~30s account push, so
+    it captures the intraday equity wiggle while a position is open."""
+
+    ts: datetime
+    equity: float
+
+
+class AccountBalanceHistory(_Frozen):
+    """Data for the UI balance chart: a per-trade balance step curve (from the
+    broker deal history, backfilled for the month) plus forward-only live equity
+    samples. `balance`/`equity` mirror the latest values for a cheap header read;
+    empty / all-zero until the collector's first push.
+    """
+
+    balance_steps: list[BalanceStep] = Field(default_factory=list)
+    equity_points: list[EquityPoint] = Field(default_factory=list)
+    balance: float = 0.0
+    equity: float = 0.0
+    currency: str | None = None
+    asof: datetime | None = None
+
+
 class BotStatus(_Frozen):
     """State of the explosion-scalper bot (opens AND closes, demo only).
 

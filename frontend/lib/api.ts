@@ -3,6 +3,7 @@
  */
 import {
   AccountPnl,
+  AccountBalanceHistory,
   AutoCloseStatus,
   BotStatus,
   BriefResponse,
@@ -107,6 +108,8 @@ export const api = {
 
   // --- order-flow execution (auto-close + manual per-asset close) ---
   getAccountPnl: () => fetchJson("/api/orderflow/pnl", AccountPnl),
+  getBalanceHistory: () =>
+    fetchJson("/api/orderflow/balance/history", AccountBalanceHistory),
   getAutoClose: () => fetchJson("/api/orderflow/autoclose", AutoCloseStatus),
   setAutoClose: (armed: boolean, targetUsd: number | null) =>
     fetchJson("/api/orderflow/autoclose", AutoCloseStatus, {

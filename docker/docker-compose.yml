@@ -26,6 +26,9 @@ services:
       # Raw order-flow tape (JSONL per UTC day) recorded by the ingest route —
       # bind-mounted so backtest data survives image rebuilds.
       - ../data/orderflow_tape:/app/data/orderflow_tape
+      # Account balance/equity series (JSONL per UTC day) feeding the balance
+      # chart — bind-mounted so the curve survives image rebuilds/restarts.
+      - ../data/account_balance:/app/data/account_balance
 
   postgres:
     image: postgres:16-alpine

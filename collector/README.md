@@ -192,6 +192,7 @@ what you are looking at:
 | **DOM depth (sizes)** | broker book | ⚠️ on demo accounts it is often **mirrored** (bid size = ask size at every level) → imbalance is always 0; worse, it can **freeze** for hours. Not used as the quote source when synthesis is on; the ladder isn't shown |
 | **Tape / Footprint / Pressure** | **real times&trades** (flags + `volume_real`) when the feed exposes one (auto-detected); otherwise **derived** from quote ticks | ✅ real when the tape is real; ⚠️ on quote-only feeds direction is sound but **"volume" is a tick count, not contracts** (unless the tick carries a size) |
 | **Open positions** | `mt5.positions_get()` (read-only) | ✅ real (your live entry, P&L, SL/TP, time-in-trade) |
+| **Account balance/equity** | `account_info()` (balance/equity) + `history_deals_get` reconstruction (read-only) | ✅ real — feeds the "Saldo da conta" chart: a per-trade balance step curve (manual + bot, from the deal history) tipped with live equity, pushed on the `balance_history` + `account_pnl` messages (~30s) |
 | **In-trade alerts** | position + flow lean (`pressure_against`, `take_profit`) | ⚠️ deterministic, but only as sound as the synthesized flow it reads — decision support, not advice |
 | **Auto-close / fechar tudo** | `mt5.order_send` (only if `allow_auto_close`) | ✅ real order execution — closes your positions for real |
 | **Breakeven (SL → entry)** | `mt5.order_send` `TRADE_ACTION_SLTP` (only if `allow_auto_close`) | ✅ real order modification — moves your stops for real |

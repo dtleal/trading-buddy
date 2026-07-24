@@ -574,6 +574,10 @@ def _read_account_pnl() -> dict[str, Any] | None:
     None on an MT5 read error so the caller just retries next cycle."""
     acct = mt5.account_info()
     currency = getattr(acct, "currency", None) if acct is not None else None
+    # Live account value from the SAME read: balance = closed/settled (steps on
+    # each trade close), equity = balance + floating P&L of open positions.
+    balance = float(getattr(acct, "balance", 0.0) or 0.0) if acct is not None else 0.0
+    equity = float(getattr(acct, "equity", 0.0) or 0.0) if acct is not None else 0.0
     # server wall-clock now = UTC + the broker offset we already track.
     server_now = (
         datetime.now(timezone.utc) + timedelta(milliseconds=_server_offset_ms)
@@ -614,6 +618,66 @@ def _read_account_pnl() -> dict[str, Any] | None:
         "week": round(week, 2),
         "month": round(month, 2),
         "currency": currency,
+        "balance": round(balance, 2),
+        "equity": round(equity, 2),
+    }
+
+
+def _read_balance_history() -> dict[str, Any] | None:
+    """Per-trade balance curve reconstructed from the broker's DEAL history.
+
+    Walks every closed BUY/SELL deal of the current month (same window as the
+    P&L cards — manual AND bot trades) in server-clock order, stepping a running
+    balance by each deal's net. The running balance is anchored so the LAST step
+    equals the account's current balance, so the curve is exact regardless of
+    deals before the window. Each point carries that deal's `pnl` so the UI can
+    show the variation per trade. Returns None on an MT5 read error."""
+    acct = mt5.account_info()
+    if acct is None:
+        return None
+    currency = getattr(acct, "currency", None)
+    balance = float(getattr(acct, "balance", 0.0) or 0.0)
+    server_now = (
+        datetime.now(timezone.utc) + timedelta(milliseconds=_server_offset_ms)
+    ).replace(tzinfo=None)
+    month_start = server_now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    try:
+        deals = mt5.history_deals_get(month_start, server_now + timedelta(minutes=1))
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("history_deals_get (balance) failed: %s", exc)
+        return None
+    if deals is None:
+        return None
+    trades: list[tuple[float, float]] = []
+    for d in deals:
+        if d.type not in (mt5.DEAL_TYPE_BUY, mt5.DEAL_TYPE_SELL):
+            continue  # skip balance / credit / correction operations
+        net = (
+            float(getattr(d, "profit", 0.0) or 0.0)
+            + float(getattr(d, "commission", 0.0) or 0.0)
+            + float(getattr(d, "swap", 0.0) or 0.0)
+            + float(getattr(d, "fee", 0.0) or 0.0)
+        )
+        trades.append((float(d.time), net))
+    trades.sort(key=lambda x: x[0])
+    # Anchor: balance right before the first in-window deal. Stepping forward
+    # from it lands exactly on the account's current balance.
+    running = balance - sum(net for _, net in trades)
+    points: list[dict[str, Any]] = []
+    for t, net in trades:
+        running += net
+        points.append(
+            {
+                "ts": _server_ms_to_utc_iso(int(t * 1000)),  # deal.time is server-epoch seconds
+                "balance": round(running, 2),
+                "pnl": round(net, 2),
+            }
+        )
+    return {
+        "type": "balance_history",
+        "currency": currency,
+        "balance": round(balance, 2),
+        "points": points,
     }
 
 
@@ -1408,6 +1472,15 @@ def run(cfg: dict[str, Any]) -> None:
                     pnl = None
                 if pnl is not None:
                     ws.send(json.dumps(pnl))
+                # Per-trade balance curve (reconstructed from deal history) —
+                # same slow cadence; only changes when a trade closes.
+                try:
+                    bal_hist = _read_balance_history()
+                except Exception as exc:  # never let it break the stream
+                    logger.debug("balance history read failed: %s", exc)
+                    bal_hist = None
+                if bal_hist is not None:
+                    ws.send(json.dumps(bal_hist))
             # Push open positions (live P&L). Throttled below the tick poll. While
             # a symbol has positions we send every period so P&L stays live; when
             # it goes flat we send one empty list to clear, then stay quiet.

@@ -26,11 +26,15 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, status
 from pydantic import BaseModel
 
+from adapters.balance_history import BalanceHistory
 from adapters.tape_recorder import TapeRecorder
 from api.orderflow_broadcaster import orderflow_broadcaster
 from core.enums import AssetSymbol
 from core.models import (
+    AccountBalanceHistory,
     AccountPnl,
+    BalanceStep,
+    EquityPoint,
     AutoCloseStatus,
     BotStatus,
     BotTrade,
@@ -153,6 +157,17 @@ _mark_last_result: str | None = None
 # Latest realized account P&L (day/week/month) pushed by the collector. None
 # until the first `account_pnl` message arrives.
 _account_pnl: AccountPnl | None = None
+
+
+def _build_balance_history() -> BalanceHistory:
+    """Balance/equity series store — persisted to JSONL unless disabled."""
+    raw = get_settings().account_balance_dir.strip()
+    return BalanceHistory(Path(raw) if raw else None)
+
+
+# Rolling balance/equity series (fed from the `account_pnl` message, which also
+# carries balance/equity). Served over REST to the UI balance chart.
+_balance_history = _build_balance_history()
 
 
 class _AutoCloseState:
@@ -634,6 +649,42 @@ async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
             currency=msg.get("currency") if isinstance(msg.get("currency"), str) else None,
             asof=datetime.now(timezone.utc),
         )
+        # The same message carries the live account balance/equity (added to the
+        # collector's account read). Record a live equity sample when present —
+        # the store coalesces idle samples so a flat account doesn't grow.
+        bal, eq = msg.get("balance"), msg.get("equity")
+        if bal is not None and eq is not None:
+            _balance_history.record_equity(
+                balance=float(bal),
+                equity=float(eq),
+                currency=_account_pnl.currency,
+                ts=_account_pnl.asof or datetime.now(timezone.utc),
+            )
+        return set()
+
+    if mtype == "balance_history":
+        # Per-trade balance curve reconstructed by the collector from the broker
+        # deal history (manual + bot). Replaces the current steps wholesale.
+        steps: list[BalanceStep] = []
+        for raw in msg.get("points", ()):
+            ts = _parse_dt(raw.get("ts"))
+            if ts is None:
+                continue
+            try:
+                steps.append(
+                    BalanceStep(
+                        ts=ts,
+                        balance=float(raw["balance"]),
+                        pnl=float(raw.get("pnl", 0.0) or 0.0),
+                    )
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
+        _balance_history.set_steps(
+            steps,
+            balance=float(msg.get("balance", 0.0) or 0.0),
+            currency=msg.get("currency") if isinstance(msg.get("currency"), str) else None,
+        )
         return set()
 
     if mtype == "autoclose_result":
@@ -871,6 +922,28 @@ async def get_account_pnl() -> AccountPnl:
     """Realized account P&L over the calendar day / week / month (all closed
     trades — manual and bot). All-zero until the collector's first push."""
     return _account_pnl or AccountPnl()
+
+
+@router.get(
+    "/api/orderflow/balance/history",
+    response_model=AccountBalanceHistory,
+    tags=["orderflow"],
+)
+async def get_balance_history() -> AccountBalanceHistory:
+    """Balance chart data: a per-trade balance step curve (from the broker deal
+    history, backfilled for the month) + forward-only live equity samples.
+    Empty until the collector's first push."""
+    steps, equity = _balance_history.snapshot()
+    last_eq: EquityPoint | None = equity[-1] if equity else None
+    asof = last_eq.ts if last_eq else (steps[-1].ts if steps else None)
+    return AccountBalanceHistory(
+        balance_steps=steps,
+        equity_points=equity,
+        balance=_balance_history.balance,
+        equity=last_eq.equity if last_eq else _balance_history.balance,
+        currency=_balance_history.currency,
+        asof=asof,
+    )
 
 
 # --- auto-close (whole-account profit target) --------------------------------

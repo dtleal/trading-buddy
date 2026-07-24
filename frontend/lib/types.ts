@@ -381,6 +381,33 @@ export const AccountPnl = z.object({
 });
 export type AccountPnl = z.infer<typeof AccountPnl>;
 
+/** One closed-trade step in the balance curve (from broker deal history). */
+export const BalanceStep = z.object({
+  ts: z.string(),
+  balance: z.number(), // running balance after this deal
+  pnl: z.number(), // this deal's realized net
+});
+export type BalanceStep = z.infer<typeof BalanceStep>;
+
+/** One live equity sample (balance + floating P&L). */
+export const EquityPoint = z.object({
+  ts: z.string(),
+  equity: z.number(),
+});
+export type EquityPoint = z.infer<typeof EquityPoint>;
+
+/** Balance chart data (/api/orderflow/balance/history): per-trade balance steps
+ * (backfilled from deal history) + forward-only live equity samples. */
+export const AccountBalanceHistory = z.object({
+  balance_steps: z.array(BalanceStep),
+  equity_points: z.array(EquityPoint),
+  balance: z.number(),
+  equity: z.number(),
+  currency: z.string().nullable().default(null),
+  asof: z.string().nullable().default(null),
+});
+export type AccountBalanceHistory = z.infer<typeof AccountBalanceHistory>;
+
 /** State of the explosion-scalper bot (/api/orderflow/bot). */
 export const BotStatus = z.object({
   enabled: z.boolean(), // collector allow_auto_trade AND demo account

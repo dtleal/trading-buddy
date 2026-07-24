@@ -127,6 +127,11 @@ class Settings(BaseSettings):
     # resolve against the backend working dir (in Docker: /app, bind-mounted to
     # the repo's ./data/orderflow_tape). Empty string disables recording.
     orderflow_record_dir: str = "data/orderflow_tape"
+    # Directory for the account balance/equity time-series (one JSONL per UTC
+    # day) that feeds the UI balance chart. Same working-dir semantics as
+    # `orderflow_record_dir`. Empty string keeps the series in memory only
+    # (chart resets on backend restart).
+    account_balance_dir: str = "data/account_balance"
 
     # --- Breakout detector tuning -----------------------------------------
 

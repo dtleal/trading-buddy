@@ -14,6 +14,7 @@ import { BreakoutsPanel } from "@/components/breakouts/BreakoutsPanel";
 import { DayOutlookBanner } from "@/components/dayoutlook/DayOutlookBanner";
 import { OrderFlowSection } from "@/components/orderflow/OrderFlowSection";
 import { PnlCards } from "@/components/orderflow/PnlCards";
+import { AccountBalanceCard } from "@/components/orderflow/AccountBalanceCard";
 import { BriefingPanel } from "@/components/briefing/BriefingPanel";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -40,6 +41,9 @@ export default function Home() {
 
         {/* Perfil do Dia — movement-potential / liquidity gate, top of the fold */}
         <DayOutlookBanner tick={tick} />
+
+        {/* Row 0: account balance/equity curve — sits above the VIX chart */}
+        <AccountBalanceCard />
 
         {/* Row 0: VIX chart on its own (pressure now lives per-column in the flow) */}
         <Card>

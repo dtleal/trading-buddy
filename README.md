@@ -176,6 +176,26 @@ notification on stance changes and zone triggers (edge-triggered, no storm on
 reload) and as **ntfy pushes** (stance changes dedup'd on state in Redis; zone
 triggers re-arm every 30 min).
 
+### Saldo da conta — per-trade balance/equity curve (dashboard)
+
+A card above the VIX chart showing the account's value over time, styled like
+the VIX chart: a single **baseline area** — green above the period's opening
+balance (in profit), red below — with a dashed guide-line at that opening.
+
+- **The curve** is reconstructed from the broker's **DEAL history** (`GET
+  /api/orderflow/balance/history`), so it covers **every closed trade — manual
+  AND bot** (not just the bot; the DB only records bot trades). One step per
+  trade, each carrying that trade's realized net; the running balance is
+  anchored so the last step equals the account's current balance.
+- **The tip** is the live **equity** (balance + floating P&L of open positions),
+  so the final segment moves with the open trade. Header shows equity, the
+  period P&L vs opening, and the floating gap.
+- **Source:** the collector reads `account_info()` (balance/equity) and rebuilds
+  the deal-history curve on its ~30s account push (`balance_history` message).
+  The backend keeps the steps in memory (re-derived each push) and persists the
+  live equity samples to `data/account_balance/` (JSONL per UTC day) so the
+  intraday equity wiggle survives a restart.
+
 ### LLM features (need `CLAUDE_API_KEY`)
 
 - `dtb brief` — pre-market briefing in PT-BR via Claude Opus 4.7.
