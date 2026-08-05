@@ -3,14 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Bot, Zap, SlidersHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { TRACKED_ASSETS } from "@/lib/types";
 import type { BotStatus } from "@/lib/types";
 
-// The three symbols the bot trades, in display order (SPX shows as USA500).
-const LOT_ASSETS: { key: string; label: string }[] = [
-  { key: "USTEC", label: "USTEC" },
-  { key: "SPX", label: "USA500" },
-  { key: "GOLD", label: "GOLD" },
-];
+// The symbols the bot trades, in display order (SPX shows as USA500).
+const LOT_ASSETS = TRACKED_ASSETS;
 
 /**
  * Explosion-scalper bot control. This is the only thing that OPENS positions

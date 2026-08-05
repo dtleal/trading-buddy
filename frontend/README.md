@@ -15,6 +15,26 @@ Next.js 15 + TypeScript + Tailwind 4 web UI for `trading-buddy`.
 - **sonner** for in-app toast alerts
 - **lucide-react** icons
 
+## Screen layout (6 assets)
+
+The dashboard shows all six tracked assets side by side. Two rows carry one tile
+per asset and line up column-for-column, so the eye can drop straight from a
+stance to the flow for the same instrument:
+
+- **VIX × Preço** — six compact tiles, a single row from `2xl` up.
+- **Fluxo** (order flow) — six half-width columns. Inside each column
+  **Atividade** and **Pressão** sit at the top on purpose: those are the two
+  reads that get acted on, so they stay visible across all six columns without
+  scrolling. Bid/Ask, Footprint and Tape follow underneath.
+
+Both grids step `1 → 2 → 3 → 6` columns (`sm` / `lg` / `2xl`), so a phone gets
+one readable column and a wide monitor gets the whole strip in one line. The page
+container is capped at `2100px` to give six columns room to breathe.
+
+The asset list itself comes from `TRACKED_ASSETS` in `lib/types.ts` — every panel
+maps over that one array, so adding an asset is a single edit on the frontend
+side. Keep it in sync with `TRACKED_ASSETS` in `backend/core/enums.py`.
+
 ## Layout
 
 ```

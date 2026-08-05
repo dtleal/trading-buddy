@@ -18,8 +18,9 @@ import { useOrderFlow } from "@/hooks/useOrderFlow";
 import { useAutoClose } from "@/hooks/useAutoClose";
 import { useScalperBot } from "@/hooks/useScalperBot";
 import { useLevelAlerts } from "@/hooks/useLevelAlerts";
-import { computeProximity, livePrice, type LevelProximity } from "@/lib/alerts/levels";
+import { computeProximity, type LevelProximity } from "@/lib/alerts/levels";
 import { cn } from "@/lib/utils";
+import { TRACKED_ASSETS } from "@/lib/types";
 import type {
   AssetSymbol,
   DashboardTick,
@@ -28,16 +29,17 @@ import type {
   SessionLiquidity,
 } from "@/lib/types";
 
-const FLOW_ASSETS: { key: AssetSymbol; label: string }[] = [
-  { key: "USTEC", label: "USTEC" },
-  { key: "SPX", label: "USA500" },
-  { key: "GOLD", label: "GOLD" },
-];
+const FLOW_ASSETS = TRACKED_ASSETS;
 
 /**
- * Live order-flow strip. Renders the 3 assets simultaneously, each as its own
- * column (DOM ladder on top, footprint in the middle, tape at the bottom).
- * Designed to sit above the VIX hero so it is the first thing on screen.
+ * Live order-flow strip. Renders all 6 assets simultaneously, each as its own
+ * half-width column. Column order is deliberate: Atividade and Pressão sit at
+ * the top because those are the two reads the trader acts on, so they stay
+ * visible across all six columns without scrolling; the heavier views (bid/ask,
+ * footprint, tape) follow underneath.
+ *
+ * The grid steps 1 → 2 → 3 → 6 columns so a phone gets one readable column and
+ * a wide monitor gets the whole strip in a single row.
  */
 export function OrderFlowSection({ tick }: { tick: DashboardTick | null }) {
   const { flows, status } = useOrderFlow();
@@ -73,11 +75,15 @@ export function OrderFlowSection({ tick }: { tick: DashboardTick | null }) {
   const account =
     FLOW_ASSETS.map((a) => flows[a.key]?.account).find((n): n is number => n != null) ?? null;
 
-  // Live price vs yesterday's high/low (PDH/PDL). PDH/PDL come from the 5m tick;
-  // the price comes from the real-time book. Fires a loud alert on approach.
+  // Price vs yesterday's high/low (PDH/PDL). Both the level AND the comparison
+  // price come from the same 5m tick (yfinance): the live FTMO book runs at a
+  // broker-specific basis (−32 pts on USA500, −120 on USTEC) that would swamp
+  // the ATR-scaled proximity math. A single snapshot can't rebase the FTMO
+  // price into the index scale — the only same-scale anchor is the tick's own
+  // last_price — so proximity uses that (delayed ~15m, but scale-correct).
   const proximities: LevelProximity[] = FLOW_ASSETS.map((a) => {
     const levels = tick?.intraday_levels?.[a.key];
-    return computeProximity(a.key, a.label, levels, livePrice(flows[a.key], levels));
+    return computeProximity(a.key, a.label, levels, levels?.last_price ?? null);
   }).filter((p): p is LevelProximity => p != null);
   useLevelAlerts(proximities);
 
@@ -90,7 +96,7 @@ export function OrderFlowSection({ tick }: { tick: DashboardTick | null }) {
             <div>
               <CardTitle>Fluxo · Pressão · Bid/Ask · Footprint · Tape</CardTitle>
               <CardDescription>
-                USTEC · USA500 · GOLD em tempo real (MT5)
+                {FLOW_ASSETS.map((a) => a.label).join(" · ")} em tempo real (MT5)
               </CardDescription>
             </div>
           </div>
@@ -117,7 +123,7 @@ export function OrderFlowSection({ tick }: { tick: DashboardTick | null }) {
         <LevelProximityBanner proximities={proximities} />
         <ScalperBotControl status={bot} arm={armBot} saveLots={saveBotLots} disarm={disarmBot} />
         <AutoCloseControl status={autoClose} arm={arm} disarm={disarm} />
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
           {FLOW_ASSETS.map((a) => (
             <SymbolColumn
               key={a.key}
@@ -161,15 +167,15 @@ function SymbolColumn({
   const fresh = ageMs != null && ageMs <= 5_000;
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
-      <div className="flex items-center justify-between">
-        <div className="text-sm font-semibold uppercase tracking-wider text-zinc-200">
+    <div className="flex min-w-0 flex-col gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-2">
+      <div className="flex items-center justify-between gap-1">
+        <div className="truncate text-xs font-semibold uppercase tracking-wider text-zinc-200">
           {label}
         </div>
-        <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider">
+        <div className="flex shrink-0 items-center gap-1 text-[10px] uppercase tracking-wider">
           <span
             className={cn(
-              "inline-block size-2 rounded-full",
+              "inline-block size-2 shrink-0 rounded-full",
               status !== "open"
                 ? "bg-zinc-600"
                 : fresh

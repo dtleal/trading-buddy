@@ -4,12 +4,15 @@
  * The user wants a loud heads-up when the 5m is *approaching* yesterday's
  * extreme — that's where the market tends to react (rejection or breakout).
  *
- * PDH/PDL come from the 5m dashboard tick (`intraday_levels`); the live price
- * comes from the real-time order-flow book (freshest), falling back to the
- * tick's `last_price`. Distance is scaled by ATR so one threshold works across
- * USTEC (~20k), USA500 (~6k) and GOLD (~3k).
+ * PDH/PDL and the comparison price BOTH come from the 5m dashboard tick
+ * (`intraday_levels`, yfinance). We deliberately do NOT use the live FTMO book
+ * here: the CFD feed runs at a broker-specific basis (−32 pts on USA500, −120
+ * on USTEC) versus the index, and mixing that price with a yfinance level would
+ * swamp the ATR-scaled proximity — the alert would never fire near the true
+ * level. Distance is scaled by ATR so one threshold works across USTEC (~20k),
+ * USA500 (~6k) and GOLD (~3k).
  */
-import type { AssetSymbol, IntradayLevels, OrderFlowSnapshot } from "@/lib/types";
+import type { AssetSymbol, IntradayLevels } from "@/lib/types";
 
 /** Within this many ATRs of the level → "approaching" (loud amber). */
 export const NEAR_ATR = 0.3;
@@ -34,19 +37,6 @@ export interface LevelProximity {
   tier: ProximityTier;
   /** True once the price has traded through the level. */
   broken: boolean;
-}
-
-/** Best live price for a symbol: book mid → last tape print → tick last_price. */
-export function livePrice(
-  flow: OrderFlowSnapshot | undefined,
-  levels: IntradayLevels | undefined,
-): number | null {
-  const bid = flow?.book?.bids?.[0]?.price ?? null;
-  const ask = flow?.book?.asks?.[0]?.price ?? null;
-  if (bid != null && ask != null) return (bid + ask) / 2;
-  const lastTrade = flow?.recent_trades?.at(-1)?.price ?? null;
-  if (lastTrade != null) return lastTrade;
-  return levels?.last_price ?? null;
 }
 
 function tierFor(atrGap: number): ProximityTier {

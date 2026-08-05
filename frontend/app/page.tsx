@@ -35,7 +35,10 @@ export default function Home() {
     <>
       <Header status={status} lastTickAt={tick?.timestamp ?? null} />
 
-      <main className="mx-auto w-full max-w-[1600px] flex-1 px-6 py-6 space-y-6">
+      {/* Wider than the old 1600px cap: the flow strip and the VIX × price row
+          both lay six assets across, so they need the extra room on a big
+          monitor to stay in a single line. */}
+      <main className="mx-auto w-full max-w-[2100px] flex-1 px-4 py-6 space-y-6">
         {/* Resultado realizado — dia / semana / mês, no topo da tela */}
         <PnlCards />
 

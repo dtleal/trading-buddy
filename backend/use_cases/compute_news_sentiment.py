@@ -10,7 +10,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 
-from core.enums import AssetSymbol, SentimentLabel
+from core.enums import TRACKED_ASSETS, AssetSymbol, SentimentLabel
 from core.interfaces import SentimentClassifier
 from core.models import NewsItem
 
@@ -33,7 +33,7 @@ class ComputeNewsSentimentUseCase:
     async def execute(self, items: list[NewsItem]) -> dict[AssetSymbol, SentimentBias]:
         if not items:
             neutral = SentimentBias(score=50.0, classified_count=0, rationale=["no recent news"])
-            return {asset: neutral for asset in AssetSymbol}
+            return {asset: neutral for asset in TRACKED_ASSETS}
 
         classifications = await asyncio.gather(
             *(self._classifier.classify(self._text_for(i)) for i in items)
@@ -50,7 +50,7 @@ class ComputeNewsSentimentUseCase:
             f"{len(classifications) - positive - negative} neutral"
         ]
         result = SentimentBias(score=score, classified_count=len(items), rationale=rationale)
-        return {asset: result for asset in AssetSymbol}
+        return {asset: result for asset in TRACKED_ASSETS}
 
     @staticmethod
     def _text_for(item: NewsItem) -> str:

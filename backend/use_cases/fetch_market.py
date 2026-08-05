@@ -7,19 +7,13 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from core.enums import AssetSymbol, TermStructure, VixRegime
+from core.enums import TRACKED_ASSETS, AssetSymbol, TermStructure, VixRegime
 from core.interfaces import CacheStore, PricesGateway
 from core.models import MarketSnapshot, PriceQuote, VixSnapshot
 
 logger = logging.getLogger(__name__)
 
 CACHE_TTL_SECONDS = 60
-ASSETS: tuple[AssetSymbol, ...] = (
-    AssetSymbol.USTEC,
-    AssetSymbol.SPX,
-    AssetSymbol.GOLD,
-    AssetSymbol.BITCOIN,
-)
 
 
 def _classify_vix_regime(value: float) -> VixRegime:
@@ -72,14 +66,14 @@ class FetchMarketSnapshotUseCase:
 
     async def execute(self) -> MarketSnapshot:
         asset_results, vix, vix9d, vix3m = await asyncio.gather(
-            asyncio.gather(*(self._quote_with_ma(a.value, with_ma=True) for a in ASSETS)),
+            asyncio.gather(*(self._quote_with_ma(a.value, with_ma=True) for a in TRACKED_ASSETS)),
             self._quote_with_ma("VIX", with_ma=False),
             self._quote_with_ma("VIX9D", with_ma=False),
             self._quote_with_ma("VIX3M", with_ma=False),
         )
 
         assets: dict[AssetSymbol, PriceQuote] = {
-            symbol: quote for symbol, quote in zip(ASSETS, asset_results)
+            symbol: quote for symbol, quote in zip(TRACKED_ASSETS, asset_results)
         }
 
         vix_snapshot = VixSnapshot(

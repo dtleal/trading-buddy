@@ -7,8 +7,8 @@ symbol; each browser WS connection registers a `subscribe()` that first
 replays the latest snapshot per symbol, then streams live updates.
 
 Kept on a SEPARATE channel from the dashboard tick on purpose: order flow is
-high-frequency and only covers USTEC / SPX / GOLD, so we never want it
-inflating the 5m tick payload or coupling its lifecycle to the data loop.
+high-frequency and only covers the ORDERFLOW_SYMBOLS subset, so we never want
+it inflating the 5m tick payload or coupling its lifecycle to the data loop.
 """
 
 from __future__ import annotations

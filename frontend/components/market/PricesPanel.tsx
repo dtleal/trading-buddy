@@ -2,6 +2,7 @@
 
 import { ArrowDown, ArrowUp, Minus } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { TRACKED_ASSETS } from "@/lib/types";
 import type { DashboardTick, PriceQuote } from "@/lib/types";
 import { cn, fmtPct, fmtPrice } from "@/lib/utils";
 
@@ -11,12 +12,13 @@ export function PricesPanel({ tick }: { tick: DashboardTick | null }) {
       <CardHeader>
         <CardTitle>Ativos</CardTitle>
         <CardDescription>
-          USTEC · SPX · GOLD · BITCOIN — preço atual, variação do dia e distância da MM 200 (daily)
+          {TRACKED_ASSETS.map((a) => a.label).join(" · ")} — preço atual, variação do dia e
+          distância da MM 200 (daily)
         </CardDescription>
       </CardHeader>
       <CardContent>
         {tick ? (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
             {Object.entries(tick.market.assets).map(([sym, quote]) => (
               <AssetCard key={sym} symbol={sym} quote={quote} />
             ))}

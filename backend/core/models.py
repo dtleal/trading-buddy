@@ -340,7 +340,8 @@ class LLMOutput(_Frozen):
 # terminal on Windows, reads the broker's depth-of-market + trade ticks, and
 # streams them to the backend ingest WebSocket. The backend aggregates the raw
 # stream into the three flow-trader views below and fans them out to browsers
-# over `/ws/orderflow`. Only USTEC / SPX / GOLD carry order flow (no BITCOIN).
+# over `/ws/orderflow`. Which symbols carry flow is set by ORDERFLOW_SYMBOLS
+# (see settings.py) and must match the collector's own symbol map.
 
 
 TradeSide = Literal["buy", "sell", "unknown"]

@@ -1,6 +1,8 @@
 # trading-buddy
 
-Macro context co-pilot for day trading **USTEC (Nasdaq 100), S&P 500 and Gold**.
+Macro context co-pilot for day trading the six FTMO instruments **USTEC
+(Nasdaq 100), USA500 (S&P 500), GOLD, US30 (Dow Jones), USOIL (WTI crude) and
+US2000 (Russell 2000)**.
 
 Two surfaces:
 - **CLI dashboard** (`dtb run`) — Rich-based terminal view, same data, no browser needed.
@@ -23,10 +25,41 @@ recordings — see "Raw tape recording" in [`backend/README.md`](backend/README.
 
 ## What it does
 
+### Tracked assets
+
+Six instruments, in screen order. The `backend` name is what the code and the
+API use; the `MT5` name is how FTMO spells it, which is what you see on your
+chart:
+
+| backend | UI label | MT5 (FTMO) | Yahoo (daily / intraday) |
+|---|---|---|---|
+| `USTEC` | USTEC | `US100.cash` | `^NDX` / `NQ=F` |
+| `SPX` | USA500 | `US500.cash` | `^GSPC` / `ES=F` |
+| `GOLD` | GOLD | `XAUUSD` | `GC=F` |
+| `US30` | US30 | `US30.cash` | `^DJI` / `YM=F` |
+| `USOIL` | USOIL | `USOIL.cash` | `CL=F` |
+| `US2000` | US2000 | `US2000.cash` | `^RUT` / `RTY=F` |
+
+Bitcoin was dropped to free up screen space. Its `AssetSymbol.BITCOIN` member is
+deliberately kept in the enum so snapshots saved before the change still load,
+but nothing tracks it any more.
+
+**To add or remove an instrument**, edit `TRACKED_ASSETS` in
+`backend/core/enums.py` and the matching table in `frontend/lib/types.ts`. Four
+other places also need an entry, and `tests/unit/test_tracked_assets.py` fails
+loudly if you miss one:
+
+- `YAHOO_TICKERS` (+ `INTRADAY_TICKERS` for a cash index) in `prices_yfinance.py`
+- `_DEFAULT_LOTS` in `api/routes/orderflow.py` — a symbol missing here is
+  **skipped by the scalper bot** entirely
+- `DEFAULT_LOTS` / `DEFAULT_USD_PER_POINT` in `replay_scalper.py`
+- `ORDERFLOW_SYMBOLS` in `.env`, plus a `symbols[]` mapping in the collector's
+  `config.json` (see [`collector/README.md`](collector/README.md))
+
 ### Macro & sentiment layer (5-min cadence)
 
 - Pulls spot prices and the **daily 200-period** moving average for USTEC, SPX,
-  Gold, VIX, VIX9D and VIX3M.
+  GOLD, US30, USOIL, US2000, VIX, VIX9D and VIX3M.
 - Aggregates today's high/medium-impact US economic events (FOMC, CPI, NFP,
   PCE, PPI, Jobless Claims, Consumer Confidence…) with countdowns. Each event
   is shown in both **UTC and Brazil time (BRT)**; events already released are
@@ -44,8 +77,10 @@ recordings — see "Raw tape recording" in [`backend/README.md`](backend/README.
 ### Intraday layer (`dtb signal`, also feeds the dashboard)
 
 - Pulls 5-minute OHLCV bars from yfinance (~15-min delay on free tier).
-  Intraday bars for **USTEC/SPX** come from the continuous **futures**
-  (`NQ=F`/`ES=F`), not the cash index (`^NDX`/`^GSPC`). The cash indices only
+  Intraday bars for the cash indices (**USTEC / SPX / US30 / US2000**) come from
+  the continuous **futures** (`NQ=F` / `ES=F` / `YM=F` / `RTY=F`), not the cash
+  index (`^NDX` / `^GSPC` / `^DJI` / `^RUT`). GOLD and USOIL are already futures
+  (`GC=F` / `CL=F`). The cash indices only
   print during RTH (~77 bars/day), so a 200-bar 5m MA reaches back ~2.5 trading
   days and won't match the near-24h instrument a trader actually watches
   (futures: ~213 bars/day → 200 bars ≈ 0.7 day). Spot quotes and the daily
@@ -58,14 +93,15 @@ recordings — see "Raw tape recording" in [`backend/README.md`](backend/README.
 - **Standard 5m read** surfaced per asset in the UI ("Níveis 5m" panel): price
   vs **VWAP**, **EMA 200** and **SMA 200**. When the two 200s converge (gap
   < 0.1×ATR) they flag **lateral/range**; price clearly above/below both flags
-  trend. Computed for every tracked asset (USTEC, SPX, GOLD, Bitcoin).
+  trend. Computed for every tracked asset (USTEC, SPX, GOLD, US30, USOIL,
+  US2000).
 - Position sizing helper when `ACCOUNT_SIZE_USD > 0` (uses NQ/ES/GC contract
   multipliers by default; override with `--multiplier`).
 
 ### Breakout detector (5m / 15m / 30m / 60m / 4h)
 
-A Donchian-channel breakout scanner runs on every tick across USTEC, SPX
-and GOLD, on five timeframes (5m / 15m / 30m / 60m / 4h — all resampled
+A Donchian-channel breakout scanner runs on every tick across all six tracked
+assets, on five timeframes (5m / 15m / 30m / 60m / 4h — all resampled
 in memory from a single 5m fetch per asset, no extra yfinance calls).
 5m is included because the user trades on the 5m chart; the filters below
 keep noise low enough that even 5m signals are tradable references.
@@ -353,7 +389,8 @@ dtb run                              Live dashboard loop (default container CMD)
 dtb brief                            Macro briefing via Claude
 dtb explain --event CPI [--mode pre|post]
 dtb snapshot [--with-prompt|--no-prompt]   Tick payload, no LLM
-dtb signal --asset USTEC|SPX|GOLD          Intraday levels + structure stop
+dtb signal --asset USTEC|SPX|GOLD|US30|USOIL|US2000
+                                           Intraday levels + structure stop
     [--interval 5m] [--lookback 5]
     [--risk-pct 2.0] [--account-size 50000] [--multiplier 20]
 dtb replay data/orderflow_tape/tape-*.jsonl   Backtest the scalper on a recorded tape

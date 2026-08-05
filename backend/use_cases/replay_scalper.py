@@ -58,11 +58,17 @@ from use_cases.trade_signal import (
 
 # USD gained per 1.0 price-unit move per 1.0 lot. MUST match the broker's
 # contract spec for absolute P&L (and thus the USD thresholds) to be right.
-# FTMO .cash defaults: indices 1 lot = 1 USD/point; XAUUSD 1 lot = 100 oz.
+# FTMO .cash defaults: indices 1 lot = 1 USD/point; the commodity CFDs are
+# 100 units per lot (XAUUSD = 100 oz, USOIL = 100 barrels), so they earn 100 USD
+# per 1.00 price unit. Confirm against the broker's contract spec before
+# trusting absolute P&L on the newer instruments.
 DEFAULT_USD_PER_POINT: dict[AssetSymbol, float] = {
     AssetSymbol.USTEC: 1.0,
     AssetSymbol.SPX: 1.0,
     AssetSymbol.GOLD: 100.0,
+    AssetSymbol.US30: 1.0,
+    AssetSymbol.USOIL: 100.0,
+    AssetSymbol.US2000: 1.0,
 }
 
 # Live per-symbol sizes (mirrors _DEFAULT_LOTS in the bot route).
@@ -70,6 +76,9 @@ DEFAULT_LOTS: dict[AssetSymbol, float] = {
     AssetSymbol.USTEC: 2.0,
     AssetSymbol.SPX: 2.0,
     AssetSymbol.GOLD: 0.12,
+    AssetSymbol.US30: 1.0,
+    AssetSymbol.USOIL: 0.1,
+    AssetSymbol.US2000: 1.0,
 }
 
 
@@ -440,13 +449,21 @@ class ScalperReplay:
 
 
 def iter_tape(paths: Iterable[Path]) -> Iterator[dict[str, Any]]:
-    """Yield recorded lines from tape JSONL files in the given order."""
+    """Yield recorded lines from tape JSONL files in the given order.
+
+    Skips lines that are not valid JSON — a collector restart can truncate the
+    line it was writing, and one bad line must not kill a whole replay.
+    """
     for path in paths:
         with path.open(encoding="utf-8") as fh:
             for line in fh:
                 line = line.strip()
-                if line:
+                if not line:
+                    continue
+                try:
                     yield json.loads(line)
+                except json.JSONDecodeError:
+                    continue
 
 
 def replay(paths: Iterable[Path], params: ReplayParams | None = None) -> ReplayReport:

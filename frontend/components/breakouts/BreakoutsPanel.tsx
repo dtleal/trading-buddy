@@ -5,6 +5,7 @@ import { ArrowDownToLine, ArrowUpFromLine, History, Zap } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { TRACKED_ASSETS } from "@/lib/types";
 import type {
   AssetSymbol as AssetSymbolType,
   Breakout,
@@ -14,7 +15,7 @@ import type {
 import { cn } from "@/lib/utils";
 
 const TIMEFRAMES: TimeframeType[] = ["5m", "15m", "30m", "60m", "4h"];
-const ASSETS: AssetSymbolType[] = ["USTEC", "SPX", "GOLD", "BITCOIN"];
+const ASSETS: AssetSymbolType[] = TRACKED_ASSETS.map((a) => a.key);
 
 // Breakouts older than this are stale for a day-trader — they don't open a new
 // decision window. Hidden by default; revealed via the "histórico" toggle.

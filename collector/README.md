@@ -227,12 +227,15 @@ For exchange-grade footprint/delta you'd switch the backend to a real CME feed
 | `allow_auto_close` | **Execution gate** (default `false` = strictly read-only). `true` lets this collector place **closing** orders when the backend profit target fires or you click "fechar tudo". Only enable on a machine/account where you accept automated execution — **test on DEMO first**. Never opens positions. |
 | `allow_auto_trade` | **OPENING gate** for the explosion-scalper bot (default `false`). `true` lets the bot OPEN positions on bursts — but the collector **refuses to open unless the account is DEMO** (or `allow_live_auto_trade: true`, below), no matter this flag, and the bot also requires `allow_auto_close: true` (it must be able to close to exit/stop) or the backend won't arm it. Requires AutoTrading on in MT5. **Also gates the [chart marker](#chart-marker-mark-a-recommended-entry)** — a user-initiated min-lot pending order which, unlike the bot, is **not** demo-restricted. |
 | `allow_live_auto_trade` | **LIVE override** for the scalper bot (default `false` = demo-only, safe). `true` lets the bot OPEN **real** positions on a **non-demo** account (e.g. an FTMO challenge, which MT5 reports as CONTEST/REAL — not DEMO). Only meaningful with `allow_auto_trade: true`. **Danger:** real orders on a funded/challenge account can count against its rules. Size the lots down (per-asset, in the UI) — 0.01 is the broker minimum — before enabling. |
-| `symbols[]` | Map each backend symbol to **your broker's exact MT5 name**. `backend` must be one of `USTEC` / `SPX` / `GOLD`. `mt5` is whatever your broker calls it (`US100.cash`, `Usa500`, `XAUUSD`, …). |
-| `symbols[].footprint_tick` | Optional price step used to group footprint rows (e.g. `1.0` for an index ~28000, `0.1` for gold). Omit to auto-derive from the broker tick size. Keeps a continuous quote feed from fragmenting into thousands of cells. |
+| `symbols[]` | Map each backend symbol to **your broker's exact MT5 name**. `backend` must be one of `USTEC` / `SPX` / `GOLD` / `US30` / `USOIL` / `US2000`, and the list must cover every entry in the backend's `ORDERFLOW_SYMBOLS`. `mt5` is whatever your broker calls it — on FTMO: `US100.cash`, `US500.cash`, `XAUUSD`, `US30.cash`, `USOIL.cash`, `US2000.cash`. |
+| `symbols[].footprint_tick` | Optional price step used to group footprint rows (e.g. `1.0` for an index ~28000, `0.1` for gold and US2000, `0.01` for oil). Omit to auto-derive from the broker tick size. Keeps a continuous quote feed from fragmenting into thousands of cells. |
 | `mt5.sources[]` | Priority list of terminals; each `{name, path}` is tried in order until one attaches. `path` is the `terminal64.exe`. Add `login`/`password`/`server` only to drive a specific account. |
 
-> ⚠️ The backend tracks **SPX** (not "USA500"). Map your broker's S&P symbol to
-> `"backend": "SPX"`. Same for gold → `"backend": "GOLD"`.
+> ⚠️ The backend name is not always the broker name. It tracks **SPX** (the UI
+> shows it as "USA500"), so map your broker's S&P symbol to `"backend": "SPX"`.
+> Same idea for gold → `"backend": "GOLD"` even when MT5 calls it `XAUUSD`.
+> `US30` / `USOIL` / `US2000` happen to match FTMO's names apart from the
+> `.cash` suffix.
 
 `config.json` holds your ingest token and is **git-ignored** — never commit it.
 `config.example.json` is the committed template.
@@ -381,7 +384,7 @@ In the backend `.env`:
 ORDERFLOW_ENABLED=true
 ORDERFLOW_INGEST_TOKEN=<long-random-string-same-as-collector-token>
 # optional overrides:
-# ORDERFLOW_SYMBOLS=USTEC,SPX,GOLD
+# ORDERFLOW_SYMBOLS=USTEC,SPX,GOLD,US30,USOIL,US2000
 # ORDERFLOW_FOOTPRINT_INTERVAL_SECONDS=60
 ```
 

@@ -33,11 +33,11 @@ from core.enums import AssetSymbol
 from core.models import (
     AccountBalanceHistory,
     AccountPnl,
-    BalanceStep,
-    EquityPoint,
     AutoCloseStatus,
+    BalanceStep,
     BotStatus,
     BotTrade,
+    EquityPoint,
     OrderFlowSnapshot,
     Position,
     SessionLiquidity,
@@ -338,11 +338,20 @@ class _BotState:
         self.last_result: str | None = None
 
 
-# Default per-symbol sizes (Diego's: index 2.0 lots, gold 0.12).
+# Default per-symbol sizes. USTEC / SPX / GOLD are Diego's tested sizes (index
+# 2.0 lots, gold 0.12). The three newer instruments start deliberately small —
+# half an index lot, and only 0.1 on oil, whose per-lot point value is much
+# larger — because their sizing has not been traded yet. A symbol missing from
+# this map is skipped by the bot entirely, so these values are what let it work
+# the new instruments at all. Check them in the UI before arming on a funded
+# account; the per-symbol inputs in the bot panel overwrite them at runtime.
 _DEFAULT_LOTS: dict[AssetSymbol, float] = {
     AssetSymbol.USTEC: 2.0,
     AssetSymbol.SPX: 2.0,
     AssetSymbol.GOLD: 0.12,
+    AssetSymbol.US30: 1.0,
+    AssetSymbol.USOIL: 0.1,
+    AssetSymbol.US2000: 1.0,
 }
 
 _bot = _BotState()

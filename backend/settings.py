@@ -106,9 +106,10 @@ class Settings(BaseSettings):
     # socket. Treat like a password (long random string). If empty while
     # orderflow_enabled is True, the ingest socket refuses every connection.
     orderflow_ingest_token: SecretStr | None = None
-    # Symbols that carry order flow. Subset of AssetSymbol — BITCOIN excluded
-    # on purpose (the user trades flow on indices + gold only).
-    orderflow_symbols: str = "USTEC,SPX,GOLD"
+    # Symbols that carry order flow. Subset of AssetSymbol — the six FTMO
+    # instruments the trader works. Each one also needs a matching entry in the
+    # Windows collector's config.json (backend name → MT5 name).
+    orderflow_symbols: str = "USTEC,SPX,GOLD,US30,USOIL,US2000"
     # Footprint bar width in seconds (60 = 1-minute footprint bars).
     orderflow_footprint_interval_seconds: int = 60
     # How many footprint bars to retain / broadcast per symbol.

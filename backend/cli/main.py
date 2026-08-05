@@ -18,7 +18,7 @@ from api.broadcaster import broadcaster
 from cli.dashboard import render_tick
 from cli.signal_render import render_signal
 from container import Container, build_container
-from core.enums import AssetSymbol
+from core.enums import TRACKED_ASSETS, AssetSymbol
 from settings import get_settings
 from use_cases.compute_intraday_levels import ComputeIntradayLevelsUseCase
 from use_cases.generate_briefing import (
@@ -37,7 +37,9 @@ DEFAULT_CONTRACT_MULTIPLIER: dict[str, float] = {
     "USTEC": 20.0,  # NQ E-mini = $20/pt
     "SPX": 50.0,  # ES E-mini = $50/pt
     "GOLD": 100.0,  # GC full = $100/pt; MGC mini = $10
-    "BITCOIN": 1.0,  # BTC CFD = $1/pt (1 contract = 1 BTC); MBT future = 0.1
+    "US30": 5.0,  # YM E-mini = $5/pt
+    "USOIL": 1000.0,  # CL = 1000 barrels, so $1000 per $1.00 move
+    "US2000": 50.0,  # RTY E-mini = $50/pt
 }
 
 app = typer.Typer(add_completion=False, help="day-trading-buddy CLI")
@@ -231,7 +233,9 @@ async def _snapshot(include_prompt: bool) -> None:
 
 @app.command()
 def signal(
-    asset: str = typer.Option(..., "--asset", "-a", help="Asset: USTEC | SPX | GOLD | BITCOIN"),
+    asset: str = typer.Option(
+        ..., "--asset", "-a", help="Asset: USTEC | SPX | GOLD | US30 | USOIL | US2000"
+    ),
     interval: str = typer.Option("5m", "--interval", "-i", help="Bar interval (5m default)"),
     lookback_days: int = typer.Option(
         5,
@@ -255,8 +259,8 @@ def signal(
     settings = get_settings()
     _configure_logging(settings.log_level)
     asset_upper = asset.upper()
-    if asset_upper not in {a.value for a in AssetSymbol}:
-        raise typer.BadParameter(f"asset must be one of: {[a.value for a in AssetSymbol]}")
+    if asset_upper not in {a.value for a in TRACKED_ASSETS}:
+        raise typer.BadParameter(f"asset must be one of: {[a.value for a in TRACKED_ASSETS]}")
     asyncio.run(
         _signal(
             asset_upper,

@@ -7,8 +7,29 @@
  */
 import { z } from "zod";
 
-export const AssetSymbol = z.enum(["USTEC", "SPX", "GOLD", "BITCOIN"]);
+// BITCOIN is retired (nothing sends it any more) but stays in the enum so a
+// snapshot saved before it was dropped still parses instead of failing loudly.
+export const AssetSymbol = z.enum([
+  "USTEC",
+  "SPX",
+  "GOLD",
+  "US30",
+  "USOIL",
+  "US2000",
+  "BITCOIN",
+]);
 export type AssetSymbol = z.infer<typeof AssetSymbol>;
+
+/** The assets the UI shows, in display order. `label` is how the broker spells
+ *  it, which is what the trader reads on their MT5 chart. */
+export const TRACKED_ASSETS: { key: AssetSymbol; label: string }[] = [
+  { key: "USTEC", label: "USTEC" },
+  { key: "SPX", label: "USA500" },
+  { key: "GOLD", label: "GOLD" },
+  { key: "US30", label: "US30" },
+  { key: "USOIL", label: "USOIL" },
+  { key: "US2000", label: "US2000" },
+];
 
 export const VixRegime = z.enum(["low", "mid", "high"]);
 export type VixRegime = z.infer<typeof VixRegime>;

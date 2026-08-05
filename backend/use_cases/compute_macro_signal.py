@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from core.enums import AssetSymbol
+from core.enums import RISK_ON_ASSETS, TRACKED_ASSETS, AssetSymbol
 from core.models import MacroSnapshot
 
 
@@ -42,13 +42,12 @@ class ComputeMacroSignalUseCase:
         ten_year = snapshot.indicators.get("DGS10")
         dxy = snapshot.indicators.get("DTWEXBGS")
 
-        for asset in AssetSymbol:
+        for asset in TRACKED_ASSETS:
             score = 50.0
             rationale: list[str] = []
-            # Bitcoin trades as a risk-on asset — it tracks the tech indices
-            # (rising yields / strong USD hurt it, rate cuts help it), so it
-            # rides the same rules as the stock indices here.
-            is_risk_on = asset in {AssetSymbol.USTEC, AssetSymbol.SPX, AssetSymbol.BITCOIN}
+            # Rising yields / a strong USD hurt the risk-on assets and help
+            # gold, so both groups ride opposite sides of the same rules.
+            is_risk_on = asset in RISK_ON_ASSETS
 
             if ten_year is not None:
                 sign = _delta_sign(ten_year.delta_1w, threshold=0.05)

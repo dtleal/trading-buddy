@@ -28,7 +28,7 @@ export function IntradayLevelsPanel({ tick }: { tick: DashboardTick | null }) {
         {levels.length === 0 ? (
           <p className="text-sm text-zinc-500">Sem dados intraday neste tick…</p>
         ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
             {levels.map((lv) => (
               <LevelCard key={lv.symbol} lv={lv} />
             ))}

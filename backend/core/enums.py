@@ -6,12 +6,51 @@ from enum import Enum
 
 
 class AssetSymbol(str, Enum):
-    """Tradable assets the buddy tracks."""
+    """Tradable assets the buddy tracks.
 
-    USTEC = "USTEC"  # Nasdaq 100 (Yahoo: ^NDX)
-    SPX = "SPX"  # S&P 500 (Yahoo: ^GSPC)
+    `BITCOIN` is kept here on purpose even though nothing tracks it any more:
+    snapshots saved before it was dropped still carry the string, so removing
+    the member would make those old rows fail to parse. The live asset list is
+    `TRACKED_ASSETS` below — that is what the dashboard reads.
+    """
+
+    USTEC = "USTEC"  # Nasdaq 100 (Yahoo: ^NDX / NQ=F intraday)
+    SPX = "SPX"  # S&P 500 (Yahoo: ^GSPC / ES=F intraday)
     GOLD = "GOLD"  # Gold futures (Yahoo: GC=F)
-    BITCOIN = "BITCOIN"  # Bitcoin spot (Yahoo: BTC-USD) — risk-on, tracks tech
+    US30 = "US30"  # Dow Jones 30 (Yahoo: ^DJI / YM=F intraday)
+    USOIL = "USOIL"  # WTI crude oil (Yahoo: CL=F)
+    US2000 = "US2000"  # Russell 2000 (Yahoo: ^RUT / RTY=F intraday)
+    BITCOIN = "BITCOIN"  # retired — see the class docstring
+
+
+"""The assets the dashboard tracks, in display order.
+
+Every per-asset loop must walk this tuple rather than `AssetSymbol` itself,
+otherwise the retired `BITCOIN` member reappears in the output with empty
+scores. Bitcoin was dropped to make screen room for the three FTMO instruments
+the trader actually works (US30.cash / USOIL.cash / US2000.cash)."""
+TRACKED_ASSETS: tuple[AssetSymbol, ...] = (
+    AssetSymbol.USTEC,
+    AssetSymbol.SPX,
+    AssetSymbol.GOLD,
+    AssetSymbol.US30,
+    AssetSymbol.USOIL,
+    AssetSymbol.US2000,
+)
+
+"""Assets that fall when fear rises. The stock indices are the obvious ones;
+oil belongs here too because a fear spike is read as a demand hit. Everything
+outside this set is treated as risk-off (gold catches a bid when stress rises),
+so the bias use cases only have to agree on this one list."""
+RISK_ON_ASSETS: frozenset[AssetSymbol] = frozenset(
+    {
+        AssetSymbol.USTEC,
+        AssetSymbol.SPX,
+        AssetSymbol.US30,
+        AssetSymbol.US2000,
+        AssetSymbol.USOIL,
+    }
+)
 
 
 class VolatilityIndex(str, Enum):

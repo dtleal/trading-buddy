@@ -23,6 +23,9 @@ YAHOO_TICKERS: dict[str, str] = {
     "USTEC": "^NDX",
     "SPX": "^GSPC",
     "GOLD": "GC=F",
+    "US30": "^DJI",
+    "USOIL": "CL=F",
+    "US2000": "^RUT",
     "BITCOIN": "BTC-USD",
     "VIX": "^VIX",
     "VIX9D": "^VIX9D",
@@ -39,6 +42,9 @@ YAHOO_TICKERS: dict[str, str] = {
 INTRADAY_TICKERS: dict[str, str] = {
     "USTEC": "NQ=F",  # Nasdaq 100 future (~24h) instead of ^NDX cash
     "SPX": "ES=F",  # S&P 500 future (~24h) instead of ^GSPC cash
+    "US30": "YM=F",  # Dow 30 future (~24h) instead of ^DJI cash
+    "US2000": "RTY=F",  # Russell 2000 future (~24h) instead of ^RUT cash
+    # USOIL needs no override: CL=F is already the ~23h continuous future.
 }
 
 

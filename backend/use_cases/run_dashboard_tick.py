@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Callable
 
 from adapters.prices_yfinance import YFinancePricesGateway
-from core.enums import AssetSymbol, Timeframe
+from core.enums import TRACKED_ASSETS, AssetSymbol, Timeframe
 from core.interfaces import SnapshotRepository
 from core.models import (
     BiasReport,
@@ -98,12 +98,7 @@ class RunDashboardTickUseCase:
         assess_vix_price: AssessVixPriceUseCase | None = None,
         push_vix_price_alerts: PushVixPriceAlertsUseCase | None = None,
         liquidity_provider: Callable[[], dict[AssetSymbol, SessionLiquidity]] | None = None,
-        intraday_assets: tuple[AssetSymbol, ...] = (
-            AssetSymbol.USTEC,
-            AssetSymbol.SPX,
-            AssetSymbol.GOLD,
-            AssetSymbol.BITCOIN,
-        ),
+        intraday_assets: tuple[AssetSymbol, ...] = TRACKED_ASSETS,
     ) -> None:
         self._fetch_market = fetch_market
         self._fetch_calendar = fetch_calendar

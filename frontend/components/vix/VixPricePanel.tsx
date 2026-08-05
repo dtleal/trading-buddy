@@ -3,6 +3,7 @@
 import { ArrowDownRight, ArrowUpRight, PauseCircle, MinusCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { TRACKED_ASSETS } from "@/lib/types";
 import type { DashboardTick, VixPriceSignal } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -15,7 +16,11 @@ import { cn } from "@/lib/utils";
  * Silent (renders nothing) until the first tick carries signals.
  */
 export function VixPricePanel({ tick }: { tick: DashboardTick | null }) {
-  const signals = Object.values(tick?.vix_price ?? {});
+  // Ordered to match the order-flow strip below, so the same asset sits in the
+  // same position in both rows and the eye can move straight down.
+  const signals = TRACKED_ASSETS.map((a) => tick?.vix_price?.[a.key]).filter(
+    (s): s is VixPriceSignal => s != null,
+  );
   if (signals.length === 0) return null;
 
   return (
@@ -27,7 +32,8 @@ export function VixPricePanel({ tick }: { tick: DashboardTick | null }) {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {/* One tile per asset, all six on a single row from 2xl up. */}
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
           {signals.map((sig) => (
             <StanceTile key={sig.asset} sig={sig} />
           ))}
@@ -42,26 +48,26 @@ function StanceTile({ sig }: { sig: VixPriceSignal }) {
   const Icon = s.icon;
 
   return (
-    <div className={cn("rounded-lg border border-zinc-800 p-3 space-y-2", s.bg)}>
-      <div className="flex flex-wrap items-center gap-2">
-        <Icon className={cn("size-4 shrink-0", s.icon_color)} />
-        <span className="text-sm font-semibold text-zinc-100">{sig.asset}</span>
-        <Badge tone={s.tone}>{s.label}</Badge>
+    <div className={cn("min-w-0 space-y-1.5 rounded-lg border border-zinc-800 p-2", s.bg)}>
+      <div className="flex items-center gap-1.5">
+        <Icon className={cn("size-3.5 shrink-0", s.icon_color)} />
+        <span className="truncate text-xs font-semibold text-zinc-100">{sig.asset}</span>
         {sig.trigger && (
-          <span className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-amber-300">
+          <span className="ml-auto flex shrink-0 items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-amber-300">
             <span className="size-2 animate-pulse rounded-full bg-amber-400" />
-            zona agora
+            agora
           </span>
         )}
       </div>
 
-      {sig.caution && (
-        <Badge tone="warning">{CAUTION_LABEL[sig.caution]}</Badge>
-      )}
+      <div className="flex flex-wrap gap-1">
+        <Badge tone={s.tone}>{s.label}</Badge>
+        {sig.caution && <Badge tone="warning">{CAUTION_LABEL[sig.caution]}</Badge>}
+      </div>
 
-      <p className="text-xs leading-snug text-zinc-300">{sig.headline}</p>
+      <p className="text-[11px] leading-snug text-zinc-300">{sig.headline}</p>
 
-      <ul className="space-y-0.5 text-[11px] text-zinc-500">
+      <ul className="space-y-0.5 text-[10px] leading-snug text-zinc-500">
         {sig.rationale.map((r, i) => (
           <li key={i}>· {r}</li>
         ))}

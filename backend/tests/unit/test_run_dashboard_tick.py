@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from core.enums import AssetSymbol
+from core.enums import TRACKED_ASSETS, AssetSymbol
 from core.models import PriceQuote
 from tests.fakes import (
     FakeCalendarGateway,
@@ -68,6 +68,6 @@ async def test_full_tick_pipeline_produces_bias_for_every_asset() -> None:
 
     tick = await run_tick.execute()
 
-    assert set(tick.bias) == set(AssetSymbol)
+    assert set(tick.bias) == set(TRACKED_ASSETS)
     assert len(repo.market_snapshots) == 1
-    assert len(repo.bias_reports) == len(AssetSymbol)
+    assert len(repo.bias_reports) == len(TRACKED_ASSETS)

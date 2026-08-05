@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from core.enums import AssetSymbol, TermStructure, VixRegime
+from core.enums import RISK_ON_ASSETS, AssetSymbol, TermStructure, VixRegime
 from core.models import MarketSnapshot
 
 
@@ -45,10 +45,11 @@ class ComputeTechnicalBiasUseCase:
             else:
                 rationale.append(f"price {distance_pct:+.1f}% below MA200 daily")
 
-        # Risk-on assets (stock indices + Bitcoin) move together vs the VIX:
-        # they rally in calm regimes and get hit when fear spikes. Gold is the
-        # odd one out — it tends to catch a bid when stress rises.
-        is_risk_on = asset in {AssetSymbol.USTEC, AssetSymbol.SPX, AssetSymbol.BITCOIN}
+        # Risk-on assets move together vs the VIX: they rally in calm regimes
+        # and get hit when fear spikes. That covers the stock indices and oil
+        # (a fear spike hits demand). Gold is the odd one out — it tends to
+        # catch a bid when stress rises.
+        is_risk_on = asset in RISK_ON_ASSETS
 
         if snapshot.vix.regime == VixRegime.LOW:
             if is_risk_on:

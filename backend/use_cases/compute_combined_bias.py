@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from core.enums import AssetSymbol, BiasLevel
+from core.enums import TRACKED_ASSETS, AssetSymbol, BiasLevel
 from core.models import BiasComponents, BiasReport
 from use_cases.compute_macro_signal import MacroBias
 from use_cases.compute_news_sentiment import SentimentBias
@@ -49,7 +49,7 @@ class ComputeCombinedBiasUseCase:
         timestamp = datetime.now(timezone.utc)
         reports: dict[AssetSymbol, BiasReport] = {}
 
-        for asset in AssetSymbol:
+        for asset in TRACKED_ASSETS:
             tech = technical.get(asset)
             mac = macro.get(asset)
             sen = sentiment.get(asset)
