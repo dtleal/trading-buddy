@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { LayoutGrid } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { BidAskChart } from "./BidAskChart";
 import { FlowSignalIndicator } from "./FlowSignalIndicator";
 import { PressureGauge } from "./PressureGauge";
@@ -32,6 +33,42 @@ import type {
 const FLOW_ASSETS = TRACKED_ASSETS;
 
 /**
+ * Blocos que ficam escondidos por padrão e só aparecem quando o botão do header
+ * liga. A escolha fica salva no navegador (localStorage) com essas chaves.
+ */
+function useSavedToggle(key: string): [boolean, () => void] {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    setOn(window.localStorage.getItem(key) === "1");
+  }, [key]);
+  const toggle = () => {
+    setOn((prev) => {
+      const next = !prev;
+      window.localStorage.setItem(key, next ? "1" : "0");
+      return next;
+    });
+  };
+  return [on, toggle];
+}
+
+/** Um botão liga/desliga no header do card. */
+function ToggleButton({
+  label,
+  on,
+  onToggle,
+}: {
+  label: string;
+  on: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <Button variant={on ? "default" : "outline"} size="sm" onClick={onToggle} aria-pressed={on}>
+      {label}: {on ? "ligado" : "desligado"}
+    </Button>
+  );
+}
+
+/**
  * Live order-flow strip. Renders all 6 assets simultaneously, each as its own
  * half-width column. Column order is deliberate: Atividade and Pressão sit at
  * the top because those are the two reads the trader acts on, so they stay
@@ -46,6 +83,11 @@ export function OrderFlowSection({ tick }: { tick: DashboardTick | null }) {
   const { status: autoClose, arm, disarm, closeSymbol, breakevenSymbol } = useAutoClose();
   const { status: bot, arm: armBot, saveLots: saveBotLots, disarm: disarmBot } = useScalperBot();
   const executionEnabled = autoClose?.enabled ?? false;
+
+  // Blocos opcionais, ligados/desligados pelos botões do header.
+  const [showDetails, toggleDetails] = useSavedToggle("orderflow.showDetails");
+  const [showPositions, togglePositions] = useSavedToggle("orderflow.showPositions");
+  const [showFlowSignal, toggleFlowSignal] = useSavedToggle("orderflow.showFlowSignal");
 
   // Ticking clock so per-symbol staleness is reactive without calling Date.now()
   // during render.
@@ -94,13 +136,18 @@ export function OrderFlowSection({ tick }: { tick: DashboardTick | null }) {
           <div className="flex items-center gap-2">
             <LayoutGrid className="size-4 text-violet-400" />
             <div>
-              <CardTitle>Fluxo · Pressão · Bid/Ask · Footprint · Tape</CardTitle>
+              <CardTitle>
+                Fluxo · Pressão · Bid/Ask{showDetails ? " · Footprint · Tape" : ""}
+              </CardTitle>
               <CardDescription>
                 {FLOW_ASSETS.map((a) => a.label).join(" · ")} em tempo real (MT5)
               </CardDescription>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <ToggleButton label="Posições" on={showPositions} onToggle={togglePositions} />
+            <ToggleButton label="Sinal do fluxo" on={showFlowSignal} onToggle={toggleFlowSignal} />
+            <ToggleButton label="Footprint · Tape" on={showDetails} onToggle={toggleDetails} />
             {source && (
               <Badge tone="neutral">
                 <span className="text-zinc-500">fonte:</span>{" "}
@@ -132,6 +179,9 @@ export function OrderFlowSection({ tick }: { tick: DashboardTick | null }) {
               flow={flows[a.key]}
               now={now}
               status={status}
+              showDetails={showDetails}
+              showPositions={showPositions}
+              showFlowSignal={showFlowSignal}
               executionEnabled={executionEnabled}
               onCloseSymbol={closeSymbol}
               onBreakevenSymbol={breakevenSymbol}
@@ -149,6 +199,9 @@ function SymbolColumn({
   flow,
   now,
   status,
+  showDetails,
+  showPositions,
+  showFlowSignal,
   executionEnabled,
   onCloseSymbol,
   onBreakevenSymbol,
@@ -158,6 +211,9 @@ function SymbolColumn({
   flow: OrderFlowSnapshot | undefined;
   now: number;
   status: "connecting" | "open" | "reconnecting" | "closed";
+  showDetails: boolean;
+  showPositions: boolean;
+  showFlowSignal: boolean;
   executionEnabled: boolean;
   onCloseSymbol: (symbol: string) => Promise<void>;
   onBreakevenSymbol: (symbol: string) => Promise<void>;
@@ -216,7 +272,7 @@ function SymbolColumn({
           <FlowBlock title="Pressão (compra · venda)">
             <PressureGauge flow={flow} />
           </FlowBlock>
-          {flow.positions.length > 0 && (
+          {showPositions && flow.positions.length > 0 && (
             <FlowBlock title="Posição aberta (MT5)">
               <PositionPanel
                 label={label}
@@ -226,18 +282,24 @@ function SymbolColumn({
               />
             </FlowBlock>
           )}
-          <FlowBlock title="Sinal do fluxo (entrada · saída)">
-            <FlowSignalIndicator signal={flow.flow_signal} />
-          </FlowBlock>
+          {showFlowSignal && (
+            <FlowBlock title="Sinal do fluxo (entrada · saída)">
+              <FlowSignalIndicator signal={flow.flow_signal} />
+            </FlowBlock>
+          )}
           <FlowBlock title="Bid · Ask (tempo real)">
             <BidAskChart flow={flow} now={now} />
           </FlowBlock>
-          <FlowBlock title="Footprint (volume executado)">
-            <FootprintPanel bars={flow.footprint} />
-          </FlowBlock>
-          <FlowBlock title="Tape (time & sales)">
-            <TapePanel trades={flow.recent_trades} />
-          </FlowBlock>
+          {showDetails && (
+            <>
+              <FlowBlock title="Footprint (volume executado)">
+                <FootprintPanel bars={flow.footprint} />
+              </FlowBlock>
+              <FlowBlock title="Tape (time & sales)">
+                <TapePanel trades={flow.recent_trades} />
+              </FlowBlock>
+            </>
+          )}
         </>
       )}
     </div>

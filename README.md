@@ -179,6 +179,15 @@ bar: a real-time candle-size + volume read straight off the live footprint (no
 baseline needed, fills the instant flow arrives), with the "% do normal" layer
 added once the collector's baseline is in. See `collector/README.md`.
 
+Three blocks of the flow strip are **off by default** and each has its own
+on/off button in the card header: **Posições** (the "Posição aberta (MT5)"
+detail block), **Sinal do fluxo** (entry/exit read) and **Footprint · Tape**.
+Off means the block is not rendered at all, so the six columns stay short enough
+to read without scrolling; the components are untouched and come straight back
+when you switch a button on. Each choice is remembered per browser
+(`localStorage`, keys `orderflow.show*`). The P&L card with Breakeven / Fechar
+tudo is always visible.
+
 The verdict is pushed to your phone once per day (and again if the regime
 genuinely changes mid-session) — see [phone push](#phone-push-notifications-ntfysh).
 
