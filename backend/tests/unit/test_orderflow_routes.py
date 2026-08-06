@@ -40,6 +40,9 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     # Recording is a live-only concern — no tape files as a test side effect.
     monkeypatch.setattr(of, "_tape_recorder", None)
     orderflow_broadcaster._latest.clear()
+    # Snapshots waiting for the next flush would otherwise land in the next
+    # test's subscriber (each test runs its own event loop).
+    orderflow_broadcaster._pending.clear()
 
     app = create_app()
     with TestClient(app) as test_client:
@@ -114,6 +117,30 @@ def test_ingest_then_rest_snapshot(client: TestClient) -> None:
     cell = next(c for c in bar["cells"] if c["price"] == 100.25)
     assert cell["ask_volume"] == 2.0
     assert bar["delta"] == 2.0
+
+
+def test_wire_snapshot_keeps_cells_only_on_the_newest_bar(client: TestClient) -> None:
+    # Two trades one minute apart = two footprint bars. Browsers only draw the
+    # ladder of the current bar, so the older bar's cells are dropped from the
+    # payload (that is ~90% of it) while its totals stay.
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        for minute, price in ((0, 100.25), (1, 100.5)):
+            ws.send_json(
+                {
+                    "type": "trade",
+                    "symbol": "USTEC",
+                    "at": f"2026-06-09T14:0{minute}:01Z",
+                    "price": price,
+                    "volume": 2.0,
+                    "side": "buy",
+                }
+            )
+
+    ustec = next(s for s in client.get("/api/orderflow").json() if s["symbol"] == "USTEC")
+    assert len(ustec["footprint"]) == 2
+    assert ustec["footprint"][0]["cells"] == []
+    assert ustec["footprint"][0]["delta"] == 2.0
+    assert ustec["footprint"][-1]["cells"] != []
 
 
 def test_browser_ws_replays_latest_snapshot(client: TestClient) -> None:
