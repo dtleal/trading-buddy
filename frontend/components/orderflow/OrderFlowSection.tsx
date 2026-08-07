@@ -88,6 +88,7 @@ export function OrderFlowSection({ tick }: { tick: DashboardTick | null }) {
   const [showDetails, toggleDetails] = useSavedToggle("orderflow.showDetails");
   const [showPositions, togglePositions] = useSavedToggle("orderflow.showPositions");
   const [showFlowSignal, toggleFlowSignal] = useSavedToggle("orderflow.showFlowSignal");
+  const [showBidAsk, toggleBidAsk] = useSavedToggle("orderflow.showBidAsk");
 
   // Ticking clock so per-symbol staleness is reactive without calling Date.now()
   // during render.
@@ -137,7 +138,8 @@ export function OrderFlowSection({ tick }: { tick: DashboardTick | null }) {
             <LayoutGrid className="size-4 text-violet-400" />
             <div>
               <CardTitle>
-                Fluxo · Pressão · Bid/Ask{showDetails ? " · Footprint · Tape" : ""}
+                Fluxo · Pressão{showBidAsk ? " · Bid/Ask" : ""}
+                {showDetails ? " · Footprint · Tape" : ""}
               </CardTitle>
               <CardDescription>
                 {FLOW_ASSETS.map((a) => a.label).join(" · ")} em tempo real (MT5)
@@ -147,6 +149,7 @@ export function OrderFlowSection({ tick }: { tick: DashboardTick | null }) {
           <div className="flex flex-wrap items-center gap-2">
             <ToggleButton label="Posições" on={showPositions} onToggle={togglePositions} />
             <ToggleButton label="Sinal do fluxo" on={showFlowSignal} onToggle={toggleFlowSignal} />
+            <ToggleButton label="Bid · Ask" on={showBidAsk} onToggle={toggleBidAsk} />
             <ToggleButton label="Footprint · Tape" on={showDetails} onToggle={toggleDetails} />
             {source && (
               <Badge tone="neutral">
@@ -182,6 +185,7 @@ export function OrderFlowSection({ tick }: { tick: DashboardTick | null }) {
               showDetails={showDetails}
               showPositions={showPositions}
               showFlowSignal={showFlowSignal}
+              showBidAsk={showBidAsk}
               executionEnabled={executionEnabled}
               onCloseSymbol={closeSymbol}
               onBreakevenSymbol={breakevenSymbol}
@@ -202,6 +206,7 @@ function SymbolColumn({
   showDetails,
   showPositions,
   showFlowSignal,
+  showBidAsk,
   executionEnabled,
   onCloseSymbol,
   onBreakevenSymbol,
@@ -214,6 +219,7 @@ function SymbolColumn({
   showDetails: boolean;
   showPositions: boolean;
   showFlowSignal: boolean;
+  showBidAsk: boolean;
   executionEnabled: boolean;
   onCloseSymbol: (symbol: string) => Promise<void>;
   onBreakevenSymbol: (symbol: string) => Promise<void>;
@@ -287,9 +293,11 @@ function SymbolColumn({
               <FlowSignalIndicator signal={flow.flow_signal} />
             </FlowBlock>
           )}
-          <FlowBlock title="Bid · Ask (tempo real)">
-            <BidAskChart flow={flow} now={now} />
-          </FlowBlock>
+          {showBidAsk && (
+            <FlowBlock title="Bid · Ask (tempo real)">
+              <BidAskChart flow={flow} now={now} />
+            </FlowBlock>
+          )}
           {showDetails && (
             <>
               <FlowBlock title="Footprint (volume executado)">

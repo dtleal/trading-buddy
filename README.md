@@ -179,9 +179,10 @@ bar: a real-time candle-size + volume read straight off the live footprint (no
 baseline needed, fills the instant flow arrives), with the "% do normal" layer
 added once the collector's baseline is in. See `collector/README.md`.
 
-Three blocks of the flow strip are **off by default** and each has its own
+Four blocks of the flow strip are **off by default** and each has its own
 on/off button in the card header: **Posições** (the "Posição aberta (MT5)"
-detail block), **Sinal do fluxo** (entry/exit read) and **Footprint · Tape**.
+detail block), **Sinal do fluxo** (entry/exit read), **Bid · Ask** (the
+real-time bid/ask chart) and **Footprint · Tape**.
 Off means the block is not rendered at all, so the six columns stay short enough
 to read without scrolling; the components are untouched and come straight back
 when you switch a button on. Each choice is remembered per browser
