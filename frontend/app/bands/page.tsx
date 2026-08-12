@@ -21,7 +21,10 @@ export default function BandsPage() {
           o <span className="text-zinc-300">caminho típico do preço</span> daqui
           pra frente, e a faixa pontilhada em volta é a metade central do que
           aconteceu — medidos nas vezes anteriores em que o preço esteve nesse
-          mesmo ponto da banda. É o histórico do próprio ativo, não previsão.
+          mesmo ponto da banda. É o histórico do próprio ativo, não previsão. O
+          selo <span className="text-sky-400">% média</span> só aparece quando o
+          preço está colado numa banda — é a chance de ele voltar pra média no
+          estado de mercado atual (passe o mouse pros detalhes).
         </p>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {TRACKED_ASSETS.map(({ key, label }) => (

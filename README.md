@@ -276,21 +276,24 @@ container the Dashboard uses.
   what price *did* the last times it sat here, the bar is who is leaning on the
   tape *right now* — agreement strengthens the case, disagreement is a fight
   worth waiting out.
-- **Volta pra média, conditioned on the market state:** when price is sitting
-  at a band (`%B` ≤ 0.2 or ≥ 0.8), the headline is how often it got back to the
-  **middle** band — measured only on past bars that were in the SAME state, and
-  shown next to the plain figure so a gap between them is visible. The state is
-  three readings, all normalised by the band's own width so they mean the same
-  thing on GOLD and on US30, and all shown as chips on the card:
+- **Selo ↩ % média (volta pra média):** a second badge beside the arrow, shown
+  **only when price is sitting at a band** (`%B` ≤ 0.2 or ≥ 0.8) — mid-band the
+  question is meaningless, price is already at the middle. It reads: of the
+  past visits to this band **in this same market state**, how many got back to
+  the middle band within the hour. Sky = usually comes back, amber = usually
+  keeps going (a break, not a bounce), grey = coin flip; dimmed when the sample
+  is under 25. Sample size, the conditions held, the typical number of candles
+  and the unconditioned figure all live in the tooltip, so the card stays
+  glanceable. The state is three readings, all normalised by the band's own
+  width so they mean the same thing on GOLD and on US30, shown as chips:
   - **trend** — how far the middle band travelled over the last 5 bars;
   - **width** — today's band width against its 50-bar baseline (the "as bandas
     estão alargando?" test);
   - **push** — one outsized candle (≥1.8× the normal size) driving one way.
 
   Conditioning costs sample size, so the filter is relaxed in a fixed order
-  (push → trend → width) until the sample is usable, and the card names what it
-  actually held constant. Mid-band the question is meaningless — price is
-  already at the middle — so the round trip leads there instead.
+  (push → trend → width) until the sample is usable, and the tooltip names what
+  it actually held constant.
 - **Why width is the last filter dropped** (measured over ~5 days of live bars,
   from a band touch): the bands' width is by far the strongest signal —
   **52%** get back to the middle while the bands are **squeezing** against

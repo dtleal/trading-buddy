@@ -11,7 +11,7 @@ import {
   type LineData,
   type UTCTimestamp,
 } from "lightweight-charts";
-import { ArrowDown, ArrowUp } from "lucide-react";
+import { ArrowDown, ArrowUp, Undo2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   bandTouchOdds,
@@ -180,14 +180,18 @@ export function BandProjectionChart({
   const odds = scenario
     ? scenarioOdds(scenario)
     : bandTouchOdds(bars.map((b) => b.close));
+  // "Does it come back to the middle?" is only a real question at a band.
+  const atBand =
+    !!scenario && (scenario.pct_b <= AT_BAND || scenario.pct_b >= 1 - AT_BAND);
 
   return (
     <Card>
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <CardTitle>{title}</CardTitle>
             {odds && <TouchOddsBadge odds={odds} measured={!!scenario} />}
+            {scenario && atBand && <ReturnToMidBadge scenario={scenario} />}
           </div>
           {/* Live buy/sell pressure — the tape's lean right now, next to the
               historical lean the badge carries. */}
@@ -200,7 +204,7 @@ export function BandProjectionChart({
             </span>
           )}
         </div>
-        {scenario && <ScenarioSummary scenario={scenario} />}
+        {scenario?.regime && <RegimeChips regime={scenario.regime} />}
       </CardHeader>
       <CardContent>
         <div className="relative w-full" style={{ height: 320 }}>
@@ -266,58 +270,46 @@ function RegimeChips({ regime }: { regime: BandRegime }) {
   );
 }
 
-/** What the past says. At a band the headline is the chance of getting back to
- * the middle IN THIS SAME MARKET STATE (with the plain figure alongside, so a
- * big gap between them is visible); mid-band that question is meaningless, so
- * the round trip to the far band leads instead. `n` is always shown — a
- * percentage without its sample size is not a number worth reading. */
-function ScenarioSummary({ scenario }: { scenario: BandScenario }) {
-  const below = scenario.pct_b < 0.5;
-  const trip = below ? scenario.lower_first : scenario.upper_first;
-  const other = below ? "de cima" : "de baixo";
-  const atBand = scenario.pct_b <= AT_BAND || scenario.pct_b >= 1 - AT_BAND;
-  const side = below ? "banda de baixo" : "banda de cima";
-  const r = scenario.return_to_mid;
+/** Below this many analogs the figure is dimmed: still shown, but visibly
+ * weaker, so a number built on a handful of cases never looks solid. */
+const THIN_SAMPLE = 25;
 
+/** "Volta pra média": of the past visits to THIS band in THIS market state,
+ * how many got back to the middle within the hour. Only shown when price is
+ * actually at a band — mid-band it would be trivially high and mean nothing.
+ * Sky = usually comes back, amber = usually keeps going (a break, not a
+ * bounce), grey = coin flip. Every detail lives in the tooltip. */
+function ReturnToMidBadge({ scenario }: { scenario: BandScenario }) {
+  const r = scenario.return_to_mid;
+  if (!r) return null;
+  const p = Math.round(r.pct * 100);
+  const tone =
+    p >= 60
+      ? "bg-sky-500/15 text-sky-400"
+      : p <= 40
+        ? "bg-amber-500/15 text-amber-400"
+        : "bg-zinc-800 text-zinc-300";
+  const side = scenario.pct_b < 0.5 ? "de baixo" : "de cima";
+  const held =
+    r.matched_on.length > 0
+      ? `no mesmo estado de mercado (${r.matched_on.join(" + ")})`
+      : "sem conseguir filtrar o estado de mercado";
   return (
-    <div className="space-y-1">
-      {scenario.regime && <RegimeChips regime={scenario.regime} />}
-      <p className="text-[11px] leading-relaxed text-zinc-500">
-        {atBand && r ? (
-          <>
-            {side}:{" "}
-            <span className="font-semibold text-zinc-200">
-              {pct(r.pct)} volta pra média
-            </span>
-            {r.median_bars != null && ` em ~${r.median_bars} candle${r.median_bars > 1 ? "s" : ""}`}{" "}
-            <span className="text-zinc-600">
-              (n={r.regime_n}
-              {r.matched_on.length > 0
-                ? `, mesmo estado: ${r.matched_on.join(" + ")}`
-                : ", sem filtrar o estado"}
-              )
-            </span>{" "}
-            · {pct(scenario.back_to_mid_pct)} sem olhar o estado
-          </>
-        ) : (
-          <>
-            nas {scenario.samples} vezes que esteve aqui:{" "}
-            <span className="text-zinc-300">
-              {pct(scenario.back_to_mid_pct)} tocou a média
-            </span>
-            {trip && trip.n > 0 && (
-              <>
-                {" · "}
-                <span className="text-zinc-300">
-                  {pct(trip.back_pct)} chegou na banda {other}
-                </span>{" "}
-                (n={trip.n})
-              </>
-            )}
-          </>
-        )}
-      </p>
-    </div>
+    <span
+      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-semibold tabular-nums ${tone} ${
+        r.regime_n < THIN_SAMPLE ? "opacity-60" : ""
+      }`}
+      title={
+        `das ${r.regime_n} vezes que o preço esteve na banda ${side} ${held}, ` +
+        `${p}% voltaram pra média em até 1h` +
+        (r.median_bars != null ? ` (tipicamente ~${r.median_bars} candles)` : "") +
+        ` · sem olhar o estado: ${pct(scenario.back_to_mid_pct)}` +
+        (r.regime_n < THIN_SAMPLE ? " · amostra pequena, leia com reserva" : "")
+      }
+    >
+      <Undo2 className="size-3.5" />
+      {p}% média
+    </span>
   );
 }
 
