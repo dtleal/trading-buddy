@@ -246,7 +246,9 @@ balance (in profit), red below — with a dashed guide-line at that opening.
 
 A tab next to Q&A with one 5m candle chart per tracked asset (6 charts,
 lightweight-charts), drawn from the **MT5 candles the collector pushes** — the
-same feed the trader's own chart shows, not delayed yfinance data.
+same feed the trader's own chart shows, not delayed yfinance data. Three charts
+per row on a wide screen (two from `md`, one on a phone), on the same 2100px
+container the Dashboard uses.
 
 - **Bands:** standard Bollinger (20-period SMA ± 2σ on closes), solid lines.
 - **Caminho típico do preço (sky, dashed) + cone:** where price actually went
@@ -268,6 +270,12 @@ same feed the trader's own chart shows, not delayed yfinance data.
   estimate (random walk with the recent drift and volatility); the tooltip says
   which one you are reading. Price already at or past a band shows **"na
   banda"** instead of a fake 100% — that is where price *is*, not a probability.
+- **Pressão (compra · venda):** the Dashboard's live pressure bar, in every
+  chart header. Same `PressureGauge` component on the same `/ws/orderflow`
+  feed, so the two tabs cannot disagree. It completes the read: the arrow is
+  what price *did* the last times it sat here, the bar is who is leaning on the
+  tape *right now* — agreement strengthens the case, disagreement is a fight
+  worth waiting out.
 - **A honest finding, measured on live data:** going band-to-band inside an
   hour is **rare — roughly 8–15%**. What actually happens is a return to the
   **middle** band (the SMA20), which is why the summary line leads with that
