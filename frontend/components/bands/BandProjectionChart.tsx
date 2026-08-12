@@ -19,30 +19,38 @@ import {
   type BandOdds,
   type BandPoint,
 } from "@/lib/bollinger";
-import type { IntradayBar } from "@/lib/types";
+import type { BandScenario, IntradayBar } from "@/lib/types";
 
 const UP = "#10b981"; // emerald — up candles
 const DOWN = "#ef4444"; // red — down candles
 const BAND = "#60a5fa"; // blue-400 — upper/lower band
 const MID = "#f59e0b"; // amber-500 — SMA20
-const PROJ_PRICE = "#38bdf8"; // sky-400 — assumed close path
+const ROUTE = "#38bdf8"; // sky-400 — the measured route ahead
+const CONE = "#0369a1"; // sky-800 — middle half of past outcomes
 
-/** Projected bars ahead (6 × 5min = 30 min). */
-const HORIZON = 6;
+/** Bars ahead when there is no measured route to follow (6 × 5min = 30 min). */
+const FALLBACK_HORIZON = 6;
 /** Real bars kept in view (the rest stay scrollable to the left). */
 const VISIBLE_BARS = 42;
 
 /**
- * One symbol's 5m candles with standard Bollinger (20, 2) plus the dashed
- * projected continuation of the three lines (see `lib/bollinger.ts` for what
- * the projection assumes). The sky dashed line is the assumed close path.
+ * One symbol's 5m candles with standard Bollinger (20, 2), the route price
+ * usually took from here, and the bands' continuation under that same route.
+ *
+ * The route (sky, dashed) and its cone (faint, the middle half of outcomes)
+ * come from the backend: every past bar where price sat at this same spot
+ * inside the band, and what happened over the next hour. No measured route
+ * (thin sample / cold start) → the bands fall back to a drift extrapolation
+ * and no route is drawn.
  */
 export function BandProjectionChart({
   title,
   bars,
+  scenario,
 }: {
   title: string;
   bars: IntradayBar[];
+  scenario?: BandScenario;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -75,16 +83,16 @@ export function BandProjectionChart({
       wickDownColor: DOWN,
       borderVisible: false,
     });
-    const line = (color: string, style: LineStyle) =>
+    const line = (color: string, style: LineStyle, width: 1 | 2 = 1) =>
       chart.addLineSeries({
         color,
-        lineWidth: 1,
+        lineWidth: width,
         lineStyle: style,
         priceLineVisible: false,
         lastValueVisible: false,
         crosshairMarkerVisible: false,
       });
-    // Order matches the setData calls below: solid bands, dashed projections.
+    // Order matches the datasets pushed below.
     linesRef.current = [
       line(BAND, LineStyle.Solid),
       line(MID, LineStyle.Solid),
@@ -92,7 +100,9 @@ export function BandProjectionChart({
       line(BAND, LineStyle.Dashed),
       line(MID, LineStyle.Dashed),
       line(BAND, LineStyle.Dashed),
-      line(PROJ_PRICE, LineStyle.Dashed),
+      line(CONE, LineStyle.Dotted),
+      line(CONE, LineStyle.Dotted),
+      line(ROUTE, LineStyle.Dashed, 2),
     ];
     chartRef.current = chart;
     candlesRef.current = candles;
@@ -105,7 +115,7 @@ export function BandProjectionChart({
     };
   }, []);
 
-  // Push the polled bars + recompute bands/projection
+  // Push the polled bars + recompute bands / route
   useEffect(() => {
     if (!candlesRef.current || bars.length === 0) return;
     const candleData: CandlestickData[] = bars.map((b) => ({
@@ -116,10 +126,27 @@ export function BandProjectionChart({
       close: b.close,
     }));
     candlesRef.current.setData(candleData);
+
+    const lastTime = candleData[candleData.length - 1].time as number;
+    const lastClose = bars[bars.length - 1].close;
+    const route = scenario?.path ?? [];
     const proj = computeBandProjection(
       bars.map((b) => ({ time: sec(b.timestamp), close: b.close })),
-      { horizon: HORIZON },
+      {
+        horizon: FALLBACK_HORIZON,
+        futureCloses: route.length ? route.map((p) => p.median) : undefined,
+      },
     );
+    // Route + cone start at the last real bar so they continue the price
+    // instead of floating detached from it.
+    const stepTime = (step: number) => lastTime + step * 300;
+    const routeLine = (pick: (p: BandScenario["path"][number]) => number) =>
+      route.length
+        ? [
+            { time: lastTime, value: lastClose },
+            ...route.map((p) => ({ time: stepTime(p.step), value: pick(p) })),
+          ]
+        : [];
     const datasets = [
       proj.upper,
       proj.mid,
@@ -127,24 +154,28 @@ export function BandProjectionChart({
       proj.projUpper,
       proj.projMid,
       proj.projLower,
-      proj.projClose,
+      routeLine((p) => p.p75),
+      routeLine((p) => p.p25),
+      routeLine((p) => p.median),
     ];
     linesRef.current.forEach((s, i) => s.setData(toLineData(datasets[i])));
 
     // Frame the last hours + the projection — but only when a NEW bar lands,
     // so the 5s forming-bar refresh doesn't fight the user's own zoom/scroll.
-    const lastTime = candleData[candleData.length - 1].time as number;
     if (lastBarTimeRef.current !== lastTime) {
       lastBarTimeRef.current = lastTime;
+      const ahead = route.length || FALLBACK_HORIZON;
       chartRef.current?.timeScale().setVisibleLogicalRange({
         from: candleData.length - VISIBLE_BARS,
-        to: candleData.length + HORIZON + 1,
+        to: candleData.length + ahead + 1,
       });
     }
-  }, [bars]);
+  }, [bars, scenario]);
 
   const last = bars.length > 0 ? bars[bars.length - 1].close : null;
-  const odds = bandTouchOdds(bars.map((b) => b.close));
+  const odds = scenario
+    ? scenarioOdds(scenario)
+    : bandTouchOdds(bars.map((b) => b.close));
 
   return (
     <Card>
@@ -152,7 +183,7 @@ export function BandProjectionChart({
         <div className="flex items-baseline justify-between">
           <div className="flex items-center gap-2">
             <CardTitle>{title}</CardTitle>
-            {odds && <TouchOddsBadge odds={odds} />}
+            {odds && <TouchOddsBadge odds={odds} measured={!!scenario} />}
           </div>
           {last !== null && (
             <span className="text-sm font-semibold tabular-nums text-zinc-100">
@@ -160,6 +191,7 @@ export function BandProjectionChart({
             </span>
           )}
         </div>
+        {scenario && <ScenarioSummary scenario={scenario} />}
       </CardHeader>
       <CardContent>
         <div className="relative w-full" style={{ height: 260 }}>
@@ -175,15 +207,42 @@ export function BandProjectionChart({
   );
 }
 
-/** Which band gets touched first, and how likely: ▲ 68% = 68% de chance de
- * tocar a banda de CIMA antes da de baixo (distância + inclinação + vol dos
- * últimos 20 candles). Cinza quando está no cara-ou-coroa (≤55%). Quando o
- * preço JÁ está na banda mostra "na banda" — não é probabilidade, é onde ele
- * está. */
-function TouchOddsBadge({ odds }: { odds: BandOdds }) {
+/** What the past says, in one line: how often price got back to the middle,
+ * and how often it went all the way to the opposite band. `n` is always shown
+ * — a percentage without its sample size is not a number worth reading. */
+function ScenarioSummary({ scenario }: { scenario: BandScenario }) {
+  const below = scenario.pct_b < 0.5;
+  const trip = below ? scenario.lower_first : scenario.upper_first;
+  const other = below ? "de cima" : "de baixo";
+  const hours = Math.round((scenario.horizon_bars * 5) / 60);
+  return (
+    <p className="text-[11px] leading-relaxed text-zinc-500">
+      nas {scenario.samples} vezes que esteve aqui na banda (últimos ~
+      {hours === 1 ? "1h" : `${hours}h`} depois):{" "}
+      <span className="text-zinc-300">
+        {pct(scenario.back_to_mid_pct)} voltou pra média
+      </span>
+      {trip && trip.n > 0 && (
+        <>
+          {" · "}
+          <span className="text-zinc-300">
+            {pct(trip.back_pct)} chegou na banda {other}
+          </span>{" "}
+          (n={trip.n})
+        </>
+      )}
+    </p>
+  );
+}
+
+/** Which band gets touched first, and how likely. `measured` = the share comes
+ * from the symbol's own history; otherwise it is the random-walk estimate used
+ * until enough history is stored. Grey = coin flip (≤55%). Price already at or
+ * past a band shows "na banda" — that is where it IS, not a probability. */
+function TouchOddsBadge({ odds, measured }: { odds: BandOdds; measured: boolean }) {
   const up = odds.at ? odds.at === "upper" : odds.pUp >= 0.5;
-  const pct = Math.round((up ? odds.pUp : 1 - odds.pUp) * 100);
-  const undecided = !odds.at && pct <= 55;
+  const p = Math.round((up ? odds.pUp : 1 - odds.pUp) * 100);
+  const undecided = !odds.at && p <= 55;
   const tone = undecided
     ? "bg-zinc-800 text-zinc-300"
     : up
@@ -197,13 +256,28 @@ function TouchOddsBadge({ odds }: { odds: BandOdds }) {
       title={
         odds.at
           ? `preço já está na banda de ${side}`
-          : `${pct}% de chance de tocar a banda de ${side} primeiro (distância até cada banda + inclinação e volatilidade dos últimos 20 candles)`
+          : measured
+            ? `nas vezes anteriores que esteve aqui, ${p}% tocaram a banda de ${side} primeiro`
+            : `${p}% de chance de tocar a banda de ${side} primeiro (estimativa por distância e volatilidade — ainda sem histórico suficiente para medir)`
       }
     >
       <Arrow className="size-3.5" />
-      {odds.at ? "na banda" : `${pct}%`}
+      {odds.at ? "na banda" : `${p}%`}
     </span>
   );
+}
+
+/** The measured equivalent of `bandTouchOdds`: of the past visits here that
+ * reached a band at all, the share that reached the upper one first. */
+function scenarioOdds(s: BandScenario): BandOdds {
+  const at = s.pct_b >= 1 ? "upper" : s.pct_b <= 0 ? "lower" : null;
+  const up = s.upper_first?.n ?? 0;
+  const down = s.lower_first?.n ?? 0;
+  return { pUp: up + down > 0 ? up / (up + down) : 0.5, at };
+}
+
+function pct(v: number): string {
+  return `${Math.round(v * 100)}%`;
 }
 
 function sec(iso: string): number {

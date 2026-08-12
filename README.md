@@ -249,23 +249,39 @@ lightweight-charts), drawn from the **MT5 candles the collector pushes** — the
 same feed the trader's own chart shows, not delayed yfinance data.
 
 - **Bands:** standard Bollinger (20-period SMA ± 2σ on closes), solid lines.
-- **Projection (dashed):** the continuation of the three band lines over the
-  next 30 min (6 bars). Future closes are assumed to ride the least-squares
-  slope of the last 20 closes and the bands are recomputed over the extended
-  series (`frontend/lib/bollinger.ts`). The sky dashed line is that assumed
-  close path. It is an **extrapolation, not a forecast** — the page says so.
-- **Seta ▲/▼ com % (qual banda primeiro):** the chance that price touches the
-  **upper** band before the **lower** one. Same assumptions as the projection —
-  price as a random walk with the recent drift and volatility — solved with the
-  closed-form first-passage probability (which of two barriers is hit first).
-  With no usable drift it reduces to "whichever band is closer is likelier"
-  (`B/(A+B)`). Grey badge = coin flip (≤55%); green/red = a real lean. When the
-  last close is already at or through a band it says **"na banda"** instead of
-  a fake 100% — that is where price *is*, not a probability.
-- **Data path:** collector pushes the last 120 M5 bars per symbol every ~5s
-  (`candles` message, bar times converted to true UTC) → backend keeps them in
-  memory → `GET /api/orderflow/candles` → the tab polls every 5s. The last bar
-  is the one still forming, so the projection moves with the live price.
+- **Caminho típico do preço (sky, dashed) + cone:** where price actually went
+  the last times it sat at this same spot inside the band. Every past bar with
+  the same `%B` (position within the band, ±0.12) is an analog; the next hour
+  (12 bars) of each is read, normalised by the band width of the time, and the
+  median becomes the route while the 25–75% range becomes the dotted cone
+  (`use_cases/project_band_path.py`, `GET /api/orderflow/bands`). Fewer than 12
+  analogs → nothing is drawn, on purpose. **This is the symbol's own past
+  behaviour, not a forecast.**
+- **Band continuation (dashed):** the three band lines carried forward over the
+  same horizon, recomputed with the route as the assumed future closes — so the
+  bands and the price path never rest on two different assumptions. With no
+  measured route it falls back to a drift extrapolation
+  (`frontend/lib/bollinger.ts`).
+- **Seta ▲/▼ com % (qual banda primeiro):** the share of those past visits that
+  reached the **upper** band before the **lower** one. Grey = coin flip (≤55%).
+  Before enough history is stored it falls back to a closed-form first-passage
+  estimate (random walk with the recent drift and volatility); the tooltip says
+  which one you are reading. Price already at or past a band shows **"na
+  banda"** instead of a fake 100% — that is where price *is*, not a probability.
+- **A honest finding, measured on live data:** going band-to-band inside an
+  hour is **rare — roughly 8–15%**. What actually happens is a return to the
+  **middle** band (the SMA20), which is why the summary line leads with that
+  number. The round trip is not decided by mean reversion but by how wide the
+  band is against how fast the market moves: a band ~18 typical bar-moves wide
+  simply cannot be crossed in 12 bars. Both numbers are shown with their sample
+  size `n`, because a percentage without one is not worth reading.
+- **Data path:** collector pushes the last 120 M5 bars per symbol every ~5s for
+  the chart, plus a 1500-bar backfill every 10 min and on every reconnect for
+  the statistics (`candles` message, bar times converted to true UTC) → the
+  backend **merges pushes by bar timestamp** into ~7 days of history →
+  `GET /api/orderflow/candles?limit=120` (chart, polled every 5s) and
+  `GET /api/orderflow/bands` (scenario, polled every 60s). The last bar is the
+  one still forming, so the chart moves with the live price.
 
 ### LLM features (need `CLAUDE_API_KEY`)
 

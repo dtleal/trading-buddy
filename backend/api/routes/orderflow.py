@@ -35,6 +35,7 @@ from core.models import (
     AccountPnl,
     AutoCloseStatus,
     BalanceStep,
+    BandScenario,
     BotStatus,
     BotTrade,
     EquityPoint,
@@ -55,6 +56,7 @@ from use_cases.orderflow_wire import (
     parse_symbol,
     parse_trade,
 )
+from use_cases.project_band_path import project_band_path
 from use_cases.scalper import (
     LOCK_GIVEBACK,
     LOCK_MIN_USD,
@@ -120,10 +122,35 @@ _liquidity_store: dict[AssetSymbol, SessionLiquidity] = {}
 # collector reported the symbol is flat (so a closed trade clears from the UI).
 _positions_store: dict[AssetSymbol, list[Position]] = {}
 
-# Latest M5 candles per symbol pushed by the collector (newest last; the final
-# bar is the one still forming). Feeds the Bollinger-projection tab over REST —
-# candles do NOT ride the order-flow snapshot, the UI polls them.
+# M5 candles per symbol pushed by the collector (newest last; the final bar is
+# the one still forming). Feeds the Bollinger-projection tab over REST — candles
+# do NOT ride the order-flow snapshot, the UI polls them.
+#
+# Pushes are MERGED by bar timestamp rather than replacing the list: the live
+# push carries only the recent bars (for the chart), while a slower deep push
+# backfills history, and the band scenario needs as much of it as it can get.
 _candles_store: dict[AssetSymbol, list[IntradayBar]] = {}
+
+# ~7 days of M5 bars. Caps memory while leaving plenty of history for the
+# scenario's analog search.
+_MAX_CANDLES = 2000
+
+# Bars the chart itself draws — the default slice served to the UI, so the deep
+# history never has to travel over the wire.
+_CHART_CANDLES = 120
+
+
+def _merge_candles(symbol: AssetSymbol, incoming: list[IntradayBar]) -> None:
+    """Fold a candle push into the stored history, newest last.
+
+    Keyed by bar timestamp so the still-forming last bar is overwritten on
+    every push (not appended twice) and a deep backfill slots in behind the
+    bars already held.
+    """
+    merged = {bar.timestamp: bar for bar in _candles_store.get(symbol, ())}
+    merged.update({bar.timestamp: bar for bar in incoming})
+    ordered = [merged[ts] for ts in sorted(merged)]
+    _candles_store[symbol] = ordered[-_MAX_CANDLES:]
 
 
 def latest_liquidity() -> dict[AssetSymbol, SessionLiquidity]:
@@ -797,19 +824,23 @@ async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
         _liquidity_store[symbol] = _parse_liquidity(msg, symbol)
         return {symbol}
     if mtype == "candles":
-        # M5 bar history for the symbol, replaced wholesale on every push. A
-        # malformed bar raises and the ingest loop skips the whole message.
-        _candles_store[symbol] = [
-            IntradayBar(
-                timestamp=_parse_dt(raw["ts"]),
-                open=float(raw["o"]),
-                high=float(raw["h"]),
-                low=float(raw["l"]),
-                close=float(raw["c"]),
-                volume=float(raw.get("v", 0.0) or 0.0),
-            )
-            for raw in msg.get("bars", ())
-        ]
+        # M5 bars for the symbol, merged into the stored history. A malformed
+        # bar raises and the ingest loop skips the whole message (so a bad push
+        # can never half-write the history).
+        _merge_candles(
+            symbol,
+            [
+                IntradayBar(
+                    timestamp=_parse_dt(raw["ts"]),
+                    open=float(raw["o"]),
+                    high=float(raw["h"]),
+                    low=float(raw["l"]),
+                    close=float(raw["c"]),
+                    volume=float(raw.get("v", 0.0) or 0.0),
+                )
+                for raw in msg.get("bars", ())
+            ],
+        )
         return set()
     if mtype == "positions":
         # Open positions for this symbol (read-only). An empty list is a valid,
@@ -991,10 +1022,37 @@ class AutoCloseRequest(BaseModel):
     response_model=dict[AssetSymbol, list[IntradayBar]],
     tags=["orderflow"],
 )
-async def get_candles() -> dict[AssetSymbol, list[IntradayBar]]:
+async def get_candles(limit: int = _CHART_CANDLES) -> dict[AssetSymbol, list[IntradayBar]]:
     """Latest M5 candles per symbol pushed by the collector (newest last; the
-    final bar is still forming). Empty until the collector's first push."""
-    return _candles_store
+    final bar is still forming). Empty until the collector's first push.
+
+    `limit` caps how many bars each symbol returns — the chart only draws the
+    recent ones, so the deep history kept for the band scenario stays server
+    side instead of being polled over the wire every few seconds.
+    """
+    count = max(1, min(limit, _MAX_CANDLES))
+    return {symbol: bars[-count:] for symbol, bars in _candles_store.items()}
+
+
+@router.get(
+    "/api/orderflow/bands",
+    response_model=dict[AssetSymbol, BandScenario],
+    tags=["orderflow"],
+)
+async def get_band_scenarios() -> dict[AssetSymbol, BandScenario]:
+    """Where price usually went from its current spot inside the Bollinger
+    band, measured on each symbol's own stored bars.
+
+    Symbols without enough history (or without enough past bars at the same
+    spot in the band) are simply absent — a thin sample must show nothing
+    rather than a number nobody should trade on.
+    """
+    scenarios: dict[AssetSymbol, BandScenario] = {}
+    for symbol, bars in _candles_store.items():
+        scenario = project_band_path(symbol, bars)
+        if scenario is not None:
+            scenarios[symbol] = scenario
+    return scenarios
 
 
 @router.get("/api/orderflow/autoclose", response_model=AutoCloseStatus, tags=["orderflow"])

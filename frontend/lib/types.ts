@@ -87,6 +87,46 @@ export type IntradayBar = z.infer<typeof IntradayBar>;
 export const CandlesBySymbol = z.record(AssetSymbol, z.array(IntradayBar));
 export type CandlesBySymbol = z.infer<typeof CandlesBySymbol>;
 
+/** One step of the typical route ahead (prices, not returns). */
+export const BandPathPoint = z.object({
+  step: z.number(),
+  median: z.number(),
+  p25: z.number(),
+  p75: z.number(),
+});
+export type BandPathPoint = z.infer<typeof BandPathPoint>;
+
+export const BandRoundTrip = z.object({
+  n: z.number(),
+  back_pct: z.number(),
+});
+export type BandRoundTrip = z.infer<typeof BandRoundTrip>;
+
+/** GET /api/orderflow/bands — what price actually did the last times it sat
+ * where it sits now, measured on the symbol's own bars. Absent per symbol when
+ * the sample is too thin to say anything. */
+export const BandScenario = z.object({
+  symbol: AssetSymbol,
+  asof: z.string(),
+  last_close: z.number(),
+  upper: z.number(),
+  mid: z.number(),
+  lower: z.number(),
+  pct_b: z.number(),
+  samples: z.number(),
+  horizon_bars: z.number(),
+  path: z.array(BandPathPoint),
+  touch_upper_pct: z.number(),
+  touch_lower_pct: z.number(),
+  back_to_mid_pct: z.number(),
+  upper_first: BandRoundTrip.nullable().default(null),
+  lower_first: BandRoundTrip.nullable().default(null),
+});
+export type BandScenario = z.infer<typeof BandScenario>;
+
+export const BandScenariosBySymbol = z.record(AssetSymbol, BandScenario);
+export type BandScenariosBySymbol = z.infer<typeof BandScenariosBySymbol>;
+
 export const EconomicEvent = z.object({
   name: z.string(),
   currency: z.string(),

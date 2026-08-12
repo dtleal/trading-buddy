@@ -1356,6 +1356,13 @@ def run(cfg: dict[str, Any]) -> None:
     cand_period = float(cfg.get("candles_poll_seconds", 5))
     cand_bars = int(cfg.get("candles_bars", 120))
     next_candles_at = 0.0
+    # Deep candle history for the band scenario (how price behaved the last
+    # times it sat where it sits now). Sent rarely — it only has to backfill
+    # what the live push doesn't carry — and re-sent on every (re)connect so a
+    # restarted backend gets its history straight away instead of in 10 min.
+    hist_period = float(cfg.get("candles_history_seconds", 600))
+    hist_bars = int(cfg.get("candles_history_bars", 1500))
+    next_hist_at = 0.0
     # Account P&L (day/week/month) cadence. `next_pnl_at = 0` forces a first read
     # so the top-of-screen cards populate as soon as the stream is up.
     next_pnl_at = 0.0
@@ -1420,6 +1427,8 @@ def run(cfg: dict[str, Any]) -> None:
                 # while flat would leave the backend showing stale positions.
                 pos_flat = {b: False for b in broker_to_backend.values()}
                 next_pos_at = 0.0
+                # The backend may have restarted and lost its candle history.
+                next_hist_at = 0.0
             # Keep the socket alive by replying to server pings before polling,
             # and handle any control command (close_all / close_symbol / open).
             _drain_control(
@@ -1504,6 +1513,18 @@ def run(cfg: dict[str, Any]) -> None:
                         cand = None
                     if cand:
                         ws.send(json.dumps(cand))
+            # Backfill the deep candle history the band scenario reads from.
+            # Same message type — the backend merges pushes by bar timestamp.
+            if hist_period > 0 and hist_bars > cand_bars and now_mono >= next_hist_at:
+                next_hist_at = now_mono + hist_period
+                for m in cfg["symbols"]:
+                    try:
+                        hist = _read_candles(m["backend"], m["mt5"], hist_bars)
+                    except Exception as exc:  # never let the backfill break the stream
+                        logger.debug("candle history read failed for %s: %s", m["mt5"], exc)
+                        hist = None
+                    if hist:
+                        ws.send(json.dumps(hist))
             # Push realized account P&L (day/week/month). Own slow cadence — it
             # only moves when a trade closes, and the read scans the whole month.
             if now_mono >= next_pnl_at:

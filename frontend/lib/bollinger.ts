@@ -110,9 +110,26 @@ export function bandTouchOdds(
   return { pUp: (1 - eB) / (eA - eB), at: null };
 }
 
+/**
+ * @param futureCloses closes to assume ahead of the last bar. Pass the measured
+ * route (see the Bandas tab) so the bands continue under the SAME assumption
+ * the price path is drawn with; omit it to fall back to the recent drift.
+ */
 export function computeBandProjection(
   bars: { time: number; close: number }[],
-  { period = 20, mult = 2, horizon = 6, stepSec = 300 } = {},
+  {
+    period = 20,
+    mult = 2,
+    horizon = 6,
+    stepSec = 300,
+    futureCloses,
+  }: {
+    period?: number;
+    mult?: number;
+    horizon?: number;
+    stepSec?: number;
+    futureCloses?: number[];
+  } = {},
 ): BandProjection {
   const n = bars.length;
   if (n < period) return EMPTY;
@@ -135,18 +152,20 @@ export function computeBandProjection(
     lower.push({ time, value: l });
   }
 
-  // Future closes ride the recent drift; bands are recomputed over the
-  // extended series so the SMA keeps sliding instead of freezing.
-  const drift = slope(closes.slice(n - period));
+  // Future closes: the measured route when we have one, else the recent drift.
+  // Bands are recomputed over the extended series so the SMA keeps sliding
+  // instead of freezing.
   const lastTime = bars[n - 1].time;
   const lastClose = closes[n - 1];
+  const drift = slope(closes.slice(n - period));
+  const steps = futureCloses?.length ? futureCloses.length : horizon;
   const extended = closes.slice();
   const projUpper: BandPoint[] = [upper[upper.length - 1]];
   const projMid: BandPoint[] = [mid[mid.length - 1]];
   const projLower: BandPoint[] = [lower[lower.length - 1]];
   const projClose: BandPoint[] = [{ time: lastTime, value: lastClose }];
-  for (let i = 1; i <= horizon; i++) {
-    extended.push(lastClose + drift * i);
+  for (let i = 1; i <= steps; i++) {
+    extended.push(futureCloses?.[i - 1] ?? lastClose + drift * i);
     const [u, m, l] = bandAt(extended, extended.length - 1);
     const time = lastTime + stepSec * i;
     projUpper.push({ time, value: u });

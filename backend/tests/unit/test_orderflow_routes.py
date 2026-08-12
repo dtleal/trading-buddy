@@ -206,6 +206,67 @@ def test_candles_ingest_then_rest(client: TestClient) -> None:
     }
 
 
+def test_candles_pushes_merge_instead_of_replacing(client: TestClient) -> None:
+    """The live push carries only recent bars; a deep push backfills. Merging
+    by timestamp keeps both, and re-sending the forming bar updates it."""
+    first = [
+        {"ts": "2026-06-09T14:05:00Z", "o": 1, "h": 2, "l": 0.5, "c": 1.5, "v": 10},
+        {"ts": "2026-06-09T14:10:00Z", "o": 1.5, "h": 3, "l": 1.4, "c": 2.0, "v": 11},
+    ]
+    backfill = [
+        {"ts": "2026-06-09T14:00:00Z", "o": 0.5, "h": 1.2, "l": 0.4, "c": 1.0, "v": 9},
+        # same bar as before but still forming — the newer close must win
+        {"ts": "2026-06-09T14:10:00Z", "o": 1.5, "h": 4, "l": 1.4, "c": 3.5, "v": 12},
+    ]
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json({"type": "candles", "symbol": "USTEC", "bars": first})
+        ws.send_json({"type": "candles", "symbol": "USTEC", "bars": backfill})
+
+    got = client.get("/api/orderflow/candles").json()["USTEC"]
+    assert [b["timestamp"][11:16] for b in got] == ["14:00", "14:05", "14:10"]
+    assert got[-1]["close"] == 3.5
+
+
+def test_candles_limit_caps_the_response(client: TestClient) -> None:
+    bars = [
+        {
+            "ts": f"2026-06-09T{10 + i // 12:02d}:{(i % 12) * 5:02d}:00Z",
+            "o": 100 + i,
+            "h": 101 + i,
+            "l": 99 + i,
+            "c": 100.5 + i,
+            "v": 10,
+        }
+        for i in range(30)
+    ]
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json({"type": "candles", "symbol": "USTEC", "bars": bars})
+
+    got = client.get("/api/orderflow/candles?limit=5").json()["USTEC"]
+    assert len(got) == 5
+    assert got[-1]["close"] == 100.5 + 29  # the newest bars, not the oldest
+
+
+def test_band_scenarios_absent_until_there_is_enough_history(client: TestClient) -> None:
+    bars = [
+        {
+            "ts": f"2026-06-09T{10 + i // 12:02d}:{(i % 12) * 5:02d}:00Z",
+            "o": 100.0,
+            "h": 100.5,
+            "l": 99.5,
+            "c": 100.0 + (0.5 if i % 2 else -0.5),
+            "v": 10,
+        }
+        for i in range(40)
+    ]
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json({"type": "candles", "symbol": "USTEC", "bars": bars})
+
+    # 40 bars is not enough history for the analog search — the symbol is
+    # simply absent rather than reported with a made-up number.
+    assert client.get("/api/orderflow/bands").json() == {}
+
+
 def test_malformed_candles_do_not_drop_stream(client: TestClient) -> None:
     with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
         ws.send_json({"type": "candles", "symbol": "USTEC", "bars": [{"ts": "not-a-date"}]})

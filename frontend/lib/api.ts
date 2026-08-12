@@ -5,6 +5,7 @@ import {
   AccountPnl,
   AccountBalanceHistory,
   AutoCloseStatus,
+  BandScenariosBySymbol,
   BotStatus,
   BriefResponse,
   CandlesBySymbol,
@@ -109,6 +110,8 @@ export const api = {
 
   // --- order-flow execution (auto-close + manual per-asset close) ---
   getCandles: () => fetchJson("/api/orderflow/candles", CandlesBySymbol),
+  getBandScenarios: () =>
+    fetchJson("/api/orderflow/bands", BandScenariosBySymbol),
   getAccountPnl: () => fetchJson("/api/orderflow/pnl", AccountPnl),
   getBalanceHistory: () =>
     fetchJson("/api/orderflow/balance/history", AccountBalanceHistory),

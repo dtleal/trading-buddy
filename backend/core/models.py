@@ -433,6 +433,61 @@ class SessionLiquidity(_Frozen):
     range_ratio: float | None = None  # range realized / baseline
 
 
+class BandPathPoint(_Frozen):
+    """One step of the typical route ahead, in price units."""
+
+    step: int  # bars ahead of the last bar (1 = next bar)
+    median: float  # middle of what happened in the analogs
+    p25: float  # 25th percentile (lower edge of the cone)
+    p75: float  # 75th percentile (upper edge of the cone)
+
+
+class BandRoundTrip(_Frozen):
+    """Did price come back to the OTHER band after touching this one first?
+
+    `n` is how many analogs touched this band first — read `back_pct` only with
+    `n` in mind, a 100% built on 3 cases is noise.
+    """
+
+    n: int
+    back_pct: float  # share of those `n` that later touched the opposite band
+
+
+class BandScenario(_Frozen):
+    """Where price usually went from here, measured on the symbol's own bars.
+
+    Answers "if it taps the lower band, does it come back to the upper one?"
+    the only honest way: by finding every past bar where price sat at the same
+    spot *inside* its Bollinger band (`pct_b`), and reading what actually
+    happened over the next `horizon_bars`. Future moves are normalised by the
+    band width at the time, so a quiet morning and a wild afternoon compare.
+
+    This is a description of past behaviour, NOT a forecast — with `samples`
+    always shown so a thin sample is never mistaken for an edge.
+    """
+
+    symbol: AssetSymbol
+    asof: datetime  # timestamp of the last bar consumed
+    last_close: float
+    upper: float
+    mid: float
+    lower: float
+    pct_b: float  # 0 = on the lower band, 1 = on the upper band
+    samples: int  # past bars that matched this spot in the band
+    horizon_bars: int
+    path: list[BandPathPoint] = Field(default_factory=list)
+    touch_upper_pct: float = 0.0  # analogs that touched the upper band at all
+    touch_lower_pct: float = 0.0  # analogs that touched the lower band at all
+    # Analogs that got back to the middle band (the SMA20) within the horizon.
+    # Usually the MUCH more common outcome than reaching the opposite band:
+    # crossing the middle is a prerequisite for it, and a wide band is often
+    # simply out of reach within the horizon. This is the honest "does it come
+    # back?" number; the round trips below answer the stricter question.
+    back_to_mid_pct: float = 0.0
+    upper_first: BandRoundTrip | None = None  # touched the upper band first
+    lower_first: BandRoundTrip | None = None  # touched the lower band first
+
+
 class LiveActivity(_Frozen):
     """Real-time activity read derived from the live footprint the backend
     already receives — NO historical baseline needed, so it fills the instant
