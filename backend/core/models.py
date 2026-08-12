@@ -453,6 +453,35 @@ class BandRoundTrip(_Frozen):
     back_pct: float  # share of those `n` that later touched the opposite band
 
 
+class BandRegime(_Frozen):
+    """The market state a band statistic was conditioned on.
+
+    Coming back to the middle band means something very different when the
+    trend is pushing the other way, when the bands are opening up, or when a
+    single outsized candle is trying to break out — so the analogs are filtered
+    to bars that were in the same state, not just at the same spot.
+    """
+
+    trend: Literal["up", "flat", "down"]  # slope of the middle band
+    width: Literal["expanding", "steady", "squeezing"]  # bands opening or closing
+    push: Literal["up", "down", "none"]  # an outsized candle driving one way
+
+
+class BandReturnToMid(_Frozen):
+    """How often price got back to the middle band, in this same state.
+
+    `regime_n` is the sample AFTER conditioning — always read the percentage
+    with it. `matched_on` lists the conditions that survived: the filter is
+    relaxed (push → width → trend) until the sample is usable, so it says what
+    the number actually holds constant.
+    """
+
+    pct: float
+    regime_n: int
+    matched_on: list[str] = Field(default_factory=list)
+    median_bars: int | None = None  # typical bars taken to get there
+
+
 class BandScenario(_Frozen):
     """Where price usually went from here, measured on the symbol's own bars.
 
@@ -486,6 +515,11 @@ class BandScenario(_Frozen):
     back_to_mid_pct: float = 0.0
     upper_first: BandRoundTrip | None = None  # touched the upper band first
     lower_first: BandRoundTrip | None = None  # touched the lower band first
+    # Today's market state, and the chance of getting back to the middle band
+    # measured only on past bars that were in that same state. None when even
+    # the loosest filter left too thin a sample.
+    regime: BandRegime | None = None
+    return_to_mid: BandReturnToMid | None = None
 
 
 class LiveActivity(_Frozen):

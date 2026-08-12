@@ -120,6 +120,99 @@ def test_getting_back_to_the_middle_beats_reaching_the_opposite_band() -> None:
         assert 0.0 <= scen.back_to_mid_pct <= 1.0
 
 
+def _alternating(n: int = 200, swing: float = 0.5) -> list[float]:
+    """Dead-quiet oscillation: flat middle band, steady width, no big candles."""
+    return [100.0 + (swing if i % 2 else -swing) for i in range(n)]
+
+
+def test_regime_reads_a_quiet_market_as_flat_and_steady() -> None:
+    scen = project_band_path(AssetSymbol.USTEC, _bars(_alternating(), wick=0.2))
+    assert scen is not None and scen.regime is not None
+    assert scen.regime.trend == "flat"
+    assert scen.regime.width == "steady"
+    assert scen.regime.push == "none"
+
+
+def test_regime_reads_a_steady_climb_as_an_uptrend() -> None:
+    # Drift well above the noise, so this is an unambiguous trend rather than a
+    # borderline one sitting on the threshold.
+    scen = project_band_path(AssetSymbol.USTEC, _bars(_trending(600, drift=0.5), wick=0.2))
+    assert scen is not None and scen.regime is not None
+    assert scen.regime.trend == "up"
+
+
+def test_regime_spots_a_giant_candle_trying_to_break_out() -> None:
+    """One outsized candle at the end, same close — only the range changes."""
+    bars = _bars(_alternating(), wick=0.2)
+    last = bars[-1]
+    pushed = bars[:-1] + [
+        last.model_copy(
+            update={
+                "open": last.close - 1.5,
+                "high": last.close + 0.2,
+                "low": last.close - 1.7,
+            }
+        )
+    ]
+    quiet = project_band_path(AssetSymbol.USTEC, bars)
+    driving = project_band_path(AssetSymbol.USTEC, pushed)
+    assert quiet is not None and quiet.regime is not None
+    assert driving is not None and driving.regime is not None
+    assert quiet.regime.push == "none"
+    assert driving.regime.push == "up"
+
+
+def test_regime_spots_the_bands_widening() -> None:
+    """A quiet stretch that suddenly starts swinging much harder."""
+    closes = _alternating(150) + [100.0 + (3.0 if i % 2 else -3.0) for i in range(12)]
+    scen = project_band_path(AssetSymbol.USTEC, _bars(closes, wick=0.2))
+    assert scen is not None and scen.regime is not None
+    assert scen.regime.width == "expanding"
+
+
+def _quiet_then_trending(seed: int = 3) -> list[float]:
+    """800 mean-reverting bars, then 400 of a steady climb."""
+    rng = random.Random(seed)
+    price = 100.0
+    out = []
+    for _ in range(800):
+        price += 0.05 * (100.0 - price) + rng.gauss(0.0, 1.0)
+        out.append(price)
+    for _ in range(400):
+        price += 0.5 + rng.gauss(0.0, 1.0)
+        out.append(price)
+    return out
+
+
+def test_conditioning_on_the_trend_lowers_the_odds_of_coming_back() -> None:
+    """Riding the top of the band in a climbing market is NOT the same as
+    sitting there in a quiet one — and the number has to show it. Measured on a
+    series whose second half trends: the overall figure mixes both phases, the
+    conditioned one only counts the bars that were also trending up."""
+    scen = project_band_path(AssetSymbol.USTEC, _bars(_quiet_then_trending(), wick=0.3))
+    assert scen is not None and scen.regime is not None
+    assert scen.regime.trend == "up"  # evaluated at the end of the trending half
+    r = scen.return_to_mid
+    assert r is not None
+    assert r.pct < scen.back_to_mid_pct  # trend makes the snap-back rarer
+    # Conditioning can only shrink the sample, never grow it.
+    assert 0 < r.regime_n <= scen.samples
+    assert r.median_bars is None or r.median_bars >= 1
+
+
+def test_the_state_filter_relaxes_instead_of_going_silent() -> None:
+    """A sample too thin for the full filter must fall back to fewer
+    conditions (and say so) rather than report nothing."""
+    bars = _bars(_quiet_then_trending(), wick=0.3)
+    strict = project_band_path(AssetSymbol.USTEC, bars, min_samples=12)
+    loose = project_band_path(AssetSymbol.USTEC, bars, min_samples=200)
+    assert strict is not None and strict.return_to_mid is not None
+    assert loose is not None and loose.return_to_mid is not None
+    # A higher bar for "enough" forces a shorter list of held-constant filters.
+    assert len(loose.return_to_mid.matched_on) < len(strict.return_to_mid.matched_on)
+    assert loose.return_to_mid.regime_n > strict.return_to_mid.regime_n
+
+
 def test_a_wide_band_is_reached_less_often_than_a_narrow_one() -> None:
     """What decides the band-to-band round trip is the band's width against how
     fast the market moves — NOT mean reversion. The mean-reverting series here

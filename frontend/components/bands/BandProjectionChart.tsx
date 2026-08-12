@@ -20,7 +20,7 @@ import {
   type BandPoint,
 } from "@/lib/bollinger";
 import { PressureGauge } from "@/components/orderflow/PressureGauge";
-import type { BandScenario, IntradayBar, OrderFlowSnapshot } from "@/lib/types";
+import type { BandRegime, BandScenario, IntradayBar, OrderFlowSnapshot } from "@/lib/types";
 
 const UP = "#10b981"; // emerald — up candles
 const DOWN = "#ef4444"; // red — down candles
@@ -216,31 +216,108 @@ export function BandProjectionChart({
   );
 }
 
-/** What the past says, in one line: how often price got back to the middle,
- * and how often it went all the way to the opposite band. `n` is always shown
- * — a percentage without its sample size is not a number worth reading. */
+/** Price is close enough to a band for "does it come back to the middle?" to
+ * be a real question. In the middle of the band it is not — price is already
+ * there, so the figure would be trivially high and mean nothing. */
+const AT_BAND = 0.2;
+
+const TREND_LABEL = {
+  up: "tendência de alta",
+  flat: "sem tendência",
+  down: "tendência de baixa",
+} as const;
+const WIDTH_LABEL = {
+  expanding: "bandas alargando",
+  steady: "largura normal",
+  squeezing: "bandas apertando",
+} as const;
+const PUSH_LABEL = { up: "candle grande ↑", down: "candle grande ↓", none: "" } as const;
+
+/** The market state the numbers below are conditioned on. Amber marks the
+ * states that work AGAINST a return to the middle (bands opening up, one
+ * outsized candle driving). */
+function RegimeChips({ regime }: { regime: BandRegime }) {
+  const chip = (text: string, tone: string) => (
+    <span key={text} className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${tone}`}>
+      {text}
+    </span>
+  );
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {chip(
+        TREND_LABEL[regime.trend],
+        regime.trend === "up"
+          ? "bg-emerald-500/10 text-emerald-400"
+          : regime.trend === "down"
+            ? "bg-red-500/10 text-red-400"
+            : "bg-zinc-800 text-zinc-400",
+      )}
+      {chip(
+        WIDTH_LABEL[regime.width],
+        regime.width === "expanding"
+          ? "bg-amber-500/10 text-amber-400"
+          : regime.width === "squeezing"
+            ? "bg-sky-500/10 text-sky-400"
+            : "bg-zinc-800 text-zinc-400",
+      )}
+      {regime.push !== "none" &&
+        chip(PUSH_LABEL[regime.push], "bg-amber-500/10 text-amber-400")}
+    </div>
+  );
+}
+
+/** What the past says. At a band the headline is the chance of getting back to
+ * the middle IN THIS SAME MARKET STATE (with the plain figure alongside, so a
+ * big gap between them is visible); mid-band that question is meaningless, so
+ * the round trip to the far band leads instead. `n` is always shown — a
+ * percentage without its sample size is not a number worth reading. */
 function ScenarioSummary({ scenario }: { scenario: BandScenario }) {
   const below = scenario.pct_b < 0.5;
   const trip = below ? scenario.lower_first : scenario.upper_first;
   const other = below ? "de cima" : "de baixo";
-  const hours = Math.round((scenario.horizon_bars * 5) / 60);
+  const atBand = scenario.pct_b <= AT_BAND || scenario.pct_b >= 1 - AT_BAND;
+  const side = below ? "banda de baixo" : "banda de cima";
+  const r = scenario.return_to_mid;
+
   return (
-    <p className="text-[11px] leading-relaxed text-zinc-500">
-      nas {scenario.samples} vezes que esteve aqui na banda (últimos ~
-      {hours === 1 ? "1h" : `${hours}h`} depois):{" "}
-      <span className="text-zinc-300">
-        {pct(scenario.back_to_mid_pct)} voltou pra média
-      </span>
-      {trip && trip.n > 0 && (
-        <>
-          {" · "}
-          <span className="text-zinc-300">
-            {pct(trip.back_pct)} chegou na banda {other}
-          </span>{" "}
-          (n={trip.n})
-        </>
-      )}
-    </p>
+    <div className="space-y-1">
+      {scenario.regime && <RegimeChips regime={scenario.regime} />}
+      <p className="text-[11px] leading-relaxed text-zinc-500">
+        {atBand && r ? (
+          <>
+            {side}:{" "}
+            <span className="font-semibold text-zinc-200">
+              {pct(r.pct)} volta pra média
+            </span>
+            {r.median_bars != null && ` em ~${r.median_bars} candle${r.median_bars > 1 ? "s" : ""}`}{" "}
+            <span className="text-zinc-600">
+              (n={r.regime_n}
+              {r.matched_on.length > 0
+                ? `, mesmo estado: ${r.matched_on.join(" + ")}`
+                : ", sem filtrar o estado"}
+              )
+            </span>{" "}
+            · {pct(scenario.back_to_mid_pct)} sem olhar o estado
+          </>
+        ) : (
+          <>
+            nas {scenario.samples} vezes que esteve aqui:{" "}
+            <span className="text-zinc-300">
+              {pct(scenario.back_to_mid_pct)} tocou a média
+            </span>
+            {trip && trip.n > 0 && (
+              <>
+                {" · "}
+                <span className="text-zinc-300">
+                  {pct(trip.back_pct)} chegou na banda {other}
+                </span>{" "}
+                (n={trip.n})
+              </>
+            )}
+          </>
+        )}
+      </p>
+    </div>
   );
 }
 

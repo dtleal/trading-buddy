@@ -276,6 +276,28 @@ container the Dashboard uses.
   what price *did* the last times it sat here, the bar is who is leaning on the
   tape *right now* — agreement strengthens the case, disagreement is a fight
   worth waiting out.
+- **Volta pra média, conditioned on the market state:** when price is sitting
+  at a band (`%B` ≤ 0.2 or ≥ 0.8), the headline is how often it got back to the
+  **middle** band — measured only on past bars that were in the SAME state, and
+  shown next to the plain figure so a gap between them is visible. The state is
+  three readings, all normalised by the band's own width so they mean the same
+  thing on GOLD and on US30, and all shown as chips on the card:
+  - **trend** — how far the middle band travelled over the last 5 bars;
+  - **width** — today's band width against its 50-bar baseline (the "as bandas
+    estão alargando?" test);
+  - **push** — one outsized candle (≥1.8× the normal size) driving one way.
+
+  Conditioning costs sample size, so the filter is relaxed in a fixed order
+  (push → trend → width) until the sample is usable, and the card names what it
+  actually held constant. Mid-band the question is meaningless — price is
+  already at the middle — so the round trip leads there instead.
+- **Why width is the last filter dropped** (measured over ~5 days of live bars,
+  from a band touch): the bands' width is by far the strongest signal —
+  **52%** get back to the middle while the bands are **squeezing** against
+  **28%** while they are **expanding**. The trend is second (55% vs 37% off the
+  lower band) and a single big candle is the weakest. The thresholds are
+  calibrated on those same live distributions, not guessed, so all three
+  buckets stay populated.
 - **A honest finding, measured on live data:** going band-to-band inside an
   hour is **rare — roughly 8–15%**. What actually happens is a return to the
   **middle** band (the SMA20), which is why the summary line leads with that

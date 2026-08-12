@@ -102,6 +102,22 @@ export const BandRoundTrip = z.object({
 });
 export type BandRoundTrip = z.infer<typeof BandRoundTrip>;
 
+/** The market state the return-to-mid figure was conditioned on. */
+export const BandRegime = z.object({
+  trend: z.enum(["up", "flat", "down"]),
+  width: z.enum(["expanding", "steady", "squeezing"]),
+  push: z.enum(["up", "down", "none"]),
+});
+export type BandRegime = z.infer<typeof BandRegime>;
+
+export const BandReturnToMid = z.object({
+  pct: z.number(),
+  regime_n: z.number(),
+  matched_on: z.array(z.string()).default([]),
+  median_bars: z.number().nullable().default(null),
+});
+export type BandReturnToMid = z.infer<typeof BandReturnToMid>;
+
 /** GET /api/orderflow/bands — what price actually did the last times it sat
  * where it sits now, measured on the symbol's own bars. Absent per symbol when
  * the sample is too thin to say anything. */
@@ -121,6 +137,8 @@ export const BandScenario = z.object({
   back_to_mid_pct: z.number(),
   upper_first: BandRoundTrip.nullable().default(null),
   lower_first: BandRoundTrip.nullable().default(null),
+  regime: BandRegime.nullable().default(null),
+  return_to_mid: BandReturnToMid.nullable().default(null),
 });
 export type BandScenario = z.infer<typeof BandScenario>;
 
