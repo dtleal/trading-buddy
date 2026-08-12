@@ -3,11 +3,14 @@
 import { Header } from "@/components/shared/Header";
 import { BandProjectionChart } from "@/components/bands/BandProjectionChart";
 import { useBandScenarios, useCandles } from "@/hooks/useCandles";
+import { useOrderFlow } from "@/hooks/useOrderFlow";
 import { TRACKED_ASSETS } from "@/lib/types";
 
 export default function BandsPage() {
   const candles = useCandles();
   const scenarios = useBandScenarios();
+  // Live buy/sell pressure, same feed the Dashboard reads.
+  const { flows } = useOrderFlow();
 
   return (
     <>
@@ -27,6 +30,7 @@ export default function BandsPage() {
               title={label}
               bars={candles?.[key] ?? []}
               scenario={scenarios?.[key]}
+              flow={flows[key]}
             />
           ))}
         </div>

@@ -19,7 +19,8 @@ import {
   type BandOdds,
   type BandPoint,
 } from "@/lib/bollinger";
-import type { BandScenario, IntradayBar } from "@/lib/types";
+import { PressureGauge } from "@/components/orderflow/PressureGauge";
+import type { BandScenario, IntradayBar, OrderFlowSnapshot } from "@/lib/types";
 
 const UP = "#10b981"; // emerald — up candles
 const DOWN = "#ef4444"; // red — down candles
@@ -48,10 +49,12 @@ export function BandProjectionChart({
   title,
   bars,
   scenario,
+  flow,
 }: {
   title: string;
   bars: IntradayBar[];
   scenario?: BandScenario;
+  flow?: OrderFlowSnapshot;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -181,10 +184,15 @@ export function BandProjectionChart({
   return (
     <Card>
       <CardHeader className="pb-2">
-        <div className="flex items-baseline justify-between">
+        <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <CardTitle>{title}</CardTitle>
             {odds && <TouchOddsBadge odds={odds} measured={!!scenario} />}
+          </div>
+          {/* Live buy/sell pressure — the tape's lean right now, next to the
+              historical lean the badge carries. */}
+          <div className="w-32 shrink-0 sm:w-40" title="pressão compradora · vendedora (tape ao vivo)">
+            <PressureGauge flow={flow} />
           </div>
           {last !== null && (
             <span className="text-sm font-semibold tabular-nums text-zinc-100">
