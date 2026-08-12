@@ -30,8 +30,9 @@ const CONE = "#0369a1"; // sky-800 — middle half of past outcomes
 
 /** Bars ahead when there is no measured route to follow (6 × 5min = 30 min). */
 const FALLBACK_HORIZON = 6;
-/** Real bars kept in view (the rest stay scrollable to the left). */
-const VISIBLE_BARS = 42;
+/** Real bars kept in view (the rest stay scrollable to the left). Sized for a
+ * three-across card: ~5h of context without squeezing the candles. */
+const VISIBLE_BARS = 60;
 
 /**
  * One symbol's 5m candles with standard Bollinger (20, 2), the route price
@@ -194,7 +195,7 @@ export function BandProjectionChart({
         {scenario && <ScenarioSummary scenario={scenario} />}
       </CardHeader>
       <CardContent>
-        <div className="relative w-full" style={{ height: 260 }}>
+        <div className="relative w-full" style={{ height: 320 }}>
           <div ref={containerRef} className="absolute inset-0" />
           {bars.length === 0 && (
             <div className="absolute inset-0 grid place-items-center text-xs text-zinc-500">
