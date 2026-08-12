@@ -254,6 +254,14 @@ same feed the trader's own chart shows, not delayed yfinance data.
   slope of the last 20 closes and the bands are recomputed over the extended
   series (`frontend/lib/bollinger.ts`). The sky dashed line is that assumed
   close path. It is an **extrapolation, not a forecast** — the page says so.
+- **Seta ▲/▼ com % (qual banda primeiro):** the chance that price touches the
+  **upper** band before the **lower** one. Same assumptions as the projection —
+  price as a random walk with the recent drift and volatility — solved with the
+  closed-form first-passage probability (which of two barriers is hit first).
+  With no usable drift it reduces to "whichever band is closer is likelier"
+  (`B/(A+B)`). Grey badge = coin flip (≤55%); green/red = a real lean. When the
+  last close is already at or through a band it says **"na banda"** instead of
+  a fake 100% — that is where price *is*, not a probability.
 - **Data path:** collector pushes the last 120 M5 bars per symbol every ~5s
   (`candles` message, bar times converted to true UTC) → backend keeps them in
   memory → `GET /api/orderflow/candles` → the tab polls every 5s. The last bar

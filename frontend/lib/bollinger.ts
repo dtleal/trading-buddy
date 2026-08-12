@@ -59,6 +59,57 @@ function slope(xs: number[]): number {
   return den === 0 ? 0 : num / den;
 }
 
+export interface BandOdds {
+  /** Chance (0–1) that the upper band is touched before the lower one. */
+  pUp: number;
+  /** Set when the last close is already at/through a band — then there is no
+   * probability to report, price is THERE. The UI says so instead of "100%". */
+  at: "upper" | "lower" | null;
+}
+
+/**
+ * Odds that price touches the UPPER band before the lower one.
+ *
+ * Same assumptions as the projection: price is a random walk with the recent
+ * drift (least-squares slope of the last `period` closes) and the volatility
+ * of the last `period` close-to-close changes. For that process the chance of
+ * hitting a barrier A above before B below has a closed form (first-passage
+ * of Brownian motion with drift); with zero drift it reduces to B/(A+B) —
+ * "whichever band is closer is likelier". Bands are treated as static
+ * barriers, fine for a ~30 min horizon. Returns null without enough bars.
+ */
+export function bandTouchOdds(
+  closes: number[],
+  { period = 20, mult = 2 } = {},
+): BandOdds | null {
+  const n = closes.length;
+  if (n < period + 1) return null;
+
+  const window = closes.slice(n - period);
+  const mu = mean(window);
+  const sd = stdev(window, mu);
+  const upper = mu + mult * sd;
+  const lower = mu - mult * sd;
+  const last = closes[n - 1];
+  const a = upper - last; // distance up
+  const b = last - lower; // distance down
+  if (a <= 0) return { pUp: 1, at: "upper" };
+  if (b <= 0) return { pUp: 0, at: "lower" };
+
+  const drift = slope(window);
+  const diffs = window.slice(1).map((c, i) => c - window[i]);
+  const dMean = mean(diffs);
+  const vol = stdev(diffs, dMean);
+  const k = vol === 0 ? 0 : (2 * drift) / (vol * vol);
+  // No usable drift → the distance-only form.
+  if (Math.abs(k) < 1e-12) return { pUp: b / (a + b), at: null };
+  // exp args clamped: beyond ±50 the ratio is saturated at 0/1 anyway.
+  const clamp = (x: number) => Math.max(-50, Math.min(50, x));
+  const eB = Math.exp(clamp(k * b));
+  const eA = Math.exp(clamp(-k * a));
+  return { pUp: (1 - eB) / (eA - eB), at: null };
+}
+
 export function computeBandProjection(
   bars: { time: number; close: number }[],
   { period = 20, mult = 2, horizon = 6, stepSec = 300 } = {},

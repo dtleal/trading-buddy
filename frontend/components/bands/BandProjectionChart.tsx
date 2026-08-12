@@ -11,8 +11,14 @@ import {
   type LineData,
   type UTCTimestamp,
 } from "lightweight-charts";
+import { ArrowDown, ArrowUp } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { computeBandProjection, type BandPoint } from "@/lib/bollinger";
+import {
+  bandTouchOdds,
+  computeBandProjection,
+  type BandOdds,
+  type BandPoint,
+} from "@/lib/bollinger";
 import type { IntradayBar } from "@/lib/types";
 
 const UP = "#10b981"; // emerald — up candles
@@ -138,12 +144,16 @@ export function BandProjectionChart({
   }, [bars]);
 
   const last = bars.length > 0 ? bars[bars.length - 1].close : null;
+  const odds = bandTouchOdds(bars.map((b) => b.close));
 
   return (
     <Card>
       <CardHeader className="pb-2">
         <div className="flex items-baseline justify-between">
-          <CardTitle>{title}</CardTitle>
+          <div className="flex items-center gap-2">
+            <CardTitle>{title}</CardTitle>
+            {odds && <TouchOddsBadge odds={odds} />}
+          </div>
           {last !== null && (
             <span className="text-sm font-semibold tabular-nums text-zinc-100">
               {last.toLocaleString("en-US", { maximumFractionDigits: 2 })}
@@ -162,6 +172,37 @@ export function BandProjectionChart({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+/** Which band gets touched first, and how likely: ▲ 68% = 68% de chance de
+ * tocar a banda de CIMA antes da de baixo (distância + inclinação + vol dos
+ * últimos 20 candles). Cinza quando está no cara-ou-coroa (≤55%). Quando o
+ * preço JÁ está na banda mostra "na banda" — não é probabilidade, é onde ele
+ * está. */
+function TouchOddsBadge({ odds }: { odds: BandOdds }) {
+  const up = odds.at ? odds.at === "upper" : odds.pUp >= 0.5;
+  const pct = Math.round((up ? odds.pUp : 1 - odds.pUp) * 100);
+  const undecided = !odds.at && pct <= 55;
+  const tone = undecided
+    ? "bg-zinc-800 text-zinc-300"
+    : up
+      ? "bg-emerald-500/15 text-emerald-400"
+      : "bg-red-500/15 text-red-400";
+  const Arrow = up ? ArrowUp : ArrowDown;
+  const side = up ? "cima" : "baixo";
+  return (
+    <span
+      className={`inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-xs font-semibold tabular-nums ${tone}`}
+      title={
+        odds.at
+          ? `preço já está na banda de ${side}`
+          : `${pct}% de chance de tocar a banda de ${side} primeiro (distância até cada banda + inclinação e volatilidade dos últimos 20 candles)`
+      }
+    >
+      <Arrow className="size-3.5" />
+      {odds.at ? "na banda" : `${pct}%`}
+    </span>
   );
 }
 
