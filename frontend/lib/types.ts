@@ -82,6 +82,11 @@ export const IntradayBar = z.object({
 });
 export type IntradayBar = z.infer<typeof IntradayBar>;
 
+/** GET /api/orderflow/candles — M5 bars per symbol straight from MT5 (newest
+ * last; the final bar is the one still forming). Feeds the Bandas tab. */
+export const CandlesBySymbol = z.record(AssetSymbol, z.array(IntradayBar));
+export type CandlesBySymbol = z.infer<typeof CandlesBySymbol>;
+
 export const EconomicEvent = z.object({
   name: z.string(),
   currency: z.string(),

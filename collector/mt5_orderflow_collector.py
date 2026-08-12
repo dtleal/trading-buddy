@@ -992,6 +992,32 @@ def _read_session_liquidity(
     return msg
 
 
+def _read_candles(backend: str, broker: str, count: int) -> dict[str, Any] | None:
+    """Last `count` M5 bars (newest last; the final bar is still forming).
+
+    Bar times are converted from the broker's server clock to true UTC with
+    the shared `_server_offset_ms`, so the backend can line them up with every
+    other UTC timestamp it holds. Feeds the Bollinger-projection tab.
+    """
+    if mt5 is None:
+        return None
+    rates = mt5.copy_rates_from_pos(broker, mt5.TIMEFRAME_M5, 0, count)
+    if rates is None or len(rates) == 0:
+        return None
+    bars = [
+        {
+            "ts": _server_ms_to_utc_iso(int(r["time"]) * 1000),
+            "o": float(r["open"]),
+            "h": float(r["high"]),
+            "l": float(r["low"]),
+            "c": float(r["close"]),
+            "v": float(r["tick_volume"]),
+        }
+        for r in rates
+    ]
+    return {"type": "candles", "symbol": backend, "asof": _now_iso(), "bars": bars}
+
+
 def _quantize(price: float, tick: float | None) -> float:
     """Snap a price to the footprint row grid so a continuous quote feed doesn't
     fragment into thousands of distinct footprint cells. No tick → unchanged."""
@@ -1325,6 +1351,11 @@ def run(cfg: dict[str, Any]) -> None:
     liq_days = int(cfg.get("liquidity_baseline_days", 20))
     liq_period = float(cfg.get("liquidity_poll_seconds", 60))
     next_liq_at = 0.0
+    # M5 candle push cadence (Bollinger-projection tab). `next_candles_at = 0`
+    # forces a first push so the chart draws as soon as the stream is up.
+    cand_period = float(cfg.get("candles_poll_seconds", 5))
+    cand_bars = int(cfg.get("candles_bars", 120))
+    next_candles_at = 0.0
     # Account P&L (day/week/month) cadence. `next_pnl_at = 0` forces a first read
     # so the top-of-screen cards populate as soon as the stream is up.
     next_pnl_at = 0.0
@@ -1461,6 +1492,18 @@ def run(cfg: dict[str, Any]) -> None:
                         liq = None
                     if liq:
                         ws.send(json.dumps(liq))
+            # Push M5 candle history (Bollinger-projection tab). Own cadence —
+            # a 5m chart doesn't need the tick poll rate.
+            if cand_period > 0 and now_mono >= next_candles_at:
+                next_candles_at = now_mono + cand_period
+                for m in cfg["symbols"]:
+                    try:
+                        cand = _read_candles(m["backend"], m["mt5"], cand_bars)
+                    except Exception as exc:  # never let candles break the stream
+                        logger.debug("candles read failed for %s: %s", m["mt5"], exc)
+                        cand = None
+                    if cand:
+                        ws.send(json.dumps(cand))
             # Push realized account P&L (day/week/month). Own slow cadence — it
             # only moves when a trade closes, and the read scans the whole month.
             if now_mono >= next_pnl_at:

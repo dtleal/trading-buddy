@@ -7,6 +7,7 @@ import {
   AutoCloseStatus,
   BotStatus,
   BriefResponse,
+  CandlesBySymbol,
   DashboardTick,
   QAEntry,
   QAEntryInput,
@@ -107,6 +108,7 @@ export const api = {
   deleteQA: (id: number) => fetchVoid(`/api/qa/${id}`, { method: "DELETE" }),
 
   // --- order-flow execution (auto-close + manual per-asset close) ---
+  getCandles: () => fetchJson("/api/orderflow/candles", CandlesBySymbol),
   getAccountPnl: () => fetchJson("/api/orderflow/pnl", AccountPnl),
   getBalanceHistory: () =>
     fetchJson("/api/orderflow/balance/history", AccountBalanceHistory),

@@ -242,6 +242,23 @@ balance (in profit), red below — with a dashed guide-line at that opening.
   live equity samples to `data/account_balance/` (JSONL per UTC day) so the
   intraday equity wiggle survives a restart.
 
+### Bandas — Bollinger projection tab (`/bands`)
+
+A tab next to Q&A with one 5m candle chart per tracked asset (6 charts,
+lightweight-charts), drawn from the **MT5 candles the collector pushes** — the
+same feed the trader's own chart shows, not delayed yfinance data.
+
+- **Bands:** standard Bollinger (20-period SMA ± 2σ on closes), solid lines.
+- **Projection (dashed):** the continuation of the three band lines over the
+  next 30 min (6 bars). Future closes are assumed to ride the least-squares
+  slope of the last 20 closes and the bands are recomputed over the extended
+  series (`frontend/lib/bollinger.ts`). The sky dashed line is that assumed
+  close path. It is an **extrapolation, not a forecast** — the page says so.
+- **Data path:** collector pushes the last 120 M5 bars per symbol every ~5s
+  (`candles` message, bar times converted to true UTC) → backend keeps them in
+  memory → `GET /api/orderflow/candles` → the tab polls every 5s. The last bar
+  is the one still forming, so the projection moves with the live price.
+
 ### LLM features (need `CLAUDE_API_KEY`)
 
 - `dtb brief` — pre-market briefing in PT-BR via Claude Opus 4.7.

@@ -38,6 +38,7 @@ from core.models import (
     BotStatus,
     BotTrade,
     EquityPoint,
+    IntradayBar,
     OrderFlowSnapshot,
     Position,
     SessionLiquidity,
@@ -118,6 +119,11 @@ _liquidity_store: dict[AssetSymbol, SessionLiquidity] = {}
 # and is stamped onto each symbol's snapshot. An explicit empty list means the
 # collector reported the symbol is flat (so a closed trade clears from the UI).
 _positions_store: dict[AssetSymbol, list[Position]] = {}
+
+# Latest M5 candles per symbol pushed by the collector (newest last; the final
+# bar is the one still forming). Feeds the Bollinger-projection tab over REST —
+# candles do NOT ride the order-flow snapshot, the UI polls them.
+_candles_store: dict[AssetSymbol, list[IntradayBar]] = {}
 
 
 def latest_liquidity() -> dict[AssetSymbol, SessionLiquidity]:
@@ -790,6 +796,21 @@ async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
         # pressure bar. Touch the symbol so the snapshot is re-broadcast now.
         _liquidity_store[symbol] = _parse_liquidity(msg, symbol)
         return {symbol}
+    if mtype == "candles":
+        # M5 bar history for the symbol, replaced wholesale on every push. A
+        # malformed bar raises and the ingest loop skips the whole message.
+        _candles_store[symbol] = [
+            IntradayBar(
+                timestamp=_parse_dt(raw["ts"]),
+                open=float(raw["o"]),
+                high=float(raw["h"]),
+                low=float(raw["l"]),
+                close=float(raw["c"]),
+                volume=float(raw.get("v", 0.0) or 0.0),
+            )
+            for raw in msg.get("bars", ())
+        ]
+        return set()
     if mtype == "positions":
         # Open positions for this symbol (read-only). An empty list is a valid,
         # meaningful update — it means "now flat", so a closed trade clears.
@@ -963,6 +984,17 @@ class AutoCloseRequest(BaseModel):
 
     armed: bool
     target_usd: float | None = None
+
+
+@router.get(
+    "/api/orderflow/candles",
+    response_model=dict[AssetSymbol, list[IntradayBar]],
+    tags=["orderflow"],
+)
+async def get_candles() -> dict[AssetSymbol, list[IntradayBar]]:
+    """Latest M5 candles per symbol pushed by the collector (newest last; the
+    final bar is still forming). Empty until the collector's first push."""
+    return _candles_store
 
 
 @router.get("/api/orderflow/autoclose", response_model=AutoCloseStatus, tags=["orderflow"])

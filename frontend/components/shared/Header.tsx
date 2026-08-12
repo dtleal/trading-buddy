@@ -10,6 +10,7 @@ import { Activity } from "lucide-react";
 const TABS = [
   { href: "/", label: "Dashboard" },
   { href: "/qa", label: "Q&A" },
+  { href: "/bands", label: "Bandas" },
 ] as const;
 
 /**

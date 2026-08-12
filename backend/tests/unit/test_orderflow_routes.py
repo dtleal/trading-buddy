@@ -33,6 +33,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     of.aggregator = of._build_aggregator()
     of._positions_store.clear()
     of._liquidity_store.clear()
+    of._candles_store.clear()
     of._autoclose = of._AutoCloseState()
     of._auto_trade_enabled = False
     of._bot = of._BotState()
@@ -181,6 +182,38 @@ def test_malformed_message_does_not_drop_stream(client: TestClient) -> None:
     snaps = client.get("/api/orderflow").json()
     ustec = next(s for s in snaps if s["symbol"] == "USTEC")
     assert ustec["book"]["bids"][0]["price"] == 100.0
+
+
+def test_candles_ingest_then_rest(client: TestClient) -> None:
+    bars = [
+        {"ts": "2026-06-09T14:00:00Z", "o": 100.0, "h": 101.0, "l": 99.5, "c": 100.5, "v": 1200},
+        {"ts": "2026-06-09T14:05:00Z", "o": 100.5, "h": 102.0, "l": 100.25, "c": 101.75, "v": 900},
+    ]
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json({"type": "candles", "symbol": "USTEC", "bars": bars})
+
+    data = client.get("/api/orderflow/candles").json()
+    got = data["USTEC"]
+    assert len(got) == 2
+    assert got[0]["timestamp"].startswith("2026-06-09T14:00:00")
+    assert got[-1] == {
+        "timestamp": got[-1]["timestamp"],
+        "open": 100.5,
+        "high": 102.0,
+        "low": 100.25,
+        "close": 101.75,
+        "volume": 900.0,
+    }
+
+
+def test_malformed_candles_do_not_drop_stream(client: TestClient) -> None:
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json({"type": "candles", "symbol": "USTEC", "bars": [{"ts": "not-a-date"}]})
+        ws.send_json(_book_msg())
+
+    snaps = client.get("/api/orderflow").json()
+    assert any(s["symbol"] == "USTEC" and s["book"] for s in snaps)
+    assert client.get("/api/orderflow/candles").json() == {}
 
 
 def test_ingest_rejects_bad_token(client: TestClient) -> None:
