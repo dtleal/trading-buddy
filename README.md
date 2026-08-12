@@ -280,7 +280,9 @@ container the Dashboard uses.
   **only when price is sitting at a band** (`%B` ≤ 0.2 or ≥ 0.8) — mid-band the
   question is meaningless, price is already at the middle. It reads: of the
   past visits to this band **in this same market state**, how many got back to
-  the middle band within the hour. Sky = usually comes back, amber = usually
+  the middle band within the hour. **Read it upwards: a HIGHER number means it
+  is more likely to snap back; a low one means it usually keeps going** (a
+  break, not a bounce). Sky = usually comes back, amber = usually
   keeps going (a break, not a bounce), grey = coin flip; dimmed when the sample
   is under 25. Sample size, the conditions held, the typical number of candles
   and the unconditioned figure all live in the tooltip, so the card stays
