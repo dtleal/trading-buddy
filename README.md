@@ -314,9 +314,12 @@ container the Dashboard uses.
   the chart, plus a 1500-bar backfill every 10 min and on every reconnect for
   the statistics (`candles` message, bar times converted to true UTC) → the
   backend **merges pushes by bar timestamp** into ~7 days of history →
-  `GET /api/orderflow/candles?limit=120` (chart, polled every 5s) and
-  `GET /api/orderflow/bands` (scenario, polled every 60s). The last bar is the
-  one still forming, so the chart moves with the live price.
+  `GET /api/orderflow/candles?limit=120` (chart) and `GET /api/orderflow/bands`
+  (scenario) — **both polled every 5s**. The last bar is the one still forming,
+  so the chart AND the badges move with the live price: the spot in the band
+  (`pct_b`) is read off that forming bar, so a slower poll on the scenario left
+  the badges a minute behind on a fast move (price already past the middle band
+  while the badge still pointed at the band it came from).
 
 ### LLM features (need `CLAUDE_API_KEY`)
 

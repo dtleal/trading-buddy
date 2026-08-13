@@ -10,9 +10,11 @@ import type { BandScenariosBySymbol, CandlesBySymbol } from "@/lib/types";
  */
 const POLL_MS = 5_000;
 
-/** The band scenario only moves when a 5m bar closes, so it polls far slower
- * than the candles — it also costs the backend an analog search per symbol. */
-const SCENARIO_POLL_MS = 60_000;
+/** The scenario is read off the bar still forming, so it moves with every tick,
+ * not only when a 5m bar closes — polling it slower than the candles left the
+ * badges showing a stale read while the chart had already crossed the middle
+ * band. Same 5s as the candles: the analog search costs ~150ms for all symbols. */
+const SCENARIO_POLL_MS = POLL_MS;
 
 export function useCandles(): CandlesBySymbol | null {
   const [candles, setCandles] = useState<CandlesBySymbol | null>(null);
