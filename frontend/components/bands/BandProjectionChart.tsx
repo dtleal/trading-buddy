@@ -21,6 +21,7 @@ import {
 } from "@/lib/bollinger";
 import { PressureGauge } from "@/components/orderflow/PressureGauge";
 import type { BandRegime, BandScenario, IntradayBar, OrderFlowSnapshot } from "@/lib/types";
+import { chartColors, useTheme } from "@/lib/theme";
 
 const UP = "#10b981"; // emerald — up candles
 const DOWN = "#ef4444"; // red — down candles
@@ -57,6 +58,7 @@ export function BandProjectionChart({
   flow?: OrderFlowSnapshot;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const theme = useTheme();
   const chartRef = useRef<IChartApi | null>(null);
   const candlesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const linesRef = useRef<ISeriesApi<"Line">[]>([]);
@@ -118,6 +120,17 @@ export function BandProjectionChart({
       lastBarTimeRef.current = null;
     };
   }, []);
+
+  // Repaint the axes/grid when the dark/light toggle flips.
+  useEffect(() => {
+    const c = chartColors(theme);
+    chartRef.current?.applyOptions({
+      layout: { textColor: c.text },
+      grid: { vertLines: { color: c.grid }, horzLines: { color: c.grid } },
+      timeScale: { borderColor: c.border },
+      rightPriceScale: { borderColor: c.border },
+    });
+  }, [theme]);
 
   // Push the polled bars + recompute bands / route
   useEffect(() => {

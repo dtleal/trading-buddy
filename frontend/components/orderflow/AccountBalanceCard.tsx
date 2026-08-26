@@ -15,6 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { useBalanceHistory } from "@/hooks/useBalanceHistory";
 import type { AccountBalanceHistory, BalanceStep } from "@/lib/types";
+import { chartColors, useTheme } from "@/lib/theme";
 
 const UP_LINE = "#10b981"; // emerald — above opening balance (profit)
 const DOWN_LINE = "#ef4444"; // red — below opening balance (loss)
@@ -29,6 +30,7 @@ const DOWN_LINE = "#ef4444"; // red — below opening balance (loss)
 export function AccountBalanceCard() {
   const history = useBalanceHistory();
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const theme = useTheme();
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Baseline"> | null>(null);
   const openLineRef = useRef<IPriceLine | null>(null);
@@ -80,6 +82,17 @@ export function AccountBalanceCard() {
       openLineRef.current = null;
     };
   }, []);
+
+  // Repaint the axes/grid when the dark/light toggle flips.
+  useEffect(() => {
+    const c = chartColors(theme);
+    chartRef.current?.applyOptions({
+      layout: { textColor: c.text },
+      grid: { vertLines: { color: c.grid }, horzLines: { color: c.grid } },
+      timeScale: { borderColor: c.border },
+      rightPriceScale: { borderColor: c.border },
+    });
+  }, [theme]);
 
   // Push the polled data + reposition the baseline / opening guide
   useEffect(() => {

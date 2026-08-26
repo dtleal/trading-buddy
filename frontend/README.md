@@ -6,7 +6,8 @@ Next.js 15 + TypeScript + Tailwind 4 web UI for `trading-buddy`.
 
 - **Next.js 15** App Router (RSC + Turbopack)
 - **TypeScript** strict
-- **Tailwind CSS 4** + custom dark palette
+- **Tailwind CSS 4** + custom dark palette, with a light mode on top of it
+  (see [Dark / light theme](#dark--light-theme))
 - **shadcn/ui** primitives (Card, Button, Badge), copied locally — not a dep
 - **TanStack Query v5** for REST state (initial loads, manual refetch)
 - **Zustand** for client state (alert configs)
@@ -40,14 +41,14 @@ side. Keep it in sync with `TRACKED_ASSETS` in `backend/core/enums.py`.
 ```
 frontend/
 ├── app/                       Next.js App Router
-│   ├── layout.tsx             Dark theme + providers
+│   ├── layout.tsx             Theme class + providers
 │   ├── page.tsx               Dashboard (/)
 │   ├── qa/page.tsx            Q&A knowledge base (/qa)
 │   ├── providers.tsx          QueryClient + Toaster
 │   └── globals.css
 ├── components/
 │   ├── ui/                    Card, Button, Badge, Input, Textarea (shadcn-style)
-│   ├── shared/                Header (tab nav), ConnectionStatusIndicator
+│   ├── shared/                Header (tab nav), ConnectionStatusIndicator, ThemeToggle
 │   └── qa/                    QAPanel, QAEntryCard, QAEditor
 ├── hooks/
 │   ├── useLiveTick.ts         Subscribes to /ws/ticks
@@ -56,9 +57,34 @@ frontend/
 │   ├── api.ts                 fetch + Zod validation
 │   ├── ws.ts                  Auto-reconnecting WebSocket client
 │   ├── types.ts               Domain Zod schemas (mirror of backend DTOs)
+│   ├── theme.ts               Dark/light switch + chart colors
 │   └── utils.ts               cn(), fmtPrice(), fmtPct()
 └── package.json
 ```
+
+## Dark / light theme
+
+The sun/moon button in the header flips the whole app between dark and light.
+The choice is kept in `localStorage` under `dtb-theme`, and a tiny inline script
+in `app/layout.tsx` puts the class on `<html>` before the first paint, so a
+reload in light mode never flashes the dark palette.
+
+Every panel is written with the dark palette spelled out in the class names
+(`bg-zinc-900`, `text-zinc-100`, `text-emerald-400`, ...). Tailwind 4 compiles
+those to `var(--color-<hue>-<shade>)`, so light mode is one block in
+`app/globals.css`: `html.light` mirrors the scale (950 <-> 50, 900 <-> 100,
+400 <-> 600, 500 stays) for the ten hues the UI uses. Page background is forced
+to pure white. Nothing else changes — no component carries `dark:` variants, and
+a new panel gets light mode for free as long as it sticks to the palette.
+
+Two places can't read CSS, so they are handed the theme directly:
+
+- **Charts** (`lightweight-charts` paints on a canvas) — `chartColors()` in
+  `lib/theme.ts` returns axis/grid/border colors, and each chart re-applies them
+  when the toggle flips.
+- **Toasts** (`sonner`) — `app/providers.tsx` passes the current theme.
+
+Use `useTheme()` from `lib/theme.ts` if a new component ever needs the same.
 
 ## Dev
 

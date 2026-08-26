@@ -12,6 +12,7 @@ import {
 } from "lightweight-charts";
 import { api } from "@/lib/api";
 import type { IntradayBar } from "@/lib/types";
+import { chartColors, useTheme } from "@/lib/theme";
 
 const REGIME_LOW = 15;   // below = "calm"
 const REGIME_HIGH = 25;  // above = "stress"
@@ -31,6 +32,7 @@ export function VixChart({
   height?: number;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const theme = useTheme();
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Line"> | null>(null);
 
@@ -91,6 +93,17 @@ export function VixChart({
       seriesRef.current = null;
     };
   }, []);
+
+  // Repaint the axes/grid when the dark/light toggle flips.
+  useEffect(() => {
+    const c = chartColors(theme);
+    chartRef.current?.applyOptions({
+      layout: { textColor: c.text },
+      grid: { vertLines: { color: c.grid }, horzLines: { color: c.grid } },
+      timeScale: { borderColor: c.border },
+      rightPriceScale: { borderColor: c.border },
+    });
+  }, [theme]);
 
   // Push REST history into the chart
   useEffect(() => {

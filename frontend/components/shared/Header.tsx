@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ConnectionStatusIndicator } from "@/components/shared/ConnectionStatusIndicator";
+import { ThemeToggle } from "@/components/shared/ThemeToggle";
 import type { ConnectionStatus } from "@/lib/ws";
 import { cn } from "@/lib/utils";
 import { Activity } from "lucide-react";
@@ -68,6 +69,7 @@ export function Header({
             </span>
           )}
           {status && <ConnectionStatusIndicator status={status} />}
+          <ThemeToggle />
         </div>
       </div>
     </header>

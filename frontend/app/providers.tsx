@@ -4,8 +4,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
 import { Toaster } from "sonner";
 import { installAudioUnlock } from "@/lib/alerts/sound";
+import { useTheme } from "@/lib/theme";
 
 export function Providers({ children }: { children: ReactNode }) {
+  const theme = useTheme();
+
   // Browsers gate Web Audio behind a user gesture. Arm one-time listeners so
   // the alert chime is ready after the first click/keypress anywhere.
   useEffect(() => installAudioUnlock(), []);
@@ -34,7 +37,7 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <QueryClientProvider client={client}>
       {children}
-      <Toaster richColors position="top-right" theme="dark" closeButton />
+      <Toaster richColors position="top-right" theme={theme} closeButton />
     </QueryClientProvider>
   );
 }
