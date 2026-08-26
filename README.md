@@ -1,8 +1,8 @@
 # trading-buddy
 
 Macro context co-pilot for day trading the six FTMO instruments **USTEC
-(Nasdaq 100), USA500 (S&P 500), GOLD, US30 (Dow Jones), USOIL (WTI crude) and
-US2000 (Russell 2000)**.
+(Nasdaq 100), USA500 (S&P 500), GOLD, US30 (Dow Jones), GER40 (DAX 40) and
+EURUSD**.
 
 Two surfaces:
 - **CLI dashboard** (`dtb run`) — Rich-based terminal view, same data, no browser needed.
@@ -37,12 +37,14 @@ chart:
 | `SPX` | USA500 | `US500.cash` | `^GSPC` / `ES=F` |
 | `GOLD` | GOLD | `XAUUSD` | `GC=F` |
 | `US30` | US30 | `US30.cash` | `^DJI` / `YM=F` |
-| `USOIL` | USOIL | `USOIL.cash` | `CL=F` |
-| `US2000` | US2000 | `US2000.cash` | `^RUT` / `RTY=F` |
+| `GER40` | GER40 | `GER40.cash` | `^GDAXI` |
+| `EURUSD` | EURUSD | `EURUSD` | `EURUSD=X` |
 
-Bitcoin was dropped to free up screen space. Its `AssetSymbol.BITCOIN` member is
-deliberately kept in the enum so snapshots saved before the change still load,
-but nothing tracks it any more.
+Bitcoin, USOIL and US2000 were dropped — Bitcoin to free up screen space, the
+other two because their round-trip cost (spread plus commission) is huge next to
+how far they travel in a day: 1.7% and 2.3% of the average daily range, against
+0.24% on US100. Their `AssetSymbol` members are deliberately kept in the enum so snapshots
+saved before the change still load, but nothing tracks them any more.
 
 **To add or remove an instrument**, edit `TRACKED_ASSETS` in
 `backend/core/enums.py` and the matching table in `frontend/lib/types.ts`. Four
@@ -59,7 +61,7 @@ loudly if you miss one:
 ### Macro & sentiment layer (5-min cadence)
 
 - Pulls spot prices and the **daily 200-period** moving average for USTEC, SPX,
-  GOLD, US30, USOIL, US2000, VIX, VIX9D and VIX3M.
+  GOLD, US30, GER40, EURUSD, VIX, VIX9D and VIX3M.
 - Aggregates today's high/medium-impact US economic events (FOMC, CPI, NFP,
   PCE, PPI, Jobless Claims, Consumer Confidence…) with countdowns. Each event
   is shown in both **UTC and Brazil time (BRT)**; events already released are
@@ -76,11 +78,21 @@ loudly if you miss one:
 
 ### Intraday layer (`dtb signal`, also feeds the dashboard)
 
-- Pulls 5-minute OHLCV bars from yfinance (~15-min delay on free tier).
-  Intraday bars for the cash indices (**USTEC / SPX / US30 / US2000**) come from
-  the continuous **futures** (`NQ=F` / `ES=F` / `YM=F` / `RTY=F`), not the cash
-  index (`^NDX` / `^GSPC` / `^DJI` / `^RUT`). GOLD and USOIL are already futures
-  (`GC=F` / `CL=F`). The cash indices only
+- **Bar source: MT5 first, Yahoo as fallback.** When the collector is feeding,
+  the dashboard tick reads the broker's own **M5 bars** (`latest_candles()` in
+  the order-flow route, up to 2000 bars ≈ 7 days). They are the same candles
+  the trader has on screen, they arrive live instead of ~15 minutes late, and
+  they carry **MT5 tick volume** — which is what makes **VWAP** work at all on
+  EURUSD and GER40, where Yahoo reports zero volume. A symbol with fewer than
+  `MIN_MT5_BARS` (400) bars stored falls back to Yahoo, so the tick still works
+  with the collector down. `dtb signal` always reads Yahoo (it runs without a
+  collector).
+- Yahoo fallback: pulls 5-minute OHLCV bars (~15-min delay on free tier).
+  Intraday bars for the cash indices (**USTEC / SPX / US30**) come from
+  the continuous **futures** (`NQ=F` / `ES=F` / `YM=F`), not the cash
+  index (`^NDX` / `^GSPC` / `^DJI`). GOLD is already a future (`GC=F`) and EURUSD
+  quotes ~24h anyway. GER40 has no continuous DAX future on Yahoo, so it stays on
+  `^GDAXI` and its 5m bars only cover the Xetra session. The cash indices only
   print during RTH (~77 bars/day), so a 200-bar 5m MA reaches back ~2.5 trading
   days and won't match the near-24h instrument a trader actually watches
   (futures: ~213 bars/day → 200 bars ≈ 0.7 day). Spot quotes and the daily
@@ -93,8 +105,8 @@ loudly if you miss one:
 - **Standard 5m read** surfaced per asset in the UI ("Níveis 5m" panel): price
   vs **VWAP**, **EMA 200** and **SMA 200**. When the two 200s converge (gap
   < 0.1×ATR) they flag **lateral/range**; price clearly above/below both flags
-  trend. Computed for every tracked asset (USTEC, SPX, GOLD, US30, USOIL,
-  US2000).
+  trend. Computed for every tracked asset (USTEC, SPX, GOLD, US30, GER40,
+  EURUSD).
 - Position sizing helper when `ACCOUNT_SIZE_USD > 0` (uses NQ/ES/GC contract
   multipliers by default; override with `--multiplier`).
 
@@ -276,6 +288,13 @@ container the Dashboard uses.
   what price *did* the last times it sat here, the bar is who is leaning on the
   tape *right now* — agreement strengthens the case, disagreement is a fight
   worth waiting out.
+- **Both badges also on the Dashboard:** the ▲/▼ % arrow and the ↩ % média
+  badge also sit inside the **Pressão** block of every column in the Dashboard
+  flow strip — same component (`components/bands/BandOddsBadges.tsx`) on the
+  same 5s `GET /api/orderflow/bands` poll, so the two tabs cannot disagree.
+  There is no candle fallback there: no scenario from the backend, no badge.
+  They sit next to the pressure bar on purpose — what price did the other times
+  it stood here, right beside who is leaning on the tape now.
 - **Selo ↩ % média (volta pra média):** a second badge beside the arrow, shown
   **only when price is sitting at a band** (`%B` ≤ 0.2 or ≥ 0.8) — mid-band the
   question is meaningless, price is already at the middle. It reads: of the
@@ -478,7 +497,7 @@ dtb run                              Live dashboard loop (default container CMD)
 dtb brief                            Macro briefing via Claude
 dtb explain --event CPI [--mode pre|post]
 dtb snapshot [--with-prompt|--no-prompt]   Tick payload, no LLM
-dtb signal --asset USTEC|SPX|GOLD|US30|USOIL|US2000
+dtb signal --asset USTEC|SPX|GOLD|US30|GER40|EURUSD
                                            Intraday levels + structure stop
     [--interval 5m] [--lookback 5]
     [--risk-pct 2.0] [--account-size 50000] [--multiplier 20]

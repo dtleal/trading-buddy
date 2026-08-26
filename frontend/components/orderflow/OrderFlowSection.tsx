@@ -15,6 +15,8 @@ import { ScalperBotControl } from "./ScalperBotControl";
 import { FootprintPanel } from "./FootprintPanel";
 import { TapePanel } from "./TapePanel";
 import { LevelProximityBanner } from "./LevelProximityBanner";
+import { BandOddsBadges } from "@/components/bands/BandOddsBadges";
+import { useBandScenarios } from "@/hooks/useCandles";
 import { useOrderFlow } from "@/hooks/useOrderFlow";
 import { useAutoClose } from "@/hooks/useAutoClose";
 import { useScalperBot } from "@/hooks/useScalperBot";
@@ -24,6 +26,7 @@ import { cn } from "@/lib/utils";
 import { TRACKED_ASSETS } from "@/lib/types";
 import type {
   AssetSymbol,
+  BandScenario,
   DashboardTick,
   LiveActivity,
   OrderFlowSnapshot,
@@ -80,6 +83,9 @@ function ToggleButton({
  */
 export function OrderFlowSection({ tick }: { tick: DashboardTick | null }) {
   const { flows, status } = useOrderFlow();
+  // Mesmos números da aba Bandas (tocar a banda / voltar pra média), ao lado da
+  // pressão do tape.
+  const scenarios = useBandScenarios();
   const { status: autoClose, arm, disarm, closeSymbol, breakevenSymbol } = useAutoClose();
   const { status: bot, arm: armBot, saveLots: saveBotLots, disarm: disarmBot } = useScalperBot();
   const executionEnabled = autoClose?.enabled ?? false;
@@ -180,6 +186,7 @@ export function OrderFlowSection({ tick }: { tick: DashboardTick | null }) {
               label={a.label}
               symbol={a.key}
               flow={flows[a.key]}
+              scenario={scenarios?.[a.key]}
               now={now}
               status={status}
               showDetails={showDetails}
@@ -201,6 +208,7 @@ function SymbolColumn({
   label,
   symbol,
   flow,
+  scenario,
   now,
   status,
   showDetails,
@@ -214,6 +222,7 @@ function SymbolColumn({
   label: string;
   symbol: AssetSymbol;
   flow: OrderFlowSnapshot | undefined;
+  scenario: BandScenario | undefined;
   now: number;
   status: "connecting" | "open" | "reconnecting" | "closed";
   showDetails: boolean;
@@ -277,6 +286,11 @@ function SymbolColumn({
               nunca é empurrada pra fora da tela por ter muitas ordens. */}
           <FlowBlock title="Pressão (compra · venda)">
             <PressureGauge flow={flow} />
+            {scenario && (
+              <div className="mt-2 flex flex-wrap items-center gap-1">
+                <BandOddsBadges scenario={scenario} />
+              </div>
+            )}
           </FlowBlock>
           {showPositions && flow.positions.length > 0 && (
             <FlowBlock title="Posição aberta (MT5)">

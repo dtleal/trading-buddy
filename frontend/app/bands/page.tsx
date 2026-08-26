@@ -19,18 +19,27 @@ export default function BandsPage() {
         <p className="mb-4 max-w-4xl text-xs text-zinc-500">
           Candles 5m (MT5) com Bollinger padrão (20, 2). A linha azul tracejada é
           o <span className="text-zinc-300">caminho típico do preço</span> daqui
-          pra frente, e a faixa pontilhada em volta é a metade central do que
-          aconteceu — medidos nas vezes anteriores em que o preço esteve nesse
+          pra frente, medido nas vezes anteriores em que o preço esteve nesse
           mesmo ponto da banda. É o histórico do próprio ativo, não previsão. O
           selo <span className="text-sky-400">% média</span> só aparece quando o
           preço está colado numa banda — é a chance de ele voltar pra média no
-          estado de mercado atual (passe o mouse pros detalhes).
+          estado de mercado atual (passe o mouse pros detalhes). As linhas{" "}
+          <span className="text-purple-400">roxas</span> são as projeções feitas
+          8 e 18 candles atrás (dois trechos, cobrindo os últimos ~20 candles),
+          congeladas em cima dos candles que vieram depois: se elas colam nas
+          bandas azuis, a projeção acertou. A linha{" "}
+          <span className="text-fuchsia-400">rosa</span> é o caminho do preço
+          previsto nesses mesmos trechos. Os selos{" "}
+          <span className="text-purple-400">±%</span> e{" "}
+          <span className="text-fuchsia-400">caminho ✓/✗</span> dão a nota do
+          trecho mais recente (passe o mouse).
         </p>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {TRACKED_ASSETS.map(({ key, label }) => (
             <BandProjectionChart
               key={key}
               title={label}
+              symbol={key}
               bars={candles?.[key] ?? []}
               scenario={scenarios?.[key]}
               flow={flows[key]}

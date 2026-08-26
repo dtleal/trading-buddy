@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createChart,
   ColorType,
@@ -10,15 +10,23 @@ import {
   type ISeriesApi,
   type LineData,
   type UTCTimestamp,
+  type WhitespaceData,
 } from "lightweight-charts";
-import { ArrowDown, ArrowUp, Undo2 } from "lucide-react";
+import { Crosshair, Route } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { computeBandProjection, type BandPoint } from "@/lib/bollinger";
 import {
-  bandTouchOdds,
-  computeBandProjection,
-  type BandOdds,
-  type BandPoint,
-} from "@/lib/bollinger";
+  gradedWindows,
+  loadHistory,
+  saveHistory,
+  scoreForecast,
+  scoreRoute,
+  updateHistory,
+  type BandForecast,
+  type ForecastScore,
+  type RouteScore,
+} from "@/lib/bandForecast";
+import { BandOddsBadges } from "./BandOddsBadges";
 import { PressureGauge } from "@/components/orderflow/PressureGauge";
 import type { BandRegime, BandScenario, IntradayBar, OrderFlowSnapshot } from "@/lib/types";
 import { chartColors, useTheme } from "@/lib/theme";
@@ -28,31 +36,39 @@ const DOWN = "#ef4444"; // red — down candles
 const BAND = "#60a5fa"; // blue-400 — upper/lower band
 const MID = "#f59e0b"; // amber-500 — SMA20
 const ROUTE = "#38bdf8"; // sky-400 — the measured route ahead
-const CONE = "#0369a1"; // sky-800 — middle half of past outcomes
+const PAST = "#c084fc"; // purple-400 — the frozen bands being graded
+const PAST_ROUTE = "#e879f9"; // fuchsia-400 — the frozen price route being graded
 
 /** Bars ahead when there is no measured route to follow (6 × 5min = 30 min). */
 const FALLBACK_HORIZON = 6;
-/** Real bars kept in view (the rest stay scrollable to the left). Sized for a
- * three-across card: ~5h of context without squeezing the candles. */
-const VISIBLE_BARS = 60;
+/** Real bars kept in view (the rest stay scrollable to the left). Kept tight on
+ * purpose: with the graded windows covering the last ~20 candles, packing more
+ * bars in only makes the lines overlap. */
+const VISIBLE_BARS = 40;
 
 /**
  * One symbol's 5m candles with standard Bollinger (20, 2), the route price
  * usually took from here, and the bands' continuation under that same route.
  *
- * The route (sky, dashed) and its cone (faint, the middle half of outcomes)
- * come from the backend: every past bar where price sat at this same spot
- * inside the band, and what happened over the next hour. No measured route
- * (thin sample / cold start) → the bands fall back to a drift extrapolation
- * and no route is drawn.
+ * The route (sky, dashed) comes from the backend: every past bar where price
+ * sat at this same spot inside the band, and what happened next. No measured
+ * route (thin sample / cold start) → the bands fall back to a drift
+ * extrapolation and no route is drawn.
+ *
+ * The last projection is also FROZEN (purple) and left pinned to its own
+ * timestamps while the real candles fill in over it, so the forecast can be
+ * compared with the bands that actually formed. The badge grades it.
  */
 export function BandProjectionChart({
   title,
+  symbol,
   bars,
   scenario,
   flow,
 }: {
   title: string;
+  /** Stable key for the frozen forecast kept in localStorage. */
+  symbol: string;
   bars: IntradayBar[];
   scenario?: BandScenario;
   flow?: OrderFlowSnapshot;
@@ -63,6 +79,12 @@ export function BandProjectionChart({
   const candlesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const linesRef = useRef<ISeriesApi<"Line">[]>([]);
   const lastBarTimeRef = useRef<number | null>(null);
+  // undefined = not read from storage yet.
+  const historyRef = useRef<BandForecast[] | undefined>(undefined);
+  const [score, setScore] = useState<ForecastScore | null>(null);
+  const [routeScore, setRouteScore] = useState<RouteScore | null>(null);
+  const scoreKeyRef = useRef<string>("");
+  const historySigRef = useRef<string>("");
 
   // Init chart once
   useEffect(() => {
@@ -106,9 +128,11 @@ export function BandProjectionChart({
       line(BAND, LineStyle.Dashed),
       line(MID, LineStyle.Dashed),
       line(BAND, LineStyle.Dashed),
-      line(CONE, LineStyle.Dotted),
-      line(CONE, LineStyle.Dotted),
       line(ROUTE, LineStyle.Dashed, 2),
+      line(PAST, LineStyle.Dashed, 2),
+      line(PAST, LineStyle.Dotted),
+      line(PAST, LineStyle.Dashed, 2),
+      line(PAST_ROUTE, LineStyle.Solid, 2),
     ];
     chartRef.current = chart;
     candlesRef.current = candles;
@@ -154,8 +178,8 @@ export function BandProjectionChart({
         futureCloses: route.length ? route.map((p) => p.median) : undefined,
       },
     );
-    // Route + cone start at the last real bar so they continue the price
-    // instead of floating detached from it.
+    // The route starts at the last real bar so it continues the price instead
+    // of floating detached from it.
     const stepTime = (step: number) => lastTime + step * 300;
     const routeLine = (pick: (p: BandScenario["path"][number]) => number) =>
       route.length
@@ -164,18 +188,69 @@ export function BandProjectionChart({
             ...route.map((p) => ({ time: stepTime(p.step), value: pick(p) })),
           ]
         : [];
-    const datasets = [
-      proj.upper,
-      proj.mid,
-      proj.lower,
-      proj.projUpper,
-      proj.projMid,
-      proj.projLower,
-      routeLine((p) => p.p75),
-      routeLine((p) => p.p25),
+    // One snapshot per bar; draw the one that has fully played out, so the
+    // purple always shows a COMPLETE forecast against the candles that
+    // followed and slides forward a bar at a time instead of blanking out.
+    // Cold start (no snapshot old enough yet) → rebuild it from the trend.
+    const closes = bars.map((b) => ({ time: sec(b.timestamp), close: b.close }));
+    if (historyRef.current === undefined) historyRef.current = loadHistory(symbol);
+    const history = updateHistory(
+      historyRef.current,
+      proj,
+      closes,
       routeLine((p) => p.median),
+    );
+    historyRef.current = history;
+    // Written once per bar, not on every 5s poll.
+    const sig = `${history.length}:${history[history.length - 1]?.anchor ?? 0}`;
+    if (sig !== historySigRef.current) {
+      historySigRef.current = sig;
+      saveHistory(symbol, history);
+    }
+    // Oldest first; the newest is the one the badge grades.
+    const windows = gradedWindows(history, closes);
+    const locked = windows[windows.length - 1] ?? null;
+    // Only push it to state when it really changed — this effect runs on every
+    // 5s poll and a fresh object would re-render the card for nothing.
+    const next = locked ? scoreForecast(locked, proj, closes) : null;
+    const nextRoute = locked ? scoreRoute(locked, closes) : null;
+    const key = JSON.stringify([next, nextRoute]);
+    if (key !== scoreKeyRef.current) {
+      scoreKeyRef.current = key;
+      setScore(next);
+      setRouteScore(nextRoute);
+    }
+    // Every window in one series, split by a blank bar between them so the
+    // segments read as separate forecasts instead of one wandering line.
+    const barIndex = new Map(closes.map((c, i) => [c.time, i]));
+    const pastLine = (pick: (f: BandForecast) => BandPoint[]) => {
+      const out: (LineData | WhitespaceData)[] = [];
+      for (const f of windows) {
+        if (out.length > 0) {
+          const i = barIndex.get(f.anchor);
+          if (i != null && i > 0) out.push({ time: closes[i - 1].time as UTCTimestamp });
+        }
+        for (const p of pick(f)) {
+          if (p.time <= lastTime) out.push({ time: p.time as UTCTimestamp, value: p.value });
+        }
+      }
+      return out.length >= 2 ? out : [];
+    };
+
+    const datasets: (LineData | WhitespaceData)[][] = [
+      toLineData(proj.upper),
+      toLineData(proj.mid),
+      toLineData(proj.lower),
+      toLineData(proj.projUpper),
+      toLineData(proj.projMid),
+      toLineData(proj.projLower),
+      toLineData(routeLine((p) => p.median)),
+      pastLine((f) => f.upper),
+      pastLine((f) => f.mid),
+      pastLine((f) => f.lower),
+      pastLine((f) => f.route ?? []),
     ];
-    linesRef.current.forEach((s, i) => s.setData(toLineData(datasets[i])));
+    linesRef.current.forEach((s, i) => s.setData(datasets[i]));
 
     // Frame the last hours + the projection — but only when a NEW bar lands,
     // so the 5s forming-bar refresh doesn't fight the user's own zoom/scroll.
@@ -187,15 +262,9 @@ export function BandProjectionChart({
         to: candleData.length + ahead + 1,
       });
     }
-  }, [bars, scenario]);
+  }, [bars, scenario, symbol]);
 
   const last = bars.length > 0 ? bars[bars.length - 1].close : null;
-  const odds = scenario
-    ? scenarioOdds(scenario)
-    : bandTouchOdds(bars.map((b) => b.close));
-  // "Does it come back to the middle?" is only a real question at a band.
-  const atBand =
-    !!scenario && (scenario.pct_b <= AT_BAND || scenario.pct_b >= 1 - AT_BAND);
 
   return (
     <Card>
@@ -203,8 +272,9 @@ export function BandProjectionChart({
         <div className="flex items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">
             <CardTitle>{title}</CardTitle>
-            {odds && <TouchOddsBadge odds={odds} measured={!!scenario} />}
-            {scenario && atBand && <ReturnToMidBadge scenario={scenario} />}
+            <BandOddsBadges scenario={scenario} closes={bars.map((b) => b.close)} />
+            {score && <ForecastScoreBadge score={score} />}
+            {routeScore && <RouteScoreBadge score={routeScore} />}
           </div>
           {/* Live buy/sell pressure — the tape's lean right now, next to the
               historical lean the badge carries. */}
@@ -220,7 +290,7 @@ export function BandProjectionChart({
         {scenario?.regime && <RegimeChips regime={scenario.regime} />}
       </CardHeader>
       <CardContent>
-        <div className="relative w-full" style={{ height: 320 }}>
+        <div className="relative w-full" style={{ height: 440 }}>
           <div ref={containerRef} className="absolute inset-0" />
           {bars.length === 0 && (
             <div className="absolute inset-0 grid place-items-center text-xs text-zinc-500">
@@ -233,10 +303,63 @@ export function BandProjectionChart({
   );
 }
 
-/** Price is close enough to a band for "does it come back to the middle?" to
- * be a real question. In the middle of the band it is not — price is already
- * there, so the figure would be trivially high and mean nothing. */
-const AT_BAND = 0.2;
+/** How the frozen (purple) forecast held up against the bands that actually
+ * formed. The error is the typical gap between the two, measured in band
+ * widths, so it means the same thing on GOLD and on US30: 10% = the forecast
+ * line sat a tenth of a band width away from the real one. Green = it worked
+ * out, amber = loose, red = it missed (or the middle band went the other way).
+ */
+function ForecastScoreBadge({ score }: { score: ForecastScore }) {
+  const err = Math.round(score.errPct * 100);
+  const tone =
+    !score.dirOk || score.errPct > 0.35
+      ? "bg-red-500/15 text-red-400"
+      : score.errPct > 0.15
+        ? "bg-amber-500/15 text-amber-400"
+        : "bg-emerald-500/15 text-emerald-400";
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-semibold tabular-nums ${tone}`}
+      title={
+        `previsão roxa mais recente (feita ${score.total} candles atrás, ${score.bars} já julgados) ` +
+        `contra as bandas que se formaram: erro típico de ${err}% da largura da banda · ` +
+        `direção da média ${score.dirOk ? "certa" : "errada"} · ` +
+        `${score.outside} de ${score.bars} candles fecharam fora da previsão` +
+        (score.drift
+          ? " · esta foi reconstruída pela tendência do momento (a medida entra quando ela expirar)"
+          : "")
+      }
+    >
+      <Crosshair className="size-3.5" />
+      {`±${err}%`}
+    </span>
+  );
+}
+
+/** Did the frozen price route (fuchsia) point the right way. The route is the
+ * TYPICAL path of past analogs, so the side it pointed to is the real claim —
+ * that is what the tick/cross says. How far the closes ran from it lives in the
+ * tooltip, in band widths. */
+function RouteScoreBadge({ score }: { score: RouteScore }) {
+  const err = Math.round(score.errPct * 100);
+  const tone = score.dirOk
+    ? "bg-emerald-500/15 text-emerald-400"
+    : "bg-red-500/15 text-red-400";
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-semibold ${tone}`}
+      title={
+        `caminho do preço previsto ${score.total} candles atrás (linha rosa no gráfico): ` +
+        `o preço foi pro lado ${score.dirOk ? "previsto" : "contrário"} · ` +
+        `distância típica do caminho: ${err}% da largura da banda ` +
+        `(${score.bars} de ${score.total} candles julgados)`
+      }
+    >
+      <Route className="size-3.5" />
+      {score.dirOk ? "caminho ✓" : "caminho ✗"}
+    </span>
+  );
+}
 
 const TREND_LABEL = {
   up: "tendência de alta",
@@ -281,94 +404,6 @@ function RegimeChips({ regime }: { regime: BandRegime }) {
         chip(PUSH_LABEL[regime.push], "bg-amber-500/10 text-amber-400")}
     </div>
   );
-}
-
-/** Below this many analogs the figure is dimmed: still shown, but visibly
- * weaker, so a number built on a handful of cases never looks solid. */
-const THIN_SAMPLE = 25;
-
-/** "Volta pra média": of the past visits to THIS band in THIS market state,
- * how many got back to the middle within the hour. Only shown when price is
- * actually at a band — mid-band it would be trivially high and mean nothing.
- * Sky = usually comes back, amber = usually keeps going (a break, not a
- * bounce), grey = coin flip. Every detail lives in the tooltip. */
-function ReturnToMidBadge({ scenario }: { scenario: BandScenario }) {
-  const r = scenario.return_to_mid;
-  if (!r) return null;
-  const p = Math.round(r.pct * 100);
-  const tone =
-    p >= 60
-      ? "bg-sky-500/15 text-sky-400"
-      : p <= 40
-        ? "bg-amber-500/15 text-amber-400"
-        : "bg-zinc-800 text-zinc-300";
-  const side = scenario.pct_b < 0.5 ? "de baixo" : "de cima";
-  const held =
-    r.matched_on.length > 0
-      ? `no mesmo estado de mercado (${r.matched_on.join(" + ")})`
-      : "sem conseguir filtrar o estado de mercado";
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-semibold tabular-nums ${tone} ${
-        r.regime_n < THIN_SAMPLE ? "opacity-60" : ""
-      }`}
-      title={
-        `das ${r.regime_n} vezes que o preço esteve na banda ${side} ${held}, ` +
-        `${p}% voltaram pra média em até 1h` +
-        (r.median_bars != null ? ` (tipicamente ~${r.median_bars} candles)` : "") +
-        ` · sem olhar o estado: ${pct(scenario.back_to_mid_pct)}` +
-        (r.regime_n < THIN_SAMPLE ? " · amostra pequena, leia com reserva" : "")
-      }
-    >
-      <Undo2 className="size-3.5" />
-      {p}% média
-    </span>
-  );
-}
-
-/** Which band gets touched first, and how likely. `measured` = the share comes
- * from the symbol's own history; otherwise it is the random-walk estimate used
- * until enough history is stored. Grey = coin flip (≤55%). Price already at or
- * past a band shows "na banda" — that is where it IS, not a probability. */
-function TouchOddsBadge({ odds, measured }: { odds: BandOdds; measured: boolean }) {
-  const up = odds.at ? odds.at === "upper" : odds.pUp >= 0.5;
-  const p = Math.round((up ? odds.pUp : 1 - odds.pUp) * 100);
-  const undecided = !odds.at && p <= 55;
-  const tone = undecided
-    ? "bg-zinc-800 text-zinc-300"
-    : up
-      ? "bg-emerald-500/15 text-emerald-400"
-      : "bg-red-500/15 text-red-400";
-  const Arrow = up ? ArrowUp : ArrowDown;
-  const side = up ? "cima" : "baixo";
-  return (
-    <span
-      className={`inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-xs font-semibold tabular-nums ${tone}`}
-      title={
-        odds.at
-          ? `preço já está na banda de ${side}`
-          : measured
-            ? `nas vezes anteriores que esteve aqui, ${p}% tocaram a banda de ${side} primeiro`
-            : `${p}% de chance de tocar a banda de ${side} primeiro (estimativa por distância e volatilidade — ainda sem histórico suficiente para medir)`
-      }
-    >
-      <Arrow className="size-3.5" />
-      {odds.at ? "na banda" : `${p}%`}
-    </span>
-  );
-}
-
-/** The measured equivalent of `bandTouchOdds`: of the past visits here that
- * reached a band at all, the share that reached the upper one first. */
-function scenarioOdds(s: BandScenario): BandOdds {
-  const at = s.pct_b >= 1 ? "upper" : s.pct_b <= 0 ? "lower" : null;
-  const up = s.upper_first?.n ?? 0;
-  const down = s.lower_first?.n ?? 0;
-  return { pUp: up + down > 0 ? up / (up + down) : 0.5, at };
-}
-
-function pct(v: number): string {
-  return `${Math.round(v * 100)}%`;
 }
 
 function sec(iso: string): number {
