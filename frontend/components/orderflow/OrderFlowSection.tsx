@@ -15,12 +15,14 @@ import { ScalperBotControl } from "./ScalperBotControl";
 import { FootprintPanel } from "./FootprintPanel";
 import { TapePanel } from "./TapePanel";
 import { LevelProximityBanner } from "./LevelProximityBanner";
+import { LotLimitBadge, LotLimitSettings, LotLimitSettingsButton } from "./LotLimitAlert";
 import { BandOddsBadges } from "@/components/bands/BandOddsBadges";
 import { useBandScenarios } from "@/hooks/useCandles";
 import { useOrderFlow } from "@/hooks/useOrderFlow";
 import { useAutoClose } from "@/hooks/useAutoClose";
 import { useScalperBot } from "@/hooks/useScalperBot";
 import { useLevelAlerts } from "@/hooks/useLevelAlerts";
+import { openLots, useLotLimits } from "@/lib/lotLimits";
 import { computeProximity, type LevelProximity } from "@/lib/alerts/levels";
 import { cn } from "@/lib/utils";
 import { TRACKED_ASSETS } from "@/lib/types";
@@ -95,6 +97,8 @@ export function OrderFlowSection({ tick }: { tick: DashboardTick | null }) {
   const [showPositions, togglePositions] = useSavedToggle("orderflow.showPositions");
   const [showFlowSignal, toggleFlowSignal] = useSavedToggle("orderflow.showFlowSignal");
   const [showBidAsk, toggleBidAsk] = useSavedToggle("orderflow.showBidAsk");
+  const [showLotLimits, toggleLotLimits] = useSavedToggle("orderflow.showLotLimits");
+  const { limits: lotLimits, setLimit, resetLimits } = useLotLimits();
 
   // Ticking clock so per-symbol staleness is reactive without calling Date.now()
   // during render.
@@ -157,6 +161,7 @@ export function OrderFlowSection({ tick }: { tick: DashboardTick | null }) {
             <ToggleButton label="Sinal do fluxo" on={showFlowSignal} onToggle={toggleFlowSignal} />
             <ToggleButton label="Bid · Ask" on={showBidAsk} onToggle={toggleBidAsk} />
             <ToggleButton label="Footprint · Tape" on={showDetails} onToggle={toggleDetails} />
+            <LotLimitSettingsButton on={showLotLimits} onToggle={toggleLotLimits} />
             {source && (
               <Badge tone="neutral">
                 <span className="text-zinc-500">fonte:</span>{" "}
@@ -177,6 +182,14 @@ export function OrderFlowSection({ tick }: { tick: DashboardTick | null }) {
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         <LevelProximityBanner proximities={proximities} />
+        {showLotLimits && (
+          <LotLimitSettings
+            limits={lotLimits}
+            setLimit={setLimit}
+            resetLimits={resetLimits}
+            onClose={toggleLotLimits}
+          />
+        )}
         <ScalperBotControl status={bot} arm={armBot} saveLots={saveBotLots} disarm={disarmBot} />
         <AutoCloseControl status={autoClose} arm={arm} disarm={disarm} />
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
@@ -187,6 +200,7 @@ export function OrderFlowSection({ tick }: { tick: DashboardTick | null }) {
               symbol={a.key}
               flow={flows[a.key]}
               scenario={scenarios?.[a.key]}
+              lotLimit={lotLimits[a.key]}
               now={now}
               status={status}
               showDetails={showDetails}
@@ -209,6 +223,7 @@ function SymbolColumn({
   symbol,
   flow,
   scenario,
+  lotLimit,
   now,
   status,
   showDetails,
@@ -223,6 +238,7 @@ function SymbolColumn({
   symbol: AssetSymbol;
   flow: OrderFlowSnapshot | undefined;
   scenario: BandScenario | undefined;
+  lotLimit: number | undefined;
   now: number;
   status: "connecting" | "open" | "reconnecting" | "closed";
   showDetails: boolean;
@@ -240,8 +256,13 @@ function SymbolColumn({
   return (
     <div className="flex min-w-0 flex-col gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-2">
       <div className="flex items-center justify-between gap-1">
-        <div className="truncate text-xs font-semibold uppercase tracking-wider text-zinc-200">
-          {label}
+        <div className="flex min-w-0 items-center gap-1.5">
+          <div className="truncate text-xs font-semibold uppercase tracking-wider text-zinc-200">
+            {label}
+          </div>
+          {lotLimit != null && (
+            <LotLimitBadge lots={openLots(flow?.positions)} limit={lotLimit} />
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-1 text-[10px] uppercase tracking-wider">
           <span

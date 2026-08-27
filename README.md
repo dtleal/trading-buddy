@@ -204,6 +204,32 @@ tudo is always visible.
 The verdict is pushed to your phone once per day (and again if the regime
 genuinely changes mid-session) — see [phone push](#phone-push-notifications-ntfysh).
 
+### Limite de lotes abertos — open-volume alert (dashboard)
+
+Next to each asset name in the flow strip there is a small chip with the **lots
+open right now / the limit for that asset** (e.g. `12/40`). It answers "how much
+size am I already carrying here?" when the position was built from many small
+orders spread over different prices.
+
+- The number is the sum of `volume` over every open MT5 position on that symbol,
+  taken from the same live snapshot the rest of the column uses.
+- **Under the limit:** plain grey chip.
+- **At or over the limit:** the chip turns red and **blinks**, so it catches the
+  eye while you scan the six columns.
+- The chip is **hidden while the asset is flat** — six `0/40` chips would just be
+  noise.
+
+Defaults (the trader's own risk sizes): USTEC 40, USA500 70, GOLD 1, US30 20,
+GER40 20, EURUSD 5.
+
+To change them, click **Limite de lotes** in the card header: a panel opens with
+one box per asset. Every edit is saved right away — there is no save button — and
+**Padrão** puts the defaults back. The limits live in the browser
+(`localStorage`, key `orderflow.lotLimits`), so each device keeps its own copy.
+
+This is an **alert only**. Nothing is blocked and nothing is closed; it is there
+to make you notice, not to act for you.
+
 ### VIX × Preço — per-asset stance from the VIX path vs the 5m tape (dashboard + push)
 
 A panel under the VIX chart that turns "where is implied vol and what is the 5m
