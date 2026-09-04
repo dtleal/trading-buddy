@@ -134,6 +134,12 @@ class Settings(BaseSettings):
     # `orderflow_record_dir`. Empty string keeps the series in memory only
     # (chart resets on backend restart).
     account_balance_dir: str = "data/account_balance"
+    # Directory for the closed-trade history (one JSON file) that feeds the
+    # Performance tab. The collector re-pushes a rolling window of trades; the
+    # store keeps everything it has ever seen, so this file is the long-term
+    # record. Same working-dir semantics as the two dirs above; empty string
+    # keeps the history in memory only (lost on backend restart).
+    trade_history_dir: str = "data/trade_history"
 
     # --- Breakout detector tuning -----------------------------------------
 

@@ -18,6 +18,7 @@ from adapters.db_bottrades import PostgresBotTradeRepository
 from adapters.db_qa import PostgresQARepository
 from api.routes import brief as brief_route
 from api.routes import orderflow as orderflow_route
+from api.routes import performance as performance_route
 from api.routes import qa as qa_route
 from api.routes import tick as tick_route
 from api.routes import vix as vix_route
@@ -101,6 +102,7 @@ def create_app() -> FastAPI:
     app.include_router(qa_route.router)
     app.include_router(ws_route.router)
     app.include_router(orderflow_route.router)
+    app.include_router(performance_route.router)
 
     @app.get("/health", tags=["meta"])
     async def health() -> dict[str, str]:

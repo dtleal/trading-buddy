@@ -29,6 +29,7 @@ from pydantic import BaseModel
 from adapters.balance_history import BalanceHistory
 from adapters.tape_recorder import TapeRecorder
 from api.orderflow_broadcaster import orderflow_broadcaster
+from api.routes.performance import trade_history
 from core.enums import AssetSymbol
 from core.models import (
     AccountBalanceHistory,
@@ -38,6 +39,7 @@ from core.models import (
     BandScenario,
     BotStatus,
     BotTrade,
+    ClosedTrade,
     EquityPoint,
     IntradayBar,
     OrderFlowSnapshot,
@@ -738,6 +740,26 @@ async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
             balance=float(msg.get("balance", 0.0) or 0.0),
             currency=msg.get("currency") if isinstance(msg.get("currency"), str) else None,
         )
+        return set()
+
+    if mtype == "trade_history":
+        # Closed round-trip trades rebuilt by the collector from the broker deal
+        # history (manual AND bot). The store merges by MT5 position id, so
+        # re-pushes are idempotent and trades that age out of the collector's
+        # window are kept. Feeds the Performance tab over REST.
+        parsed: list[ClosedTrade] = []
+        for raw in msg.get("trades", ()):
+            try:
+                parsed.append(ClosedTrade.model_validate(raw))
+            except Exception:  # one malformed trade must not drop the push
+                continue
+        trade_history.merge(
+            parsed,
+            balance=float(msg["balance"]) if msg.get("balance") is not None else None,
+            currency=msg.get("currency") if isinstance(msg.get("currency"), str) else None,
+            asof=msg.get("asof") if isinstance(msg.get("asof"), str) else None,
+        )
+        logger.info("Trade history push: %d closed trades", len(parsed))
         return set()
 
     if mtype == "autoclose_result":

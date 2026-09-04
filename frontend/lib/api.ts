@@ -10,6 +10,8 @@ import {
   BriefResponse,
   CandlesBySymbol,
   DashboardTick,
+  PerformanceQuery,
+  PerformanceReport,
   QAEntry,
   QAEntryInput,
   QAEntryList,
@@ -127,6 +129,20 @@ export const api = {
   breakevenSymbol: (symbol: string) =>
     fetchVoid(`/api/orderflow/breakeven/${symbol}`, { method: "POST" }),
   getBot: () => fetchJson("/api/orderflow/bot", BotStatus),
+
+  // --- performance (closed-trade history + metrics) ---
+  getPerformance: (query: PerformanceQuery = {}) => {
+    const params = new URLSearchParams();
+    if (query.start) params.set("start", query.start);
+    if (query.end) params.set("end", query.end);
+    // A date range always wins over a preset (same rule as the backend).
+    if (!query.start && !query.end && query.preset) params.set("preset", query.preset);
+    if (query.symbols && query.symbols.length > 0)
+      params.set("symbols", query.symbols.join(","));
+    if (query.source && query.source !== "all") params.set("source", query.source);
+    const qs = params.toString();
+    return fetchJson(`/api/performance${qs ? `?${qs}` : ""}`, PerformanceReport);
+  },
   setBot: (
     armed: boolean,
     profitTarget: number | null,

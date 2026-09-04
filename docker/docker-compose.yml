@@ -29,6 +29,10 @@ services:
       # Account balance/equity series (JSONL per UTC day) feeding the balance
       # chart — bind-mounted so the curve survives image rebuilds/restarts.
       - ../data/account_balance:/app/data/account_balance
+      # Closed-trade history (one JSON file) feeding the Performance tab —
+      # bind-mounted so the trade record survives rebuilds and grows past the
+      # window the collector re-pushes.
+      - ../data/trade_history:/app/data/trade_history
 
   postgres:
     image: postgres:16-alpine

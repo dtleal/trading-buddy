@@ -509,6 +509,130 @@ export const BotStatus = z.object({
 });
 export type BotStatus = z.infer<typeof BotStatus>;
 
+// --- Performance (closed-trade history + metrics) ---------------------------
+
+/** One closed round-trip trade, rebuilt from the broker's deal history. */
+export const ClosedTrade = z.object({
+  id: z.number(),
+  symbol: z.string(),
+  broker_symbol: z.string().nullable().default(null),
+  side: z.enum(["buy", "sell"]),
+  source: z.enum(["manual", "bot"]),
+  lots: z.number(),
+  open_ts: z.string(),
+  close_ts: z.string(),
+  open_price: z.number(),
+  close_price: z.number(),
+  profit: z.number().default(0),
+  commission: z.number().default(0),
+  swap: z.number().default(0),
+  fee: z.number().default(0),
+  net: z.number(), // what was actually banked (profit + custos)
+  magic: z.number().default(0),
+  comment: z.string().nullable().default(null),
+});
+export type ClosedTrade = z.infer<typeof ClosedTrade>;
+
+/** The core numbers of a set of trades (whole period, one bucket or one group). */
+export const PerformanceStats = z.object({
+  trades: z.number(),
+  wins: z.number(),
+  losses: z.number(),
+  breakeven: z.number(),
+  win_rate: z.number(), // %
+  loss_rate: z.number(), // %
+  net: z.number(),
+  gross_profit: z.number(),
+  gross_loss: z.number(), // positive
+  profit_factor: z.number().nullable().default(null),
+  avg_win: z.number(),
+  avg_loss: z.number(), // positive
+  payoff: z.number().nullable().default(null), // avg_win / avg_loss
+  expectancy: z.number(),
+  best: z.number(),
+  worst: z.number(),
+  lots: z.number(),
+  commission: z.number(),
+  swap: z.number(),
+  avg_duration_seconds: z.number(),
+  max_consecutive_wins: z.number(),
+  max_consecutive_losses: z.number(),
+});
+export type PerformanceStats = z.infer<typeof PerformanceStats>;
+
+/** One time slice (day / ISO week / month) of the report. */
+export const PerformanceBucket = z.object({
+  key: z.string(),
+  label: z.string(),
+  start: z.string(),
+  stats: PerformanceStats,
+  balance_end: z.number(),
+});
+export type PerformanceBucket = z.infer<typeof PerformanceBucket>;
+
+/** One breakdown row (asset, origin, side, weekday, hour). */
+export const PerformanceGroup = z.object({
+  key: z.string(),
+  label: z.string(),
+  stats: PerformanceStats,
+});
+export type PerformanceGroup = z.infer<typeof PerformanceGroup>;
+
+/** One step of the equity curve: account balance after a closed trade. */
+export const EquityCurvePoint = z.object({
+  ts: z.string(),
+  balance: z.number(),
+  peak: z.number(),
+  drawdown: z.number(),
+  drawdown_pct: z.number(),
+  net: z.number(),
+});
+export type EquityCurvePoint = z.infer<typeof EquityCurvePoint>;
+
+/** Everything the Performance tab draws (/api/performance). */
+export const PerformanceReport = z.object({
+  filters: z.object({
+    start: z.string().nullable().default(null),
+    end: z.string().nullable().default(null),
+    symbols: z.array(z.string()),
+    source: z.enum(["all", "manual", "bot"]),
+  }),
+  summary: PerformanceStats,
+  start_balance: z.number(),
+  end_balance: z.number(),
+  return_pct: z.number(),
+  max_drawdown: z.number(),
+  max_drawdown_pct: z.number(),
+  current_drawdown: z.number(),
+  current_drawdown_pct: z.number(),
+  recovery_factor: z.number().nullable().default(null),
+  equity_curve: z.array(EquityCurvePoint),
+  by_day: z.array(PerformanceBucket),
+  by_week: z.array(PerformanceBucket),
+  by_month: z.array(PerformanceBucket),
+  by_symbol: z.array(PerformanceGroup),
+  by_source: z.array(PerformanceGroup),
+  by_side: z.array(PerformanceGroup),
+  by_weekday: z.array(PerformanceGroup),
+  by_hour: z.array(PerformanceGroup),
+  trades: z.array(ClosedTrade),
+  trades_returned: z.number(),
+  available_symbols: z.array(z.string()),
+  first_trade_at: z.string().nullable().default(null),
+  currency: z.string().nullable().default(null),
+  asof: z.string().nullable().default(null),
+});
+export type PerformanceReport = z.infer<typeof PerformanceReport>;
+
+/** Filter selection the Performance tab sends to the backend. */
+export interface PerformanceQuery {
+  preset?: string; // today | week | month | last_month | 7d | 30d | 90d | all
+  start?: string; // YYYY-MM-DD (wins over preset)
+  end?: string;
+  symbols?: string[]; // empty = all
+  source?: "all" | "manual" | "bot";
+}
+
 /** Response from /api/vix/history. */
 export const VixHistoryResponse = z.object({
   symbol: z.string(),

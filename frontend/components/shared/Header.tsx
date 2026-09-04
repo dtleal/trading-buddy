@@ -12,6 +12,7 @@ const TABS = [
   { href: "/", label: "Dashboard" },
   { href: "/qa", label: "Q&A" },
   { href: "/bands", label: "Bandas" },
+  { href: "/performance", label: "Performance" },
 ] as const;
 
 /**

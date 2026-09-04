@@ -730,6 +730,163 @@ class BotTrade(_Frozen):
     created_at: datetime
 
 
+# -----------------------------------------------------------------------------
+# Performance (closed-trade history + its metrics)
+# -----------------------------------------------------------------------------
+
+
+class ClosedTrade(_Frozen):
+    """One closed round-trip trade, rebuilt by the collector from the broker's
+    DEAL history (so it covers manual AND bot trades, exactly as the broker
+    booked them).
+
+    `id` is the MT5 position id — the same trade always keeps the same id, which
+    is how repeated pushes are de-duplicated. `symbol` is the backend asset name
+    when the collector's map knows the broker symbol, else the broker's own
+    spelling (older trades on instruments no longer configured). `source` reads
+    the ENTRY deal: "bot" when the scalper's magic number or comment is on it,
+    "manual" otherwise. `net` is the money actually banked (profit + commission
+    + swap + fee).
+    """
+
+    id: int
+    symbol: str
+    broker_symbol: str | None = None
+    side: Literal["buy", "sell"]
+    source: Literal["manual", "bot"]
+    lots: float
+    open_ts: datetime
+    close_ts: datetime
+    open_price: float
+    close_price: float
+    profit: float = 0.0
+    commission: float = 0.0
+    swap: float = 0.0
+    fee: float = 0.0
+    net: float
+    magic: int = 0
+    comment: str | None = None
+
+    @property
+    def duration_seconds(self) -> float:
+        return max(0.0, (self.close_ts - self.open_ts).total_seconds())
+
+
+class PerformanceStats(_Frozen):
+    """The core numbers of a set of closed trades. Reused for the whole-period
+    summary, each time bucket (day/week/month) and each breakdown group
+    (per asset, per origin, per side, per weekday, per hour).
+
+    `win_rate`/`loss_rate` are percentages of the trades counted here (a
+    zero-net trade counts as neither a win nor a loss). `profit_factor` is
+    gross profit ÷ gross loss and `payoff` is average win ÷ average loss
+    (the risk-return ratio in money) — both None when there is no losing
+    trade to divide by. `expectancy` is the average net per trade.
+    """
+
+    trades: int = 0
+    wins: int = 0
+    losses: int = 0
+    breakeven: int = 0
+    win_rate: float = 0.0  # %
+    loss_rate: float = 0.0  # %
+    net: float = 0.0
+    gross_profit: float = 0.0
+    gross_loss: float = 0.0  # positive number (absolute value)
+    profit_factor: float | None = None
+    avg_win: float = 0.0
+    avg_loss: float = 0.0  # positive number
+    payoff: float | None = None  # avg_win / avg_loss
+    expectancy: float = 0.0  # net / trades
+    best: float = 0.0
+    worst: float = 0.0
+    lots: float = 0.0
+    commission: float = 0.0
+    swap: float = 0.0
+    avg_duration_seconds: float = 0.0
+    max_consecutive_wins: int = 0
+    max_consecutive_losses: int = 0
+
+
+class PerformanceBucket(_Frozen):
+    """One time slice of the report (a day, an ISO week or a month). `start` is
+    the slice's first instant in UTC; `label` is what the UI prints."""
+
+    key: str
+    label: str
+    start: datetime
+    stats: PerformanceStats
+    balance_end: float  # running account balance at the end of the slice
+
+
+class PerformanceGroup(_Frozen):
+    """One breakdown row (asset, origin, side, weekday or hour of day)."""
+
+    key: str
+    label: str
+    stats: PerformanceStats
+
+
+class EquityCurvePoint(_Frozen):
+    """One step of the equity/drawdown curve — the running account balance right
+    after a closed trade, plus how far below the running peak it sits."""
+
+    ts: datetime
+    balance: float
+    peak: float
+    drawdown: float  # peak - balance (>= 0)
+    drawdown_pct: float  # % of the peak
+    net: float  # this trade's net
+
+
+class PerformanceFilters(_Frozen):
+    """Echo of the filters the report was computed with, so the UI can show
+    exactly what it is looking at."""
+
+    start: datetime | None = None
+    end: datetime | None = None
+    symbols: list[str] = Field(default_factory=list)  # empty = all
+    source: Literal["all", "manual", "bot"] = "all"
+
+
+class PerformanceReport(_Frozen):
+    """Everything the Performance tab draws for one filter selection.
+
+    `start_balance` is the account balance right before the first trade in the
+    period (derived from the broker's current balance by unwinding every trade
+    since), so `equity_curve`, `return_pct` and the drawdown numbers are in real
+    account money, not just a cumulative sum. With an asset/origin filter the
+    baseline is still the real account balance when the window opened, so the
+    curve reads "what this slice of my trading did to the account".
+    """
+
+    filters: PerformanceFilters
+    summary: PerformanceStats
+    start_balance: float = 0.0
+    end_balance: float = 0.0
+    return_pct: float = 0.0  # net over start_balance
+    max_drawdown: float = 0.0
+    max_drawdown_pct: float = 0.0
+    current_drawdown: float = 0.0
+    current_drawdown_pct: float = 0.0
+    recovery_factor: float | None = None  # net / max_drawdown
+    equity_curve: list[EquityCurvePoint] = Field(default_factory=list)
+    by_day: list[PerformanceBucket] = Field(default_factory=list)
+    by_week: list[PerformanceBucket] = Field(default_factory=list)
+    by_month: list[PerformanceBucket] = Field(default_factory=list)
+    by_symbol: list[PerformanceGroup] = Field(default_factory=list)
+    by_source: list[PerformanceGroup] = Field(default_factory=list)
+    by_side: list[PerformanceGroup] = Field(default_factory=list)
+    by_weekday: list[PerformanceGroup] = Field(default_factory=list)
+    by_hour: list[PerformanceGroup] = Field(default_factory=list)
+    trades: list[ClosedTrade] = Field(default_factory=list)  # newest first, capped
+    trades_returned: int = 0
+    available_symbols: list[str] = Field(default_factory=list)  # for the filter UI
+    first_trade_at: datetime | None = None  # oldest trade the backend holds
+    currency: str | None = None
+    asof: datetime | None = None  # last collector push
+
+
 class OrderFlowSnapshot(_Frozen):
     """Per-symbol order-flow state broadcast to the frontend.
 

@@ -394,6 +394,53 @@ container the Dashboard uses.
   the badges a minute behind on a fast move (price already past the middle band
   while the badge still pointed at the band it came from).
 
+### Performance — todos os trades, com filtros (`/performance`)
+
+A tab that answers one question: **is the trading actually working?** It reads
+**every closed round-trip trade of the account — placed by hand AND by the
+scalper bot** — straight from the broker's own deal history, so the money on
+screen is the money that hit the account (commission and swap already in).
+
+- **Filters:** ready-made windows (hoje, esta semana, este mês, mês passado, 7 /
+  30 / 90 dias, tudo), an exact date range (which always wins over the preset),
+  which assets to count, and the origin — tudo / manual / bot scalper. Every
+  number, chart and table on the page follows the same selection.
+- **Headline numbers:** result in money, **hit rate**, **% of losing trades**,
+  profit factor (every dollar won ÷ every dollar lost), **risk-return** (average
+  win ÷ average loss), expectancy per trade, **max drawdown in money and in %**,
+  the drawdown right now, return over the account in %, recovery factor (result
+  ÷ max drawdown), longest winning / losing streak, and the costs + lots traded.
+- **Evolução patrimonial:** the account balance after each closed trade, as a
+  green/red baseline area against the balance the period started from, with a
+  second chart under it showing how far below its own peak the account was —
+  the drawdown, in %.
+- **Resultado por período:** one row per day, ISO week or month (toggle) with
+  trades, hit rate, wins/losses, profit factor, result and the account balance
+  at the end of the slice.
+- **Breakdowns:** per asset, **manual × bot**, buy × sell, weekday and hour of
+  day — where the money is really made or lost.
+- **Operações:** the trade list — close time, asset, side, origin, lots, entry
+  and exit price, time in trade, costs and the net banked.
+- **Data path:** the collector groups the broker's DEALS by `position_id` into
+  round-trip trades (volume-weighted entry/exit prices, every deal's net summed)
+  over a rolling window (`history_days`, default 180) and pushes them every
+  `history_poll_seconds` (default 300) on the `trade_history` message. The
+  backend merges each push **by MT5 position id**, so re-pushes never duplicate
+  and trades that age out of the window are kept, and writes the whole set to
+  `data/trade_history/closed_trades.json` (survives restarts and rebuilds).
+  `GET /api/performance` then computes the report
+  (`use_cases/compute_performance.py`), polled every 30s by the UI.
+- **Manual vs bot:** every position the bot opens is stamped with the magic
+  number `770078`; older bot trades are recognised by their `trading-buddy …`
+  comment. The origin is read from the **entry** deal only, so a bot trade you
+  closed by hand still counts as the bot's — and a trade you opened by hand and
+  the auto-close closed still counts as yours.
+- **Honest caveats:** the period's opening balance is derived from the account's
+  current balance minus everything banked since, so **deposits and withdrawals
+  are not separated** (it is a trading-performance view, not accounting). Day /
+  week / month grouping and the hour breakdown are in **UTC**. Trades still open
+  are not in the report — there is nothing to score yet.
+
 ### LLM features (need `CLAUDE_API_KEY`)
 
 - `dtb brief` — pre-market briefing in PT-BR via Claude Opus 4.7.
@@ -788,6 +835,8 @@ GET    /api/qa                            list saved Q&A entries (updated-first)
 POST   /api/qa                            create a Q&A entry (201)
 PUT    /api/qa/{id}                       update a Q&A entry (404 if missing)
 DELETE /api/qa/{id}                       delete a Q&A entry (204 / 404)
+GET    /api/performance                   closed-trade performance report (filters:
+                                          preset|start|end, symbols, source)
 WS     /ws/ticks                          streams each new tick
 ```
 

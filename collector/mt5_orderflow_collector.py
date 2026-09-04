@@ -66,6 +66,19 @@ _TICK_FLAG_VOLUME = 16
 _TICK_FLAG_BUY = 32
 _TICK_FLAG_SELL = 64
 
+# MT5 deal type / deal entry (ENUM_DEAL_TYPE / ENUM_DEAL_ENTRY), also mirrored
+# as literals so the deal-grouping helper stays importable off-Windows.
+_DEAL_TYPE_BUY = 0
+_DEAL_TYPE_SELL = 1
+_DEAL_ENTRY_IN = 0  # deal that OPENED (or added to) a position
+
+# Magic number stamped on every position the scalper bot opens, so the
+# Performance tab can tell bot trades from hand-placed ones for certain.
+# Bot trades opened before this magic existed are still recognised by their
+# "trading-buddy ..." comment (the broker truncates it but never rewrites it).
+_BOT_MAGIC = 770078
+_BOT_COMMENT = "trading-buddy"
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -520,6 +533,7 @@ def _open_position(broker: str, side: str, lots: float) -> Any:
         "type": order_type,
         "price": price,
         "deviation": 50,
+        "magic": _BOT_MAGIC,  # marks the trade as the bot's in the deal history
         "comment": "trading-buddy scalper",
         "type_time": mt5.ORDER_TIME_GTC,
     }
@@ -681,6 +695,148 @@ def _read_balance_history() -> dict[str, Any] | None:
     }
 
 
+def _deal_net(d: Any) -> float:
+    """One deal's realized net: profit + commission + swap + fee."""
+    return (
+        float(getattr(d, "profit", 0.0) or 0.0)
+        + float(getattr(d, "commission", 0.0) or 0.0)
+        + float(getattr(d, "swap", 0.0) or 0.0)
+        + float(getattr(d, "fee", 0.0) or 0.0)
+    )
+
+
+def _group_deals_into_trades(
+    deals: Any, broker_to_backend: dict[str, str]
+) -> list[dict[str, Any]]:
+    """Fold raw MT5 deals into CLOSED round-trip trades, one per position.
+
+    MT5 books every fill as a deal; a trade is the group of deals that share a
+    `position_id` — one or more entries in, one or more exits out. Per position
+    we sum the realized net of every deal, take volume-weighted entry and exit
+    prices, and read the origin from the ENTRY deal ONLY: a bot open closed by
+    hand is still a bot trade, and our own "trading-buddy autoclose" comment on
+    an exit must never make a hand-placed trade look like the bot's.
+
+    Positions still open (no exit deal yet) are skipped — there is nothing to
+    score. Pure function (no MT5 calls), so it runs and is unit-tested
+    off-Windows.
+    """
+    agg: dict[int, dict[str, Any]] = {}
+    for d in deals:
+        if getattr(d, "type", None) not in (_DEAL_TYPE_BUY, _DEAL_TYPE_SELL):
+            continue  # balance / credit / correction operation, not a trade
+        pid = int(getattr(d, "position_id", 0) or 0)
+        if pid == 0:
+            continue
+        broker = str(getattr(d, "symbol", "") or "")
+        trade = agg.setdefault(
+            pid,
+            {
+                "id": pid,
+                "symbol": broker_to_backend.get(broker, broker),
+                "broker_symbol": broker,
+                "side": None,
+                "source": "manual",
+                "in_lots": 0.0,
+                "in_notional": 0.0,
+                "out_lots": 0.0,
+                "out_notional": 0.0,
+                "open_t": None,
+                "close_t": None,
+                "profit": 0.0,
+                "commission": 0.0,
+                "swap": 0.0,
+                "fee": 0.0,
+                "net": 0.0,
+                "magic": 0,
+                "comment": "",
+            },
+        )
+        lots = float(getattr(d, "volume", 0.0) or 0.0)
+        price = float(getattr(d, "price", 0.0) or 0.0)
+        when = float(getattr(d, "time", 0.0) or 0.0)
+        trade["profit"] += float(getattr(d, "profit", 0.0) or 0.0)
+        trade["commission"] += float(getattr(d, "commission", 0.0) or 0.0)
+        trade["swap"] += float(getattr(d, "swap", 0.0) or 0.0)
+        trade["fee"] += float(getattr(d, "fee", 0.0) or 0.0)
+        trade["net"] += _deal_net(d)
+        if getattr(d, "entry", None) == _DEAL_ENTRY_IN:
+            trade["in_lots"] += lots
+            trade["in_notional"] += lots * price
+            if trade["open_t"] is None or when < trade["open_t"]:
+                trade["open_t"] = when
+            if trade["side"] is None:  # first entry deal defines the trade
+                trade["side"] = "buy" if d.type == _DEAL_TYPE_BUY else "sell"
+                magic = int(getattr(d, "magic", 0) or 0)
+                comment = str(getattr(d, "comment", "") or "")
+                trade["magic"] = magic
+                trade["comment"] = comment
+                if magic == _BOT_MAGIC or comment.startswith(_BOT_COMMENT):
+                    trade["source"] = "bot"
+        else:
+            trade["out_lots"] += lots
+            trade["out_notional"] += lots * price
+            if trade["close_t"] is None or when > trade["close_t"]:
+                trade["close_t"] = when
+    trades: list[dict[str, Any]] = []
+    for trade in agg.values():
+        if trade["in_lots"] <= 0.0 or trade["out_lots"] <= 0.0:
+            continue  # still open, or its entry deal is outside the window
+        if trade["open_t"] is None or trade["close_t"] is None:
+            continue
+        trades.append(
+            {
+                "id": trade["id"],
+                "symbol": trade["symbol"],
+                "broker_symbol": trade["broker_symbol"],
+                "side": trade["side"] or "buy",
+                "source": trade["source"],
+                "lots": round(trade["in_lots"], 4),
+                # deal.time is server-epoch seconds, like the balance curve's
+                "open_ts": _server_ms_to_utc_iso(int(trade["open_t"] * 1000)),
+                "close_ts": _server_ms_to_utc_iso(int(trade["close_t"] * 1000)),
+                "open_price": round(trade["in_notional"] / trade["in_lots"], 5),
+                "close_price": round(trade["out_notional"] / trade["out_lots"], 5),
+                "profit": round(trade["profit"], 2),
+                "commission": round(trade["commission"], 2),
+                "swap": round(trade["swap"], 2),
+                "fee": round(trade["fee"], 2),
+                "net": round(trade["net"], 2),
+                "magic": trade["magic"],
+                "comment": trade["comment"],
+            }
+        )
+    trades.sort(key=lambda t: t["close_ts"])
+    return trades
+
+
+def _read_trade_history(days: int, broker_to_backend: dict[str, str]) -> dict[str, Any] | None:
+    """Closed round-trip trades of the last `days` days (manual AND bot), for
+    the Performance tab. Returns None on an MT5 read error."""
+    acct = mt5.account_info()
+    if acct is None:
+        return None
+    server_now = (
+        datetime.now(timezone.utc) + timedelta(milliseconds=_server_offset_ms)
+    ).replace(tzinfo=None)
+    start = server_now - timedelta(days=max(1, days))
+    try:
+        deals = mt5.history_deals_get(start, server_now + timedelta(minutes=1))
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("history_deals_get (performance) failed: %s", exc)
+        return None
+    if deals is None:
+        return None
+    return {
+        "type": "trade_history",
+        "days": days,
+        "currency": getattr(acct, "currency", None),
+        "balance": round(float(getattr(acct, "balance", 0.0) or 0.0), 2),
+        "asof": _now_iso(),
+        "trades": _group_deals_into_trades(deals, broker_to_backend),
+    }
+
+
 def _close_all_positions(broker_symbols: set[str] | None = None) -> dict[str, Any]:
     """Close open positions (fresh read). With `broker_symbols`, only those MT5
     symbols are closed (the per-asset button); None closes everything (the
@@ -777,6 +933,7 @@ def _place_pending(broker: str, side: str, lots: float, price: float) -> Any:
         "type": order_type,
         "price": float(price),
         "deviation": 50,
+        "magic": _BOT_MAGIC,  # grid fills are bot trades too
         "comment": "trading-buddy grid",
         "type_time": mt5.ORDER_TIME_GTC,
         "type_filling": mt5.ORDER_FILLING_RETURN,
@@ -1366,6 +1523,13 @@ def run(cfg: dict[str, Any]) -> None:
     # Account P&L (day/week/month) cadence. `next_pnl_at = 0` forces a first read
     # so the top-of-screen cards populate as soon as the stream is up.
     next_pnl_at = 0.0
+    # Closed-trade history (Performance tab): every round-trip trade of the last
+    # `history_days` days, rebuilt from the broker deal history. Heavier than the
+    # P&L read (it walks months of deals), so it gets its own slow cadence;
+    # `next_trades_at = 0` forces a first push so the tab has data right away.
+    trades_days = int(cfg.get("history_days", 180))
+    trades_period = float(cfg.get("history_poll_seconds", 300))
+    next_trades_at = 0.0
     # Optional per-symbol footprint row size; falls back to the broker tick size.
     ftick: dict[str, float | None] = {
         m["mt5"]: (m.get("footprint_tick") or _broker_tick(m["mt5"])) for m in cfg["symbols"]
@@ -1429,6 +1593,7 @@ def run(cfg: dict[str, Any]) -> None:
                 next_pos_at = 0.0
                 # The backend may have restarted and lost its candle history.
                 next_hist_at = 0.0
+                next_trades_at = 0.0
             # Keep the socket alive by replying to server pings before polling,
             # and handle any control command (close_all / close_symbol / open).
             _drain_control(
@@ -1545,6 +1710,17 @@ def run(cfg: dict[str, Any]) -> None:
                     bal_hist = None
                 if bal_hist is not None:
                     ws.send(json.dumps(bal_hist))
+            # Closed-trade history (Performance tab). Own slow cadence — it
+            # rebuilds months of round-trip trades from the deal history.
+            if trades_days > 0 and trades_period > 0 and now_mono >= next_trades_at:
+                next_trades_at = now_mono + trades_period
+                try:
+                    hist_trades = _read_trade_history(trades_days, broker_to_backend)
+                except Exception as exc:  # never let it break the stream
+                    logger.debug("trade history read failed: %s", exc)
+                    hist_trades = None
+                if hist_trades is not None:
+                    ws.send(json.dumps(hist_trades))
             # Push open positions (live P&L). Throttled below the tick poll. While
             # a symbol has positions we send every period so P&L stays live; when
             # it goes flat we send one empty list to clear, then stay quiet.
