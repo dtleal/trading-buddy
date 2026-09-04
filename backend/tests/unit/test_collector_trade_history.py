@@ -21,6 +21,7 @@ from mt5_orderflow_collector import (  # noqa: E402
     _DEAL_ENTRY_IN,
     _DEAL_TYPE_BUY,
     _DEAL_TYPE_SELL,
+    _collect_cash_flows,
     _group_deals_into_trades,
 )
 
@@ -47,6 +48,7 @@ class Deal:
     fee: float = 0.0
     magic: int = 0
     comment: str = ""
+    ticket: int = 0
 
 
 def entry_deal(pid: int, **kw) -> Deal:
@@ -180,3 +182,47 @@ def test_trades_come_back_oldest_close_first() -> None:
         MAP,
     )
     assert [t["id"] for t in trades] == [11, 10]
+
+
+def balance_deal(ticket: int, amount: float, comment: str = "", dtype: int = 2) -> Deal:
+    """A balance operation (deposit / withdrawal / transfer): MT5 books the
+    money on `profit` with no symbol and no position."""
+    return Deal(
+        position_id=0,
+        symbol="",
+        type=dtype,
+        entry=0,
+        volume=0.0,
+        price=0.0,
+        time=T0,
+        profit=amount,
+        comment=comment,
+        ticket=ticket,
+    )
+
+
+def test_cash_flows_split_deposits_from_withdrawals() -> None:
+    flows = _collect_cash_flows(
+        [
+            balance_deal(10, 1000.0, "12641814 Deposit Treviso"),
+            balance_deal(11, -250.0, "11609797 TRF to 80005047"),
+            entry_deal(1),  # a trade — never a cash flow
+            exit_deal(1),
+        ]
+    )
+    assert [(f["id"], f["amount"], f["kind"]) for f in flows] == [
+        (10, 1000.0, "deposit"),
+        (11, -250.0, "withdrawal"),
+    ]
+    assert flows[0]["comment"] == "12641814 Deposit Treviso"
+    assert flows[0]["ts"].startswith("2026-03-02T14:00")
+
+
+def test_zero_value_bookkeeping_markers_are_dropped() -> None:
+    """The broker writes a 0.00 "Archive" balance deal at year end."""
+    assert _collect_cash_flows([balance_deal(12, 0.0, "Archive 2024-12-31")]) == []
+
+
+def test_credit_and_commission_deals_are_kept_as_other() -> None:
+    flows = _collect_cash_flows([balance_deal(13, -1.5, "commission", dtype=7)])
+    assert [(f["amount"], f["kind"]) for f in flows] == [(-1.5, "other")]

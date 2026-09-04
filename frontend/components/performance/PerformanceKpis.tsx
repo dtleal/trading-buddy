@@ -2,7 +2,6 @@
 
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  fmtDuration,
   fmtMoney,
   fmtPercent,
   fmtRatio,
@@ -39,9 +38,10 @@ function Kpi({
 }
 
 /**
- * The headline numbers of the selected period: result, hit rate, the win/loss
- * split, profit factor, payoff (risk-return in money), expectancy per trade,
- * drawdown in money and %, return over the account and recovery factor.
+ * The headline numbers, named like the Profit performance report: what the
+ * trading made, how often it hit, how much it won per dollar lost, the payoff,
+ * the worst fall and the return over the capital. The full stat list lives in
+ * `SummaryPanel`.
  */
 export function PerformanceKpis({ report }: { report: PerformanceReport }) {
   const s = report.summary;
@@ -50,28 +50,22 @@ export function PerformanceKpis({ report }: { report: PerformanceReport }) {
   return (
     <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
       <Kpi
-        label="Resultado"
+        label="Saldo líquido total"
         value={fmtSigned(s.net, cur)}
-        hint={`${s.trades} operações fechadas`}
+        hint={`${s.trades} operações · ${fmtSigned(s.expectancy, null)} por operação`}
         tone={netColor(s.net)}
       />
       <Kpi
-        label="Taxa de acerto"
+        label="Operações vencedoras"
         value={fmtPercent(s.win_rate)}
         hint={`${s.wins} ganhos · ${s.losses} perdas${
-          s.breakeven > 0 ? ` · ${s.breakeven} zerados` : ""
+          s.breakeven > 0 ? ` · ${s.breakeven} zeradas` : ""
         }`}
-      />
-      <Kpi
-        label="Perdedoras"
-        value={fmtPercent(s.loss_rate)}
-        hint={`média das perdas ${fmtMoney(s.avg_loss, cur)}`}
-        tone={s.loss_rate > 50 ? "text-red-400" : undefined}
       />
       <Kpi
         label="Fator de lucro"
         value={fmtRatio(s.profit_factor)}
-        hint={`ganhou ${fmtMoney(s.gross_profit, cur)} · perdeu ${fmtMoney(s.gross_loss, cur)}`}
+        hint={`${fmtMoney(s.gross_profit, null)} ganhos ÷ ${fmtMoney(s.gross_loss, null)} perdas`}
         tone={
           s.profit_factor === null
             ? undefined
@@ -81,49 +75,31 @@ export function PerformanceKpis({ report }: { report: PerformanceReport }) {
         }
       />
       <Kpi
-        label="Risco × retorno"
+        label="Razão média lucro : prejuízo"
         value={fmtRatio(s.payoff)}
-        hint={`ganho médio ${fmtMoney(s.avg_win, cur)} ÷ perda média ${fmtMoney(s.avg_loss, cur)}`}
+        hint={`média ganho ${fmtMoney(s.avg_win, null)} · média perda ${fmtMoney(
+          s.avg_loss,
+          null,
+        )}`}
       />
       <Kpi
-        label="Por operação"
-        value={fmtSigned(s.expectancy, cur)}
-        hint={`esperado por trade · ${fmtDuration(s.avg_duration_seconds)} em média`}
-        tone={netColor(s.expectancy)}
-      />
-      <Kpi
-        label="Drawdown máximo"
+        label="Máximo drawdown"
         value={fmtMoney(report.max_drawdown, cur)}
-        hint={`${fmtPercent(report.max_drawdown_pct, 2)} do topo da conta`}
+        hint={`${fmtPercent(report.max_drawdown_pct, 2)} do patrimônio máximo`}
         tone={report.max_drawdown > 0 ? "text-red-400" : undefined}
       />
       <Kpi
-        label="Drawdown agora"
-        value={fmtMoney(report.current_drawdown, cur)}
-        hint={`${fmtPercent(report.current_drawdown_pct, 2)} abaixo do topo`}
-        tone={report.current_drawdown > 0 ? "text-amber-400" : "text-emerald-400"}
-      />
-      <Kpi
-        label="Retorno"
+        label="Retorno sobre o capital"
         value={fmtSignedPercent(report.return_pct)}
-        hint={`de ${fmtMoney(report.start_balance, cur)} para ${fmtMoney(report.end_balance, cur)}`}
+        hint={
+          report.deposits > 0
+            ? `capital ${fmtMoney(report.capital, cur)} (inclui ${fmtMoney(
+                report.deposits,
+                null,
+              )} depositados)`
+            : `capital ${fmtMoney(report.capital, cur)}`
+        }
         tone={netColor(report.return_pct)}
-      />
-      <Kpi
-        label="Recuperação"
-        value={fmtRatio(report.recovery_factor)}
-        hint="resultado ÷ drawdown máximo"
-      />
-      <Kpi
-        label="Sequências"
-        value={`${s.max_consecutive_wins} × ${s.max_consecutive_losses}`}
-        hint="maior sequência de ganhos × de perdas"
-      />
-      <Kpi
-        label="Custos e volume"
-        value={fmtSigned(s.commission + s.swap, cur)}
-        hint={`comissão + swap · ${s.lots.toFixed(2)} lotes negociados`}
-        tone={s.commission + s.swap < 0 ? "text-red-400" : undefined}
       />
     </div>
   );

@@ -11,6 +11,11 @@ so:
 - a backend restart doesn't lose the older trades: the whole set is written to
   one JSON file after each push and reloaded on construction.
 
+The same push carries the account's **balance operations** (deposits,
+withdrawals, transfers, credit) — kept here as well, keyed by deal ticket,
+because the performance report needs them to tell "the account grew" from
+"money was paid in".
+
 `directory=None` keeps everything in memory (used by the tests).
 """
 
@@ -21,7 +26,7 @@ import logging
 import os
 from pathlib import Path
 
-from core.models import ClosedTrade
+from core.models import CashFlow, ClosedTrade
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +39,7 @@ class TradeHistory:
     def __init__(self, directory: Path | None) -> None:
         self._dir = directory
         self._trades: dict[int, ClosedTrade] = {}
+        self._flows: dict[int, CashFlow] = {}
         self.currency: str | None = None
         self.balance: float = 0.0
         self.asof: str | None = None  # ISO timestamp of the last push
@@ -47,6 +53,7 @@ class TradeHistory:
         self,
         trades: list[ClosedTrade],
         *,
+        cash_flows: list[CashFlow] | None = None,
         balance: float | None = None,
         currency: str | None = None,
         asof: str | None = None,
@@ -57,6 +64,8 @@ class TradeHistory:
             if trade.id not in self._trades:
                 new += 1
             self._trades[trade.id] = trade  # latest wins (a re-read may correct swap)
+        for flow in cash_flows or ():
+            self._flows[flow.id] = flow
         if balance is not None:
             self.balance = balance
         if currency:
@@ -71,6 +80,10 @@ class TradeHistory:
     def snapshot(self) -> list[ClosedTrade]:
         """Every closed trade held, oldest first (by close time)."""
         return sorted(self._trades.values(), key=lambda t: (t.close_ts, t.id))
+
+    def cash_flows(self) -> list[CashFlow]:
+        """Every balance operation held, oldest first."""
+        return sorted(self._flows.values(), key=lambda f: (f.ts, f.id))
 
     # --- persistence ---------------------------------------------------------
 
@@ -87,6 +100,9 @@ class TradeHistory:
             for item in raw.get("trades", ()):
                 trade = ClosedTrade.model_validate(item)
                 self._trades[trade.id] = trade
+            for item in raw.get("cash_flows", ()):
+                flow = CashFlow.model_validate(item)
+                self._flows[flow.id] = flow
             self.balance = float(raw.get("balance", 0.0) or 0.0)
             self.currency = raw.get("currency") or None
             self.asof = raw.get("asof") or None
@@ -101,6 +117,7 @@ class TradeHistory:
             "currency": self.currency,
             "asof": self.asof,
             "trades": [t.model_dump(mode="json") for t in self.snapshot()],
+            "cash_flows": [f.model_dump(mode="json") for f in self.cash_flows()],
         }
         path = self._path()
         tmp = path.with_suffix(".json.tmp")

@@ -21,7 +21,12 @@ from settings import Settings
 TOKEN = "test-secret-token"
 
 
-def push(client: TestClient, trades: list[dict], balance: float = 1000.0) -> None:
+def push(
+    client: TestClient,
+    trades: list[dict],
+    balance: float = 1000.0,
+    cash_flows: list[dict] | None = None,
+) -> None:
     with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
         ws.send_json(
             {
@@ -31,6 +36,7 @@ def push(client: TestClient, trades: list[dict], balance: float = 1000.0) -> Non
                 "balance": balance,
                 "asof": "2026-03-02T15:00:00+00:00",
                 "trades": trades,
+                "cash_flows": cash_flows or [],
             }
         )
         # A second message we can wait on, so the first is fully handled.
@@ -137,3 +143,28 @@ def test_a_bad_date_is_a_400(client: TestClient) -> None:
 
 def test_unknown_preset_is_rejected(client: TestClient) -> None:
     assert client.get("/api/performance?preset=decade").status_code == 422
+
+
+def test_a_pushed_deposit_is_kept_out_of_the_result(client: TestClient) -> None:
+    """The real case: the account traded on 6.77, then 1,000 was paid in. The
+    result must stay 25 and the 1,000 must show up as a deposit, not profit."""
+    push(
+        client,
+        [trade(1, 25.0)],
+        balance=1031.77,
+        cash_flows=[
+            {
+                "id": 900,
+                "ts": "2026-03-02T14:03:00+00:00",  # after the first trade closed
+                "amount": 1000.0,
+                "kind": "deposit",
+                "comment": "Deposit",
+            }
+        ],
+    )
+    body = client.get("/api/performance").json()
+    assert body["summary"]["net"] == 25.0
+    assert body["deposits"] == 1000.0
+    assert body["start_balance"] == 6.77
+    assert body["capital"] == 1006.77
+    assert len(body["cash_flows"]) == 1

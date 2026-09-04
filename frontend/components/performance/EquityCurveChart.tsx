@@ -22,13 +22,15 @@ const DOWN_LINE = "#ef4444"; // red — below it
 const DD_LINE = "#f59e0b"; // amber — the drawdown curve
 
 /**
- * Equity evolution of the selected trades: the account balance after each
- * closed trade, drawn against the balance the period started from (green fill
- * above, red below), plus a second chart with how far below its own peak the
- * account was at each point ("drawdown", in %).
+ * "Curva de capital", the Profit report's main chart: the account balance after
+ * each closed trade, drawn against the balance the period started from (green
+ * fill above, red below), plus a second chart with how far below its own peak
+ * the account was at each point ("drawdown", in %).
  *
- * Both read the same `equity_curve` the backend computes, so the numbers in
- * the KPI cards and the shapes here can never disagree.
+ * A deposit or withdrawal is a step in the same line — it moved the account —
+ * but it is never part of the result, so it is called out in the header.
+ * Both charts read the same `equity_curve` the backend computes, so the KPI
+ * cards and the shapes here can never disagree.
  */
 export function EquityCurveChart({ report }: { report: PerformanceReport }) {
   const theme = useTheme();
@@ -137,9 +139,11 @@ export function EquityCurveChart({ report }: { report: PerformanceReport }) {
       <CardHeader>
         <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <CardTitle>Evolução patrimonial</CardTitle>
+            <CardTitle>Curva de capital</CardTitle>
             <CardDescription>
-              saldo da conta a cada trade fechado · verde acima do início, vermelho abaixo
+              saldo da conta a cada operação fechada · verde acima do início,
+              vermelho abaixo · depósito/saque entra como degrau, não como
+              resultado
             </CardDescription>
           </div>
           <div className="flex flex-wrap items-baseline gap-3">
@@ -160,6 +164,12 @@ export function EquityCurveChart({ report }: { report: PerformanceReport }) {
             <Badge tone={report.max_drawdown > 0 ? "warning" : "neutral"}>
               DD máx {fmtMoney(report.max_drawdown, cur)} ({fmtPercent(report.max_drawdown_pct, 2)})
             </Badge>
+            {report.deposits > 0 && (
+              <Badge tone="info">depósitos +{fmtMoney(report.deposits, cur)}</Badge>
+            )}
+            {report.withdrawals > 0 && (
+              <Badge tone="info">saques −{fmtMoney(report.withdrawals, cur)}</Badge>
+            )}
           </div>
         </div>
       </CardHeader>

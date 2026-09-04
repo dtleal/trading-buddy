@@ -555,6 +555,10 @@ export const PerformanceStats = z.object({
   commission: z.number(),
   swap: z.number(),
   avg_duration_seconds: z.number(),
+  // Tempo em operação separado por resultado (o "indicador de disposição" do
+  // Profit): segurar perdedora muito mais que vencedora é o vício clássico.
+  avg_win_duration_seconds: z.number().default(0),
+  avg_loss_duration_seconds: z.number().default(0),
   max_consecutive_wins: z.number(),
   max_consecutive_losses: z.number(),
 });
@@ -578,16 +582,28 @@ export const PerformanceGroup = z.object({
 });
 export type PerformanceGroup = z.infer<typeof PerformanceGroup>;
 
-/** One step of the equity curve: account balance after a closed trade. */
+/** One step of the equity curve: account balance after a closed trade (or
+ *  after a deposit/withdrawal, when `flow` is not zero). */
 export const EquityCurvePoint = z.object({
   ts: z.string(),
   balance: z.number(),
   peak: z.number(),
   drawdown: z.number(),
   drawdown_pct: z.number(),
-  net: z.number(),
+  net: z.number(), // resultado do trade (0 num depósito/saque)
+  flow: z.number().default(0), // dinheiro que entrou/saiu (0 num trade)
 });
 export type EquityCurvePoint = z.infer<typeof EquityCurvePoint>;
+
+/** Money that moved the balance without a trade (depósito, saque, transferência). */
+export const CashFlow = z.object({
+  id: z.number(),
+  ts: z.string(),
+  amount: z.number(), // com sinal: entrou (+) / saiu (−)
+  kind: z.enum(["deposit", "withdrawal", "other"]),
+  comment: z.string().nullable().default(null),
+});
+export type CashFlow = z.infer<typeof CashFlow>;
 
 /** Everything the Performance tab draws (/api/performance). */
 export const PerformanceReport = z.object({
@@ -600,13 +616,19 @@ export const PerformanceReport = z.object({
   summary: PerformanceStats,
   start_balance: z.number(),
   end_balance: z.number(),
-  return_pct: z.number(),
+  peak_balance: z.number().default(0), // patrimônio máximo
+  avg_time_between_trades_seconds: z.number().default(0), // TET
+  deposits: z.number().default(0),
+  withdrawals: z.number().default(0),
+  capital: z.number().default(0), // saldo inicial + depósitos do período
+  return_pct: z.number(), // resultado sobre o capital
   max_drawdown: z.number(),
   max_drawdown_pct: z.number(),
   current_drawdown: z.number(),
   current_drawdown_pct: z.number(),
   recovery_factor: z.number().nullable().default(null),
   equity_curve: z.array(EquityCurvePoint),
+  cash_flows: z.array(CashFlow).default([]),
   by_day: z.array(PerformanceBucket),
   by_week: z.array(PerformanceBucket),
   by_month: z.array(PerformanceBucket),

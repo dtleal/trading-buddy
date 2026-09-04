@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from core.models import ClosedTrade
+from core.models import CashFlow, ClosedTrade
 from use_cases.compute_performance import compute_performance, compute_stats
 
 BASE = datetime(2026, 3, 2, 14, 0, tzinfo=timezone.utc)  # a Monday
@@ -37,6 +37,16 @@ def trade(
         open_price=100.0,
         close_price=101.0,
         net=net,
+    )
+
+
+def flow(fid: int, amount: float, *, minutes: int = 0, kind: str = "deposit") -> CashFlow:
+    return CashFlow(
+        id=fid,
+        ts=BASE + timedelta(minutes=minutes),
+        amount=amount,
+        kind=kind,  # type: ignore[arg-type]
+        comment="Deposit",
     )
 
 
@@ -179,3 +189,59 @@ def test_trade_list_is_newest_first_and_capped() -> None:
     report = compute_performance(trades, account_balance=1005.0, trades_limit=2)
     assert [t.id for t in report.trades] == [5, 4]
     assert report.trades_returned == 2
+
+
+def test_a_deposit_is_never_counted_as_result() -> None:
+    """The real case that exposed this: +1,000 paid in, +25 actually traded."""
+    trades = [trade(1, 10.0), trade(2, 15.0, minutes=30)]
+    flows = [flow(900, 1000.0, minutes=15)]
+    # Account is at 1031.77 now: it started at 6.77, made 25 and got 1,000 in.
+    report = compute_performance(trades, account_balance=1031.77, cash_flows=flows)
+    assert report.start_balance == 6.77
+    assert report.summary.net == 25.0  # trading money only
+    assert report.deposits == 1000.0
+    assert report.withdrawals == 0.0
+    assert report.capital == 1006.77  # start + what was paid in
+    assert report.return_pct == 2.48  # 25 over 1006.77, not over 6.77
+    assert report.end_balance == 1031.77
+    # The deposit is its own step in the curve, with no result attached.
+    assert [(p.balance, p.net, p.flow) for p in report.equity_curve] == [
+        (16.77, 10.0, 0.0),
+        (1016.77, 0.0, 1000.0),
+        (1031.77, 15.0, 0.0),
+    ]
+    assert report.peak_balance == 1031.77
+
+
+def test_a_withdrawal_is_reported_apart_too() -> None:
+    trades = [trade(1, 20.0)]
+    flows = [flow(901, -50.0, minutes=10, kind="withdrawal")]
+    report = compute_performance(trades, account_balance=970.0, cash_flows=flows)
+    assert report.start_balance == 1000.0
+    assert report.withdrawals == 50.0
+    assert report.summary.net == 20.0
+    assert report.end_balance == 970.0
+
+
+def test_a_deposit_outside_the_window_only_moves_the_baseline() -> None:
+    trades = [trade(1, 10.0, minutes=60)]
+    flows = [flow(902, 500.0, minutes=0)]  # before the window opens
+    report = compute_performance(
+        trades, account_balance=1510.0, cash_flows=flows, start=BASE + timedelta(minutes=30)
+    )
+    assert report.start_balance == 1500.0
+    assert report.deposits == 0.0
+    assert report.capital == 1500.0
+    assert len(report.equity_curve) == 1
+
+
+def test_time_in_trade_is_split_by_outcome_and_the_gap_is_measured() -> None:
+    trades = [
+        trade(1, 10.0, duration_s=30),
+        trade(2, -5.0, minutes=10, duration_s=600),
+    ]
+    report = compute_performance(trades, account_balance=1005.0)
+    assert report.summary.avg_win_duration_seconds == 30.0
+    assert report.summary.avg_loss_duration_seconds == 600.0
+    # Trade 1 closed at BASE, trade 2 opened 600s before BASE+10min → 0s gap.
+    assert report.avg_time_between_trades_seconds == 0.0

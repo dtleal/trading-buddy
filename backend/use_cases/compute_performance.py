@@ -13,12 +13,18 @@ What is measured, in plain words:
 - **drawdown** — how far the account fell below its own best point, in money
   and in % of that peak. Measured on the running ACCOUNT BALANCE, not on a
   cumulative sum from zero, so the % is the real account risk.
-- **equity evolution** — the running balance after each closed trade.
+- **equity evolution** — the running balance after each closed trade, with
+  deposits and withdrawals as their own steps (they move the balance but are
+  never counted as result).
+- **time in trade, winners vs losers** — the Profit report's "disposition"
+  read: holding losers far longer than winners is a habit worth seeing.
 
 Baseline: the collector pushes the account's CURRENT balance along with the
-trades, so the balance before any trade in the window is that current balance
-minus the net of every trade closed since the window opened (deposits and
-withdrawals aside — this is a trading-performance view, not accounting).
+trades and the balance operations, so the balance before the window is that
+current balance minus every trade net AND every deposit/withdrawal since. The
+result (`summary.net`) is trading money only; money paid in is reported apart
+(`deposits`) and the return % is measured over `capital` = the balance at the
+start plus what was paid in, so a deposit can never look like a profit.
 """
 
 from __future__ import annotations
@@ -28,6 +34,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from core.models import (
+    CashFlow,
     ClosedTrade,
     EquityCurvePoint,
     PerformanceBucket,
@@ -44,6 +51,13 @@ _WEEKDAYS_PT = ["seg", "ter", "qua", "qui", "sex", "sáb", "dom"]
 # A trade nets exactly zero often enough (a scratch) that it deserves its own
 # bucket instead of being counted as a loss.
 _EPS = 0.005
+
+
+def _avg_duration(trades: Sequence[ClosedTrade]) -> float:
+    """Average time in trade, in seconds (0 for an empty set)."""
+    if not trades:
+        return 0.0
+    return round(sum(t.duration_seconds for t in trades) / len(trades), 1)
 
 
 def compute_stats(trades: Sequence[ClosedTrade]) -> PerformanceStats:
@@ -93,6 +107,8 @@ def compute_stats(trades: Sequence[ClosedTrade]) -> PerformanceStats:
         commission=round(sum(t.commission for t in ordered), 2),
         swap=round(sum(t.swap for t in ordered), 2),
         avg_duration_seconds=round(sum(t.duration_seconds for t in ordered) / len(ordered), 1),
+        avg_win_duration_seconds=_avg_duration([t for t in ordered if t.net > _EPS]),
+        avg_loss_duration_seconds=_avg_duration([t for t in ordered if t.net < -_EPS]),
         max_consecutive_wins=best_w,
         max_consecutive_losses=best_l,
     )
@@ -184,10 +200,23 @@ def _groups(
     return rows
 
 
+def _avg_time_between(trades: Sequence[ClosedTrade]) -> float:
+    """ "TET" in the Profit report: average wait between closing one trade and
+    opening the next. Negative gaps (overlapping trades) count as zero."""
+    if len(trades) < 2:
+        return 0.0
+    gaps = [
+        max(0.0, (nxt.open_ts - prev.close_ts).total_seconds())
+        for prev, nxt in zip(trades, trades[1:])
+    ]
+    return round(sum(gaps) / len(gaps), 1)
+
+
 def compute_performance(
     all_trades: Iterable[ClosedTrade],
     *,
     account_balance: float,
+    cash_flows: Iterable[CashFlow] = (),
     start: datetime | None = None,
     end: datetime | None = None,
     symbols: Sequence[str] | None = None,
@@ -198,31 +227,48 @@ def compute_performance(
 ) -> PerformanceReport:
     """Build the whole report for one filter selection.
 
-    `all_trades` must be every trade the backend holds (not pre-filtered): the
-    balance baseline is derived from the ones OUTSIDE the window too.
+    `all_trades` and `cash_flows` must be everything the backend holds (not
+    pre-filtered): the balance baseline is derived from the trades AND the
+    deposits/withdrawals that sit OUTSIDE the window too.
     """
     everything = sorted(all_trades, key=lambda t: (t.close_ts, t.id))
+    flows = sorted(cash_flows, key=lambda f: (f.ts, f.id))
     wanted = {s.strip().upper() for s in (symbols or []) if s.strip()}
     selected = [t for t in everything if _matches(t, start, end, wanted, source)]
 
     # Balance right before the window opened: today's balance minus everything
-    # banked since (all trades, not only the filtered ones — they all moved it).
+    # that moved it since — every trade (not only the filtered ones) AND every
+    # deposit/withdrawal. Without the cash flows a $1,000 deposit would read as
+    # if the account had always held it, flattering the return %.
     since = start if start is not None else (selected[0].close_ts if selected else None)
-    banked_since = (
-        sum(t.net for t in everything if since is not None and t.close_ts >= since)
-        if since is not None
-        else 0.0
-    )
+    if since is None:
+        banked_since = 0.0
+    else:
+        banked_since = sum(t.net for t in everything if t.close_ts >= since) + sum(
+            f.amount for f in flows if f.ts >= since
+        )
     start_balance = round(account_balance - banked_since, 2)
 
+    window_flows = [
+        f for f in flows if (since is None or f.ts >= since) and (end is None or f.ts <= end)
+    ]
+    deposits = round(sum(f.amount for f in window_flows if f.amount > 0), 2)
+    withdrawals = round(-sum(f.amount for f in window_flows if f.amount < 0), 2)
+    capital = round(start_balance + deposits, 2)
+
     summary = compute_stats(selected)
+    # One timeline: trades and cash movements, in the order the account saw
+    # them. A deposit is a step in the balance, never a result.
+    events: list[tuple[datetime, float, float]] = [(t.close_ts, t.net, 0.0) for t in selected]
+    events += [(f.ts, 0.0, f.amount) for f in window_flows]
+    events.sort(key=lambda e: e[0])
     curve: list[EquityCurvePoint] = []
     running = start_balance
     peak = start_balance
     max_dd = 0.0
     max_dd_pct = 0.0
-    for trade in selected:
-        running = round(running + trade.net, 2)
+    for ts, net, flow in events:
+        running = round(running + net + flow, 2)
         peak = max(peak, running)
         drawdown = round(max(0.0, peak - running), 2)
         drawdown_pct = round(100.0 * drawdown / peak, 2) if peak > 0 else 0.0
@@ -232,12 +278,13 @@ def compute_performance(
             max_dd_pct = drawdown_pct
         curve.append(
             EquityCurvePoint(
-                ts=trade.close_ts,
+                ts=ts,
                 balance=running,
                 peak=round(peak, 2),
                 drawdown=drawdown,
                 drawdown_pct=drawdown_pct,
-                net=trade.net,
+                net=net,
+                flow=flow,
             )
         )
     end_balance = running
@@ -249,7 +296,13 @@ def compute_performance(
         summary=summary,
         start_balance=start_balance,
         end_balance=round(end_balance, 2),
-        return_pct=round(100.0 * summary.net / start_balance, 2) if start_balance > 0 else 0.0,
+        peak_balance=round(peak, 2),
+        avg_time_between_trades_seconds=_avg_time_between(selected),
+        deposits=deposits,
+        withdrawals=withdrawals,
+        capital=capital,
+        cash_flows=window_flows,
+        return_pct=round(100.0 * summary.net / capital, 2) if capital > 0 else 0.0,
         max_drawdown=max_dd,
         max_drawdown_pct=max_dd_pct,
         current_drawdown=current_dd,

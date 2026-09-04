@@ -113,6 +113,7 @@ async def get_performance(
     return compute_performance(
         trade_history.snapshot(),
         account_balance=trade_history.balance,
+        cash_flows=trade_history.cash_flows(),
         start=window_start,
         end=window_end,
         symbols=symbols.split(",") if symbols else None,

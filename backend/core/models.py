@@ -772,6 +772,23 @@ class ClosedTrade(_Frozen):
         return max(0.0, (self.close_ts - self.open_ts).total_seconds())
 
 
+class CashFlow(_Frozen):
+    """Money that moved the account balance WITHOUT a trade: a deposit, a
+    withdrawal, an internal transfer, credit/bonus or a standalone charge.
+
+    Read from the broker's balance operations. The Performance tab needs these
+    to keep "the account grew" apart from "I put money in": `amount` is signed
+    (positive in, negative out) and `id` is the deal ticket, which is how
+    repeated pushes are de-duplicated.
+    """
+
+    id: int
+    ts: datetime
+    amount: float
+    kind: Literal["deposit", "withdrawal", "other"]
+    comment: str | None = None
+
+
 class PerformanceStats(_Frozen):
     """The core numbers of a set of closed trades. Reused for the whole-period
     summary, each time bucket (day/week/month) and each breakdown group
@@ -804,6 +821,10 @@ class PerformanceStats(_Frozen):
     commission: float = 0.0
     swap: float = 0.0
     avg_duration_seconds: float = 0.0
+    # Time in trade split by outcome — the Profit report's "indicador de
+    # disposição": holding losers much longer than winners is the classic tell.
+    avg_win_duration_seconds: float = 0.0
+    avg_loss_duration_seconds: float = 0.0
     max_consecutive_wins: int = 0
     max_consecutive_losses: int = 0
 
@@ -836,7 +857,8 @@ class EquityCurvePoint(_Frozen):
     peak: float
     drawdown: float  # peak - balance (>= 0)
     drawdown_pct: float  # % of the peak
-    net: float  # this trade's net
+    net: float  # this trade's net (0 on a deposit/withdrawal step)
+    flow: float = 0.0  # cash moved in/out at this point (0 on a trade)
 
 
 class PerformanceFilters(_Frozen):
@@ -852,25 +874,39 @@ class PerformanceFilters(_Frozen):
 class PerformanceReport(_Frozen):
     """Everything the Performance tab draws for one filter selection.
 
-    `start_balance` is the account balance right before the first trade in the
-    period (derived from the broker's current balance by unwinding every trade
-    since), so `equity_curve`, `return_pct` and the drawdown numbers are in real
-    account money, not just a cumulative sum. With an asset/origin filter the
-    baseline is still the real account balance when the window opened, so the
-    curve reads "what this slice of my trading did to the account".
+    `start_balance` is the account balance right before the period opened,
+    derived from the broker's current balance by unwinding every trade AND every
+    deposit/withdrawal since — so `equity_curve` and the drawdown numbers are in
+    real account money, not just a cumulative sum. With an asset/origin filter
+    the baseline is still the real account balance when the window opened, so
+    the curve reads "what this slice of my trading did to the account".
+
+    Deposits and withdrawals inside the period are shown as their own steps in
+    the curve and are NEVER counted as result: `summary.net` is trading money
+    only. `return_pct` is that result over `capital` (the balance at the start
+    plus what was paid in during the period), so a $1,000 deposit cannot look
+    like a $1,000 profit.
     """
 
     filters: PerformanceFilters
     summary: PerformanceStats
     start_balance: float = 0.0
     end_balance: float = 0.0
-    return_pct: float = 0.0  # net over start_balance
+    peak_balance: float = 0.0  # "patrimônio máximo": best the account ever was
+    # "TET" in the Profit report: average gap between closing one trade and
+    # opening the next — how long the trader stays out between trades.
+    avg_time_between_trades_seconds: float = 0.0
+    deposits: float = 0.0  # paid in during the period
+    withdrawals: float = 0.0  # taken out during the period (positive number)
+    capital: float = 0.0  # start_balance + deposits (what the result is measured on)
+    return_pct: float = 0.0  # net over capital
     max_drawdown: float = 0.0
     max_drawdown_pct: float = 0.0
     current_drawdown: float = 0.0
     current_drawdown_pct: float = 0.0
     recovery_factor: float | None = None  # net / max_drawdown
     equity_curve: list[EquityCurvePoint] = Field(default_factory=list)
+    cash_flows: list[CashFlow] = Field(default_factory=list)  # inside the period
     by_day: list[PerformanceBucket] = Field(default_factory=list)
     by_week: list[PerformanceBucket] = Field(default_factory=list)
     by_month: list[PerformanceBucket] = Field(default_factory=list)

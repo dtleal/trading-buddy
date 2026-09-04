@@ -39,6 +39,7 @@ from core.models import (
     BandScenario,
     BotStatus,
     BotTrade,
+    CashFlow,
     ClosedTrade,
     EquityPoint,
     IntradayBar,
@@ -753,13 +754,26 @@ async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
                 parsed.append(ClosedTrade.model_validate(raw))
             except Exception:  # one malformed trade must not drop the push
                 continue
+        # Same push carries the account's deposits/withdrawals, so the report
+        # can keep money paid in apart from money made.
+        flows: list[CashFlow] = []
+        for raw in msg.get("cash_flows", ()):
+            try:
+                flows.append(CashFlow.model_validate(raw))
+            except Exception:
+                continue
         trade_history.merge(
             parsed,
+            cash_flows=flows,
             balance=float(msg["balance"]) if msg.get("balance") is not None else None,
             currency=msg.get("currency") if isinstance(msg.get("currency"), str) else None,
             asof=msg.get("asof") if isinstance(msg.get("asof"), str) else None,
         )
-        logger.info("Trade history push: %d closed trades", len(parsed))
+        logger.info(
+            "Trade history push: %d closed trades, %d balance operations",
+            len(parsed),
+            len(flows),
+        )
         return set()
 
     if mtype == "autoclose_result":

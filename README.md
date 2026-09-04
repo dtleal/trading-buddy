@@ -401,16 +401,28 @@ A tab that answers one question: **is the trading actually working?** It reads
 scalper bot** — straight from the broker's own deal history, so the money on
 screen is the money that hit the account (commission and swap already in).
 
+Laid out and named after the **Profit (Nelogica) "Relatório de Performance"**,
+the report the trader already reads: two tabs — **Resumo** (stat list + capital
+curve + breakdowns) and **Operações** (the trade list) — and its metric names
+(Saldo Líquido Total, Lucro/Prejuízo Bruto, Fator de Lucro, Razão Média
+Lucro : Média Prejuízo, Patrimônio Máximo, Retorno sobre o Capital, TET).
+
 - **Filters:** ready-made windows (hoje, esta semana, este mês, mês passado, 7 /
   30 / 90 dias, tudo), an exact date range (which always wins over the preset),
   which assets to count, and the origin — tudo / manual / bot scalper. Every
   number, chart and table on the page follows the same selection.
-- **Headline numbers:** result in money, **hit rate**, **% of losing trades**,
-  profit factor (every dollar won ÷ every dollar lost), **risk-return** (average
-  win ÷ average loss), expectancy per trade, **max drawdown in money and in %**,
-  the drawdown right now, return over the account in %, recovery factor (result
-  ÷ max drawdown), longest winning / losing streak, and the costs + lots traded.
-- **Evolução patrimonial:** the account balance after each closed trade, as a
+- **Headline cards:** Saldo Líquido Total, % de operações vencedoras, Fator de
+  Lucro, Razão Média Lucro : Prejuízo, Máximo Drawdown and Retorno sobre o
+  Capital.
+- **Resumo (full stat list):** gross profit / gross loss, costs, result per
+  trade, volume in lots; total trades with winners / losers / scratches, average
+  win, average loss, biggest win, biggest loss, longest winning and losing
+  streak; opening balance, deposits, withdrawals, capital, current balance,
+  **patrimônio máximo**, return over capital, max and current drawdown (money
+  and %), recovery factor, average time in trade **split into winners vs
+  losers** (the Profit "disposition" read — the losers' figure turns amber when
+  it is over twice the winners') and **TET**, the average wait between trades.
+- **Curva de capital:** the account balance after each closed trade, as a
   green/red baseline area against the balance the period started from, with a
   second chart under it showing how far below its own peak the account was —
   the drawdown, in %.
@@ -435,11 +447,22 @@ screen is the money that hit the account (commission and swap already in).
   comment. The origin is read from the **entry** deal only, so a bot trade you
   closed by hand still counts as the bot's — and a trade you opened by hand and
   the auto-close closed still counts as yours.
-- **Honest caveats:** the period's opening balance is derived from the account's
-  current balance minus everything banked since, so **deposits and withdrawals
-  are not separated** (it is a trading-performance view, not accounting). Day /
-  week / month grouping and the hour breakdown are in **UTC**. Trades still open
-  are not in the report — there is nothing to score yet.
+- **Deposits and withdrawals are never result.** The collector also pushes the
+  account's **balance operations** (deposits, withdrawals, transfers, credit —
+  read over the account's whole life, not just the trade window). They appear as
+  their own **step in the capital curve** and as their own line in the Resumo,
+  and `return_pct` is measured over **capital = opening balance + what was paid
+  in during the period**. This matters: on the ActivTrades account the trading
+  made **+25.54** while **1,000 was deposited on 31/08** — without the cash
+  flows the tab showed an opening balance of 1,006.77 (as if the deposit had
+  always been there) instead of the real 6.77, flattering the return and
+  understating the drawdown %. The reconciliation now closes exactly:
+  `6.77 + 1,000 deposit + 25.54 traded = 1,032.31` = the broker's balance.
+- **Honest caveats:** day / week / month grouping and the hour breakdown are in
+  **UTC**. Trades still open are not in the report — there is nothing to score
+  yet. The Profit report's **MEP / MEN** (best and worst point reached inside a
+  trade) and "máximo de contratos" have no equivalent here: the broker's deal
+  history does not keep the price path inside a trade.
 
 ### LLM features (need `CLAUDE_API_KEY`)
 

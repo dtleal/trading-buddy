@@ -70,6 +70,7 @@ _TICK_FLAG_SELL = 64
 # as literals so the deal-grouping helper stays importable off-Windows.
 _DEAL_TYPE_BUY = 0
 _DEAL_TYPE_SELL = 1
+_DEAL_TYPE_BALANCE = 2  # deposit / withdrawal / internal transfer
 _DEAL_ENTRY_IN = 0  # deal that OPENED (or added to) a position
 
 # Magic number stamped on every position the scalper bot opens, so the
@@ -78,6 +79,10 @@ _DEAL_ENTRY_IN = 0  # deal that OPENED (or added to) a position
 # "trading-buddy ..." comment (the broker truncates it but never rewrites it).
 _BOT_MAGIC = 770078
 _BOT_COMMENT = "trading-buddy"
+
+# Far enough back to cover any account's whole life — the cash-flow read walks
+# from here so an old deposit is never missed.
+_ACCOUNT_EPOCH = datetime(2000, 1, 1)
 
 
 def _now_iso() -> str:
@@ -810,6 +815,40 @@ def _group_deals_into_trades(
     return trades
 
 
+def _collect_cash_flows(deals: Any) -> list[dict[str, Any]]:
+    """Money that moved the balance WITHOUT a trade: deposits, withdrawals,
+    internal transfers, credit, corrections, standalone commission charges.
+
+    The Performance tab needs these to tell "the account grew" from "I put
+    money in": without them a $1,000 deposit reads as if it had always been
+    there, which flatters the return % and hides the real drawdown %. Zero-value
+    entries (the broker's year-end "Archive" marker) are dropped.
+    Pure function, like the grouping above.
+    """
+    flows: list[dict[str, Any]] = []
+    for d in deals:
+        if getattr(d, "type", None) in (_DEAL_TYPE_BUY, _DEAL_TYPE_SELL):
+            continue  # a trade, handled by _group_deals_into_trades
+        amount = _deal_net(d)
+        if abs(amount) < 0.005:
+            continue  # bookkeeping marker, no money moved
+        if getattr(d, "type", None) == _DEAL_TYPE_BALANCE:
+            kind = "deposit" if amount > 0 else "withdrawal"
+        else:  # credit / bonus / correction / commission / interest
+            kind = "other"
+        flows.append(
+            {
+                "id": int(getattr(d, "ticket", 0) or 0),
+                "ts": _server_ms_to_utc_iso(int(float(getattr(d, "time", 0.0)) * 1000)),
+                "amount": round(amount, 2),
+                "kind": kind,
+                "comment": str(getattr(d, "comment", "") or ""),
+            }
+        )
+    flows.sort(key=lambda f: f["ts"])
+    return flows
+
+
 def _read_trade_history(days: int, broker_to_backend: dict[str, str]) -> dict[str, Any] | None:
     """Closed round-trip trades of the last `days` days (manual AND bot), for
     the Performance tab. Returns None on an MT5 read error."""
@@ -822,6 +861,10 @@ def _read_trade_history(days: int, broker_to_backend: dict[str, str]) -> dict[st
     start = server_now - timedelta(days=max(1, days))
     try:
         deals = mt5.history_deals_get(start, server_now + timedelta(minutes=1))
+        # Deposits/withdrawals are read from the account's WHOLE life, not the
+        # rolling window: one old deposit outside the window would otherwise be
+        # invisible and the starting balance would be wrong.
+        all_deals = mt5.history_deals_get(_ACCOUNT_EPOCH, server_now + timedelta(minutes=1))
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug("history_deals_get (performance) failed: %s", exc)
         return None
@@ -834,6 +877,7 @@ def _read_trade_history(days: int, broker_to_backend: dict[str, str]) -> dict[st
         "balance": round(float(getattr(acct, "balance", 0.0) or 0.0), 2),
         "asof": _now_iso(),
         "trades": _group_deals_into_trades(deals, broker_to_backend),
+        "cash_flows": _collect_cash_flows(all_deals if all_deals is not None else deals),
     }
 
 
