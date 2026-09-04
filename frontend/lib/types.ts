@@ -7,13 +7,16 @@
  */
 import { z } from "zod";
 
-// BITCOIN is retired (nothing sends it any more) but stays in the enum so a
-// snapshot saved before it was dropped still parses instead of failing loudly.
+// BITCOIN, USOIL and US2000 are retired (nothing sends them any more) but stay
+// in the enum so a snapshot saved before they were dropped still parses instead
+// of failing loudly.
 export const AssetSymbol = z.enum([
   "USTEC",
   "SPX",
   "GOLD",
   "US30",
+  "GER40",
+  "EURUSD",
   "USOIL",
   "US2000",
   "BITCOIN",
@@ -27,8 +30,8 @@ export const TRACKED_ASSETS: { key: AssetSymbol; label: string }[] = [
   { key: "SPX", label: "USA500" },
   { key: "GOLD", label: "GOLD" },
   { key: "US30", label: "US30" },
-  { key: "USOIL", label: "USOIL" },
-  { key: "US2000", label: "US2000" },
+  { key: "GER40", label: "GER40" },
+  { key: "EURUSD", label: "EURUSD" },
 ];
 
 export const VixRegime = z.enum(["low", "mid", "high"]);

@@ -12,7 +12,7 @@ import type {
   DashboardTick,
   Timeframe as TimeframeType,
 } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { cn, fmtPrice, priceDigits } from "@/lib/utils";
 
 const TIMEFRAMES: TimeframeType[] = ["5m", "15m", "30m", "60m", "4h"];
 const ASSETS: AssetSymbolType[] = TRACKED_ASSETS.map((a) => a.key);
@@ -202,8 +202,8 @@ function BreakoutRow({ breakout: b, stale }: { breakout: Breakout; stale: boolea
         )}
         <span className="tabular-nums">
           {isUp ? "rompeu acima de" : "rompeu abaixo de"}{" "}
-          <span className="font-semibold">{b.level.toFixed(2)}</span> @{" "}
-          <span className="font-semibold">{b.close.toFixed(2)}</span>
+          <span className="font-semibold">{fmtPrice(b.level, priceDigits(b.close))}</span> @{" "}
+          <span className="font-semibold">{fmtPrice(b.close)}</span>
         </span>
         {b.squeeze && (
           <Badge tone="info" className="no-strike">

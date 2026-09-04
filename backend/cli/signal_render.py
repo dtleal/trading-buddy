@@ -9,21 +9,22 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from core.formatting import price_digits
 from core.models import IntradayLevels
 
 BRT = ZoneInfo("America/Sao_Paulo")
 
 
-def _fmt(v: float | None, digits: int = 2) -> str:
+def _fmt(v: float | None, digits: int) -> str:
     return f"{v:.{digits}f}" if v is not None else "n/a"
 
 
-def _delta(a: float, b: float | None) -> str:
+def _delta(a: float, b: float | None, digits: int) -> str:
     if b is None:
         return "n/a"
     diff = a - b
     sign = "+" if diff >= 0 else ""
-    return f"{sign}{diff:.2f}"
+    return f"{sign}{diff:.{digits}f}"
 
 
 def _levels_table(levels: IntradayLevels) -> Table:
@@ -33,15 +34,16 @@ def _levels_table(levels: IntradayLevels) -> Table:
     t.add_column("vs Last", justify="right", style="dim")
 
     last = levels.last_price
-    t.add_row("Last", _fmt(last), "")
-    t.add_row("HOD", _fmt(levels.hod), _delta(levels.hod, last))
-    t.add_row("LOD", _fmt(levels.lod), _delta(levels.lod, last))
-    t.add_row("VWAP", _fmt(levels.vwap), _delta(levels.vwap, last) if levels.vwap else "n/a")
-    t.add_row("ORH", _fmt(levels.orh), _delta(levels.orh, last) if levels.orh else "n/a")
-    t.add_row("ORL", _fmt(levels.orl), _delta(levels.orl, last) if levels.orl else "n/a")
-    t.add_row("PDC", _fmt(levels.pdc), _delta(levels.pdc, last) if levels.pdc else "n/a")
-    t.add_row("PDH", _fmt(levels.pdh), _delta(levels.pdh, last) if levels.pdh else "n/a")
-    t.add_row("PDL", _fmt(levels.pdl), _delta(levels.pdl, last) if levels.pdl else "n/a")
+    d = price_digits(last)
+    t.add_row("Last", _fmt(last, d), "")
+    t.add_row("HOD", _fmt(levels.hod, d), _delta(levels.hod, last, d))
+    t.add_row("LOD", _fmt(levels.lod, d), _delta(levels.lod, last, d))
+    t.add_row("VWAP", _fmt(levels.vwap, d), _delta(levels.vwap, last, d) if levels.vwap else "n/a")
+    t.add_row("ORH", _fmt(levels.orh, d), _delta(levels.orh, last, d) if levels.orh else "n/a")
+    t.add_row("ORL", _fmt(levels.orl, d), _delta(levels.orl, last, d) if levels.orl else "n/a")
+    t.add_row("PDC", _fmt(levels.pdc, d), _delta(levels.pdc, last, d) if levels.pdc else "n/a")
+    t.add_row("PDH", _fmt(levels.pdh, d), _delta(levels.pdh, last, d) if levels.pdh else "n/a")
+    t.add_row("PDL", _fmt(levels.pdl, d), _delta(levels.pdl, last, d) if levels.pdl else "n/a")
     return t
 
 
@@ -51,6 +53,7 @@ def _trend_table(levels: IntradayLevels) -> Table:
     t.add_column("Value", justify="right")
     t.add_column("Last vs MA", justify="center")
     last = levels.last_price
+    d = price_digits(last)
     rows = (
         ("EMA 9", levels.ema_9),
         ("EMA 20", levels.ema_20),
@@ -63,7 +66,7 @@ def _trend_table(levels: IntradayLevels) -> Table:
             t.add_row(label, "n/a", "—")
             continue
         side = "[green]acima[/green]" if last > val else "[red]abaixo[/red]"
-        t.add_row(label, _fmt(val), side)
+        t.add_row(label, _fmt(val, d), side)
     return t
 
 
@@ -71,9 +74,10 @@ def _volatility_table(levels: IntradayLevels) -> Table:
     t = Table(title="Volatilidade", show_header=False, expand=False)
     t.add_column("Field", style="bold cyan")
     t.add_column("Value", justify="right")
-    t.add_row("ATR(14, 5m)", _fmt(levels.atr_14))
+    d = price_digits(levels.last_price)
+    t.add_row("ATR(14, 5m)", _fmt(levels.atr_14, d))
     if levels.hod is not None and levels.lod is not None:
-        t.add_row("Range do dia", _fmt(levels.hod - levels.lod))
+        t.add_row("Range do dia", _fmt(levels.hod - levels.lod, d))
     return t
 
 
@@ -96,10 +100,11 @@ def _stop_card(
     sl = levels.last_swing_low
     atr = levels.atr_14 or 0.0
     buffer_pts = stop_buffer * atr if atr else 0.0
+    d = price_digits(last)
 
     body = Text()
     body.append("Stop estrutural baseado no último swing pivot (5-bar).\n", style="dim")
-    body.append(f"Buffer: {stop_buffer:.2f}x ATR = {buffer_pts:.2f} pts\n\n", style="dim")
+    body.append(f"Buffer: {stop_buffer:.2f}x ATR = {buffer_pts:.{d}f} pts\n\n", style="dim")
 
     # LONG
     body.append("LONG  ", style="bold green")
@@ -108,7 +113,7 @@ def _stop_card(
     else:
         stop = sl - buffer_pts
         dist = last - stop
-        body.append(f"→ Stop @ {stop:.2f} ({-dist:+.2f} pts)\n")
+        body.append(f"→ Stop @ {stop:.{d}f} ({-dist:+.{d}f} pts)\n")
         if account_size_usd > 0 and contract_multiplier > 0 and dist > 0:
             risk_usd = account_size_usd * risk_pct / 100.0
             size = risk_usd / (dist * contract_multiplier)
@@ -125,7 +130,7 @@ def _stop_card(
     else:
         stop = sh + buffer_pts
         dist = stop - last
-        body.append(f"→ Stop @ {stop:.2f} (+{dist:.2f} pts)\n")
+        body.append(f"→ Stop @ {stop:.{d}f} (+{dist:.{d}f} pts)\n")
         if account_size_usd > 0 and contract_multiplier > 0 and dist > 0:
             risk_usd = account_size_usd * risk_pct / 100.0
             size = risk_usd / (dist * contract_multiplier)
@@ -148,7 +153,7 @@ def render_signal(
     brt_str = levels.asof.astimezone(BRT).strftime("%H:%M BRT")
     header = Text()
     header.append(f"{levels.symbol}", style="bold cyan")
-    header.append(f"  |  Last: {levels.last_price:.2f}")
+    header.append(f"  |  Last: {levels.last_price:.{price_digits(levels.last_price)}f}")
     header.append(
         f"  |  asof {levels.asof.strftime('%Y-%m-%d %H:%M UTC')}  ·  {brt_str}",
         style="dim",

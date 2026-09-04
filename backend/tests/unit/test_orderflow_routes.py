@@ -646,7 +646,7 @@ def test_autoclose_result_recorded(client: TestClient) -> None:
 def test_bot_status_defaults(client: TestClient) -> None:
     st = client.get("/api/orderflow/bot").json()
     assert st["enabled"] is False and st["armed"] is False
-    assert st["profit_target"] == 350.0 and st["loss_stop"] == 900.0
+    assert st["profit_target"] == 35.0 and st["loss_stop"] == 200.0
 
 
 def test_bot_enabled_requires_trade_close_and_demo(client: TestClient) -> None:
@@ -696,7 +696,7 @@ def test_bot_opens_market_plus_grid_on_explosion(
         ws.send_json({"type": "positions", "symbol": "USTEC", "positions": []})  # touch, flat
         cmd = ws.receive_json()
     assert cmd["type"] == "open"
-    assert cmd["symbol"] == "USTEC" and cmd["side"] == "buy" and cmd["lots"] == 2.0
+    assert cmd["symbol"] == "USTEC" and cmd["side"] == "buy" and cmd["lots"] == 0.01
     # entry 100.5, step 0.5*10=5 → limits below
     assert cmd["grid"] == [95.5, 90.5, 85.5]
     assert "USTEC" in of._bot.grid  # region recorded for the break-reverse
@@ -791,6 +791,7 @@ def test_bot_profit_lock_closes_on_giveback(client: TestClient) -> None:
     # the trailing lock banks it instead of letting it round-trip.
     of._bot.enabled = True
     of._bot.armed = True
+    of._bot.profit_target = 500.0  # keep the account target out of the way
     with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
         ws.send_json(_positions_msg(profit=100.0))  # sets the peak
         ws.send_json(_positions_msg(profit=50.0))  # gave back enough → lock

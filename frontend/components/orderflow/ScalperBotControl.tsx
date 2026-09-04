@@ -30,8 +30,8 @@ export function ScalperBotControl({
   saveLots: (lots: Record<string, number>) => Promise<void>;
   disarm: () => Promise<void>;
 }) {
-  const [target, setTarget] = useState("350");
-  const [stop, setStop] = useState("900");
+  const [target, setTarget] = useState("35");
+  const [stop, setStop] = useState("200");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [showLots, setShowLots] = useState(false);

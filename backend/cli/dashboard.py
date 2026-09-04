@@ -13,6 +13,7 @@ from rich.text import Text
 
 from cli.i18n import t
 from core.enums import BiasLevel, TermStructure, VixRegime
+from core.formatting import fmt_price, price_digits
 from core.models import DashboardTick, TradeSetup
 
 BRT = ZoneInfo("America/Sao_Paulo")
@@ -66,7 +67,7 @@ def _prices_table(tick: DashboardTick, language: Language) -> Table:
             ma_text = f"{distance:+.2f}%"
         else:
             ma_text = t("no_data", language)
-        table.add_row(asset.value, f"{quote.price:,.2f}", change, ma_text)
+        table.add_row(asset.value, fmt_price(quote.price, grouped=True), change, ma_text)
     return table
 
 
@@ -162,13 +163,16 @@ def _setup_card(setup: TradeSetup) -> Text:
     body.append(f"{arrow}\n", style=style)
     body.append(f"  Tendência: {setup.trend_label}\n")
     body.append(f"  Continuação: {setup.continuation_label}\n")
+    d = price_digits(setup.entry_zone_low)
     body.append(
-        f"  Região de entrada: {setup.entry_zone_low:.2f} – {setup.entry_zone_high:.2f}\n",
+        f"  Região de entrada: {fmt_price(setup.entry_zone_low, digits=d)} – "
+        f"{fmt_price(setup.entry_zone_high, digits=d)}\n",
         style="bold",
     )
-    body.append(f"  Stop: {setup.stop_level:.2f}\n", style="red")
+    body.append(f"  Stop: {fmt_price(setup.stop_level, digits=d)}\n", style="red")
     body.append(
-        f"  Alvo: {setup.target_level:.2f}   |   R:R = {setup.risk_reward:.2f}\n",
+        f"  Alvo: {fmt_price(setup.target_level, digits=d)}   |   "
+        f"R:R = {setup.risk_reward:.2f}\n",
         style="green",
     )
     body.append("  Razões:\n", style="dim")

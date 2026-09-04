@@ -1,7 +1,7 @@
 "use client";
 
 import type { OrderBookSnapshot } from "@/lib/types";
-import { cn, fmtPrice } from "@/lib/utils";
+import { cn, fmtPrice, priceDigits } from "@/lib/utils";
 
 /**
  * Depth-of-market ladder: resting limit liquidity per price.
@@ -38,7 +38,9 @@ export function DomLadder({ book }: { book: OrderBookSnapshot | null | undefined
       ))}
       <div className="flex items-center justify-center gap-2 py-1 text-[11px] text-zinc-500">
         <span>spread</span>
-        <span className="text-zinc-300">{spread != null ? fmtPrice(spread) : "—"}</span>
+        <span className="text-zinc-300">
+          {spread != null ? fmtPrice(spread, priceDigits(bestBid)) : "—"}
+        </span>
       </div>
       {bids.map((lv) => (
         <LadderRow key={`b-${lv.price}`} side="bid" price={lv.price} volume={lv.volume} maxVol={maxVol} />

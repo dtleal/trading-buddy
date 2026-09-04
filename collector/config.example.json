@@ -19,26 +19,23 @@
   "allow_auto_close": false,
   "_comment_allow_auto_trade": "OPENING gate for the explosion-scalper bot. false = bot can't open (default). true = bot may OPEN positions on bursts — but ONLY on a DEMO account (the collector refuses to open on a live account regardless, unless allow_live_auto_trade=true below). The bot ALSO needs allow_auto_close=true (it must be able to close to exit/stop), else the backend won't arm it. Separate flag because opening is far riskier than closing. Requires AutoTrading on in the MT5 terminal (Ctrl+E).",
   "allow_auto_trade": false,
-  "_comment_allow_live_auto_trade": "LIVE OVERRIDE for the scalper bot. false = demo-only (default, safe). true = allow the bot to OPEN REAL positions on a NON-demo account (e.g. an FTMO challenge, which MT5 reports as CONTEST/REAL — not DEMO). Only meaningful with allow_auto_trade=true. DANGER: real orders on a funded/challenge account can count against its rules. Start with 0.01 lots (configurable in the UI).",
+  "_comment_allow_live_auto_trade": "LIVE OVERRIDE for the scalper bot. false = demo-only (default, safe). true = allow the bot to OPEN REAL positions on a NON-demo account (e.g. a live/challenge account, which MT5 reports as REAL/CONTEST — not DEMO). Only meaningful with allow_auto_trade=true. DANGER: real orders on a funded/challenge account can count against its rules. Start with 0.01 lots (configurable in the UI).",
   "allow_live_auto_trade": false,
-  "_comment_symbols": "Maps the backend's asset name to the symbol as your broker spells it in MT5. Must cover every entry in the backend's ORDERFLOW_SYMBOLS. footprint_tick is the price step the footprint groups trades by; leave it out to use the broker's own tick size. FTMO spells these US100.cash / US500.cash / XAUUSD / US30.cash / USOIL.cash / US2000.cash.",
+  "_comment_symbols": "Maps the backend's asset name to the symbol as your broker spells it in MT5. Must cover every entry in the backend's ORDERFLOW_SYMBOLS. footprint_tick is the price step the footprint groups trades by; leave it out to use the broker's own tick size. ActivTrades spells the index CFDs UsaTecSep26 / Usa500Sep26 / UsaIndSep26 / Ger40Sep26 (forward contracts — the name rolls every quarter), plus GOLD and EURUSD.",
   "symbols": [
-    { "backend": "USTEC",  "mt5": "USTEC",  "footprint_tick": 1.0 },
-    { "backend": "SPX",    "mt5": "USA500", "footprint_tick": 0.5 },
-    { "backend": "GOLD",   "mt5": "GOLD",   "footprint_tick": 0.1 },
-    { "backend": "US30",   "mt5": "US30",   "footprint_tick": 1.0 },
-    { "backend": "USOIL",  "mt5": "USOIL",  "footprint_tick": 0.01 },
-    { "backend": "US2000", "mt5": "US2000", "footprint_tick": 0.1 }
+    { "backend": "USTEC",  "mt5": "UsaTecSep26", "footprint_tick": 1.0 },
+    { "backend": "SPX",    "mt5": "Usa500Sep26", "footprint_tick": 0.5 },
+    { "backend": "GOLD",   "mt5": "GOLD",        "footprint_tick": 0.1 },
+    { "backend": "US30",   "mt5": "UsaIndSep26", "footprint_tick": 1.0 },
+    { "backend": "GER40",  "mt5": "Ger40Sep26",  "footprint_tick": 1.0 },
+    { "backend": "EURUSD", "mt5": "EURUSD",      "footprint_tick": 0.0001 }
   ],
   "mt5": {
     "sources": [
       {
-        "name": "FTMO",
-        "path": "C:\\Program Files\\FTMO MetaTrader 5\\terminal64.exe"
-      },
-      {
         "name": "ActivTrades",
-        "path": "C:\\Program Files\\ActivTrades MT5 Terminal\\terminal64.exe"
+        "path": "C:\\Program Files\\ActivTrades MT5 Terminal\\terminal64.exe",
+        "login": 950191
       }
     ]
   }

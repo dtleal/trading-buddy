@@ -91,8 +91,8 @@ dashboard keeps working).
 6. **Verify.** The console should print, in order:
 
    ```
-   MT5 attached: source=FTMO terminal=... connected=True account=...
-   tape source for US100.cash: quote-tick synthesis (auto-detected)   ← one line per symbol; says "real times&trades" when the feed has a usable tape
+   MT5 attached: source=ActivTrades terminal=... connected=True account=950191
+   tape source for UsaTecSep26: quote-tick synthesis (auto-detected)   ← one line per symbol; says "real times&trades" when the feed has a usable tape
    Connected to backend ingest: ws://127.0.0.1:8000/ws/ingest/orderflow
    ```
 
@@ -183,7 +183,7 @@ wrong broker is the difference between a full flow and an empty dashboard.
 
 ## What is real vs derived (important)
 
-Most retail CFD feeds (incl. FTMO demo) do **not** send real order flow. Know
+Most retail CFD feeds (incl. ActivTrades) do **not** send real order flow. Know
 what you are looking at:
 
 | Panel | Source | Trustworthy? |
@@ -231,16 +231,18 @@ For exchange-grade footprint/delta you'd switch the backend to a real CME feed
 | `positions_poll_seconds` | How often (s) to read + push your **open positions** for the live P&L / time-in-trade panel and in-trade alerts (default `0.25`). Reading is always safe. `0` disables position reading entirely. |
 | `allow_auto_close` | **Execution gate** (default `false` = strictly read-only). `true` lets this collector place **closing** orders when the backend profit target fires or you click "fechar tudo". Only enable on a machine/account where you accept automated execution — **test on DEMO first**. Never opens positions. |
 | `allow_auto_trade` | **OPENING gate** for the explosion-scalper bot (default `false`). `true` lets the bot OPEN positions on bursts — but the collector **refuses to open unless the account is DEMO** (or `allow_live_auto_trade: true`, below), no matter this flag, and the bot also requires `allow_auto_close: true` (it must be able to close to exit/stop) or the backend won't arm it. Requires AutoTrading on in MT5. **Also gates the [chart marker](#chart-marker-mark-a-recommended-entry)** — a user-initiated min-lot pending order which, unlike the bot, is **not** demo-restricted. |
-| `allow_live_auto_trade` | **LIVE override** for the scalper bot (default `false` = demo-only, safe). `true` lets the bot OPEN **real** positions on a **non-demo** account (e.g. an FTMO challenge, which MT5 reports as CONTEST/REAL — not DEMO). Only meaningful with `allow_auto_trade: true`. **Danger:** real orders on a funded/challenge account can count against its rules. Size the lots down (per-asset, in the UI) — 0.01 is the broker minimum — before enabling. |
-| `symbols[]` | Map each backend symbol to **your broker's exact MT5 name**. `backend` must be one of `USTEC` / `SPX` / `GOLD` / `US30` / `USOIL` / `US2000`, and the list must cover every entry in the backend's `ORDERFLOW_SYMBOLS`. `mt5` is whatever your broker calls it — on FTMO: `US100.cash`, `US500.cash`, `XAUUSD`, `US30.cash`, `USOIL.cash`, `US2000.cash`. |
-| `symbols[].footprint_tick` | Optional price step used to group footprint rows (e.g. `1.0` for an index ~28000, `0.1` for gold and US2000, `0.01` for oil). Omit to auto-derive from the broker tick size. Keeps a continuous quote feed from fragmenting into thousands of cells. |
+| `allow_live_auto_trade` | **LIVE override** for the scalper bot (default `false` = demo-only, safe). `true` lets the bot OPEN **real** positions on a **non-demo** account (e.g. the live ActivTrades account, which MT5 reports as REAL — not DEMO). Only meaningful with `allow_auto_trade: true`. **Danger:** real orders on a funded/challenge account can count against its rules. Size the lots down (per-asset, in the UI) — 0.01 is the broker minimum — before enabling. |
+| `symbols[]` | Map each backend symbol to **your broker's exact MT5 name**. `backend` must be one of `USTEC` / `SPX` / `GOLD` / `US30` / `GER40` / `EURUSD`, and the list must cover every entry in the backend's `ORDERFLOW_SYMBOLS`. `mt5` is whatever your broker calls it — on ActivTrades: `UsaTecSep26`, `Usa500Sep26`, `GOLD`, `UsaIndSep26`, `Ger40Sep26`, `EURUSD`. |
+| `symbols[].footprint_tick` | Optional price step used to group footprint rows (e.g. `1.0` for an index ~28000, `0.1` for gold, `0.0001` (one pip) for EURUSD). Omit to auto-derive from the broker tick size. Keeps a continuous quote feed from fragmenting into thousands of cells. |
 | `mt5.sources[]` | Priority list of terminals; each `{name, path}` is tried in order until one attaches. `path` is the `terminal64.exe`. Add `login`/`password`/`server` only to drive a specific account. |
 
 > ⚠️ The backend name is not always the broker name. It tracks **SPX** (the UI
 > shows it as "USA500"), so map your broker's S&P symbol to `"backend": "SPX"`.
-> Same idea for gold → `"backend": "GOLD"` even when MT5 calls it `XAUUSD`.
-> `US30` / `USOIL` / `US2000` happen to match FTMO's names apart from the
-> `.cash` suffix.
+> Same idea for gold → `"backend": "GOLD"`. On ActivTrades the four index CFDs
+> are **forward contracts**: the expiry is part of the name (`UsaTecSep26`) and
+> it **rolls every quarter**, so when the contract expires you must edit
+> `symbols[]` to the next one (`Dec26`) or the flow goes dead. `GOLD` and
+> `EURUSD` are spot and never change.
 
 `config.json` holds your ingest token and is **git-ignored** — never commit it.
 `config.example.json` is the committed template.
@@ -296,7 +298,7 @@ resting order is the only way to mark a price from code.
 
 ```bash
 # offset = price-points from the CURRENT market (the safe form — never mixes the
-# yfinance level scale with the FTMO tape scale). Positive = above market.
+# yfinance level scale with the broker tape scale). Positive = above market.
 curl -X POST http://localhost:8000/api/orderflow/mark/GOLD \
   -H 'Content-Type: application/json' -d '{"side":"sell","offset":5.7}'
 # or an absolute price on the broker's feed:
@@ -331,9 +333,10 @@ so it's gated hardest:
 - **Opens** only when `allow_auto_trade: true` **and** `allow_auto_close: true`
   (it must be able to close to exit/stop) **and** the account is **DEMO** — or you
   set `allow_live_auto_trade: true` to accept **real** orders on a non-demo
-  account (e.g. FTMO). Then click **LIGAR** in the UI. **Lot size is configurable
-  per asset in the UI** (button **Lotes** → set each, or "mín 0.01 em tudo");
-  defaults index 2.0 lt / gold 0.12 lt. Up to 6 positions per symbol; entries
+  account (e.g. the live ActivTrades one). Then click **LIGAR** in the UI. **Lot
+  size is configurable per asset in the UI** (button **Lotes** → set each, or
+  "mín 0.01 em tudo"); defaults USTEC 0.1 / USA500 0.04 / US30 0.2 / GER40 0.04
+  / gold 0.12 lt — the index CFDs are worth 5x-50x an FTMO `.cash` lot. Up to 6 positions per symbol; entries
   paced by a cooldown.
 - **Entry = burst + grid (market-maker)**: a burst (short-window range expansion
   + strong directional pressure) opens **1 market order plus a grid of limit
@@ -389,7 +392,7 @@ In the backend `.env`:
 ORDERFLOW_ENABLED=true
 ORDERFLOW_INGEST_TOKEN=<long-random-string-same-as-collector-token>
 # optional overrides:
-# ORDERFLOW_SYMBOLS=USTEC,SPX,GOLD,US30,USOIL,US2000
+# ORDERFLOW_SYMBOLS=USTEC,SPX,GOLD,US30,GER40,EURUSD
 # ORDERFLOW_FOOTPRINT_INTERVAL_SECONDS=60
 ```
 

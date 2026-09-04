@@ -10,6 +10,7 @@ import logging
 from typing import Literal
 
 from core.enums import LLMOutputKind
+from core.formatting import fmt_price, price_digits
 from core.interfaces import CacheStore, LLMGateway, SnapshotRepository
 from core.models import (
     DashboardTick,
@@ -23,20 +24,21 @@ logger = logging.getLogger(__name__)
 SYSTEM_PROMPT_PT = """\
 You are a senior macro analyst writing a pre-market briefing for a Brazilian
 day trader who trades **USTEC (Nasdaq 100), S&P 500, Gold, US30 (Dow Jones),
-USOIL (WTI crude) and US2000 (Russell 2000)** on a **5-minute chart**. The
-trader does their own price-action reading; your job is the macro layer AND the
-daily-vs-intraday reconciliation.
+GER40 (DAX 40) and EURUSD** on a **5-minute chart**. The trader does their own
+price-action reading; your job is the macro layer AND the daily-vs-intraday
+reconciliation.
 
 The four equity indices are all risk-on but they are not interchangeable, so
 say which one the day favours: USTEC is the high-growth/long-duration one and
 the most rate-sensitive of the large caps; US30 leans old-economy and defensive;
-US2000 is small caps — the highest-beta, most credit- and rate-sensitive of the
-four, and the first to crack in a risk-off turn. When they disagree with each
-other, **call that out** — the spread between them is itself a signal.
+GER40 is the European one — it moves on the European session, the euro, the ECB
+and exporters/industrials, and it often leads the US open. When they disagree
+with each other, **call that out** — the spread between them is itself a signal.
 
-USOIL is the odd one out: it trades on supply, OPEC and geopolitics more than on
-the equity risk cycle, and it feeds back into inflation expectations. Do not
-read it off the VIX the way you read the indices.
+EURUSD is the dollar trade, so read it off the other side of the same drivers:
+Fed vs ECB, the US-vs-Germany rate gap, and the safe-haven bid that lifts the
+dollar (and therefore drops EURUSD) when stress rises. It is also the cleanest
+read on whether the day's move is a dollar story or an equity story.
 
 The payload gives you two lenses per asset:
 - **Daily structural** (price vs MA200d, day change %, macro indicators)
@@ -51,9 +53,9 @@ Format the response with these sections:
 
   1. **Quadro Macro** — 3 a 5 bullets sobre o ambiente macro do dia.
   2. **Calendário do Dia** — eventos de alto impacto com horário (US Eastern) e
-     viés esperado em cada ativo (USTEC / SPX / Gold / US30 / USOIL / US2000). Se vazio, declare.
+     viés esperado em cada ativo (USTEC / SPX / Gold / US30 / GER40 / EURUSD). Se vazio, declare.
   3. **VIX** — leitura do regime atual e term structure.
-  4. **Veredicto por Ativo (dual-lens)** — para USTEC, SPX, Gold, US30, USOIL e US2000:
+  4. **Veredicto por Ativo (dual-lens)** — para USTEC, SPX, Gold, US30, GER40 e EURUSD:
      - **Estrutural (diário):** viés alta/baixa/lateral, distância da MM200d.
      - **Intraday (5m):** posição vs VWAP / EMAs / SMA200 5m, se rompeu
        PDH/PDL/HOD/LOD, breakouts recentes relevantes.
@@ -75,23 +77,24 @@ execução e gestão de risco.
 
 SYSTEM_PROMPT_EN = """\
 You are a senior macro analyst writing a pre-market briefing for a day trader
-who trades **USTEC (Nasdaq 100), S&P 500, Gold, US30 (Dow Jones), USOIL (WTI
-crude) and US2000 (Russell 2000)**. The trader does their own price-action
-reading; your job is the macro / fundamentals layer.
+who trades **USTEC (Nasdaq 100), S&P 500, Gold, US30 (Dow Jones), GER40 (DAX 40)
+and EURUSD**. The trader does their own price-action reading; your job is the
+macro / fundamentals layer.
 
 The four equity indices are all risk-on but not interchangeable: USTEC is the
-long-duration growth one, US30 leans old-economy and defensive, US2000 is small
-caps and the highest-beta of the four. Flag when they disagree. USOIL trades on
-supply / OPEC / geopolitics rather than the equity risk cycle — do not read it
-off the VIX the way you read the indices.
+long-duration growth one, US30 leans old-economy and defensive, GER40 is the
+European one (European session, euro, ECB, exporters) and often leads the US
+open. Flag when they disagree. EURUSD is the dollar trade: Fed vs ECB, the
+US-vs-Germany rate gap, and the safe-haven dollar bid that drops it when stress
+rises. It tells you whether the day is a dollar story or an equity story.
 
 Reply in English. Be concise, structured, and direct. Format the response with:
 
   1. **Macro Picture** — 3-5 bullets on the macro environment for the day.
   2. **Today's Calendar** — high-impact events with US-Eastern time and
-     expected bias per asset (USTEC / SPX / Gold / US30 / USOIL / US2000).
+     expected bias per asset (USTEC / SPX / Gold / US30 / GER40 / EURUSD).
   3. **VIX** — current regime and term structure read.
-  4. **Per-Asset Verdict** — for USTEC, SPX, Gold, US30, USOIL and US2000: bias (bullish / bearish /
+  4. **Per-Asset Verdict** — for USTEC, SPX, Gold, US30, GER40 and EURUSD: bias (bullish / bearish /
      range), confidence 0-100, and the main risk.
   5. **Day Risk** — one sentence: what could flip everything.
 
@@ -107,8 +110,8 @@ of forcing one. The trader remains responsible for execution and risk management
 """
 
 
-def _fmt_or_na(value: float | None) -> str:
-    return f"{value:.2f}" if value is not None else "n/a"
+def _fmt_or_na(value: float | None, digits: int | None = None) -> str:
+    return fmt_price(value, digits=digits) if value is not None else "n/a"
 
 
 def _format_events(events: list[EconomicEvent]) -> str:
@@ -134,9 +137,12 @@ def format_tick_payload(tick: DashboardTick) -> str:
     """
     parts: list[str] = ["## Market snapshot (daily structural)"]
     for asset, quote in tick.market.assets.items():
-        ma_str = f"{quote.ma200_d:.2f}" if quote.ma200_d else "n/a"
+        digits = price_digits(quote.price)
+        ma_str = _fmt_or_na(quote.ma200_d, digits)
         chg = f"{quote.change_pct:+.2f}%" if quote.change_pct is not None else "n/a"
-        parts.append(f"- {asset.value}: price={quote.price:.2f}, change={chg}, MA200d={ma_str}")
+        parts.append(
+            f"- {asset.value}: price={fmt_price(quote.price)}, change={chg}, MA200d={ma_str}"
+        )
     parts.append(
         f"- VIX: {tick.market.vix.vix:.2f} ({tick.market.vix.regime.value}), "
         f"term={tick.market.vix.term_structure.value}"
@@ -147,27 +153,29 @@ def format_tick_payload(tick: DashboardTick) -> str:
         parts.append("(no intraday data this tick)")
     else:
         for asset, lv in tick.intraday_levels.items():
+            d = price_digits(lv.last_price)
             parts.append(
-                f"\n### {asset.value} (last {lv.last_price:.2f}, asof {lv.asof.strftime('%H:%M UTC')})"
+                f"\n### {asset.value} (last {fmt_price(lv.last_price)}, "
+                f"asof {lv.asof.strftime('%H:%M UTC')})"
             )
             parts.append(
-                f"- session: HOD={lv.hod:.2f}, LOD={lv.lod:.2f}, "
-                f"VWAP={_fmt_or_na(lv.vwap)}, range={lv.hod - lv.lod:.2f}"
+                f"- session: HOD={_fmt_or_na(lv.hod, d)}, LOD={_fmt_or_na(lv.lod, d)}, "
+                f"VWAP={_fmt_or_na(lv.vwap, d)}, range={_fmt_or_na(lv.hod - lv.lod, d)}"
             )
             parts.append(
-                f"- previous day: PDH={_fmt_or_na(lv.pdh)}, "
-                f"PDL={_fmt_or_na(lv.pdl)}, PDC={_fmt_or_na(lv.pdc)}"
+                f"- previous day: PDH={_fmt_or_na(lv.pdh, d)}, "
+                f"PDL={_fmt_or_na(lv.pdl, d)}, PDC={_fmt_or_na(lv.pdc, d)}"
             )
             parts.append(
-                f"- 5m MAs: EMA9={_fmt_or_na(lv.ema_9)}, EMA20={_fmt_or_na(lv.ema_20)}, "
-                f"EMA50={_fmt_or_na(lv.ema_50)}, EMA200={_fmt_or_na(lv.ema_200)}, "
-                f"SMA200={_fmt_or_na(lv.sma_200)}"
+                f"- 5m MAs: EMA9={_fmt_or_na(lv.ema_9, d)}, EMA20={_fmt_or_na(lv.ema_20, d)}, "
+                f"EMA50={_fmt_or_na(lv.ema_50, d)}, EMA200={_fmt_or_na(lv.ema_200, d)}, "
+                f"SMA200={_fmt_or_na(lv.sma_200, d)}"
             )
             parts.append(
-                f"- swings: high={_fmt_or_na(lv.last_swing_high)}, "
-                f"low={_fmt_or_na(lv.last_swing_low)}"
+                f"- swings: high={_fmt_or_na(lv.last_swing_high, d)}, "
+                f"low={_fmt_or_na(lv.last_swing_low, d)}"
             )
-            parts.append(f"- ATR(14, 5m): {_fmt_or_na(lv.atr_14)}")
+            parts.append(f"- ATR(14, 5m): {_fmt_or_na(lv.atr_14, d)}")
 
     if tick.breakouts_recent:
         parts.append("\n## Recent breakouts (Donchian N=20, multi-timeframe)")
@@ -176,8 +184,9 @@ def format_tick_payload(tick: DashboardTick) -> str:
             direction = "↑" if b.direction.value == "up" else "↓"
             squeeze_tag = " (squeeze)" if b.squeeze else ""
             parts.append(
-                f"- {b.asset.value} {b.timeframe.value} {direction} @ {b.close:.2f} "
-                f"(level {b.level:.2f}, expansion {b.expansion_ratio:.2f}× ATR, "
+                f"- {b.asset.value} {b.timeframe.value} {direction} @ {fmt_price(b.close)} "
+                f"(level {fmt_price(b.level, digits=price_digits(b.close))}, "
+                f"expansion {b.expansion_ratio:.2f}× ATR, "
                 f"strength {b.strength:.0f}/100){squeeze_tag} "
                 f"— {b.signal_bar_at.strftime('%H:%M UTC')}"
             )

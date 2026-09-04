@@ -16,6 +16,9 @@ const PERIODS: { key: keyof Pick<AccountPnl, "day" | "week" | "month">; label: s
   { key: "month", label: "Mês" },
 ];
 
+/** Starting balance of the ActivTrades account, used for the monthly %. */
+const INITIAL_CAPITAL_USD = 1000;
+
 function fmtMoney(v: number, currency: string | null): string {
   const sign = v > 0 ? "+" : v < 0 ? "−" : "";
   const abs = Math.abs(v).toLocaleString("en-US", {
@@ -23,6 +26,13 @@ function fmtMoney(v: number, currency: string | null): string {
     maximumFractionDigits: 2,
   });
   return `${sign}${abs}${currency ? ` ${currency}` : ""}`;
+}
+
+/** P&L as a share of the starting balance, e.g. +3.50%. */
+function fmtPct(v: number): string {
+  const pct = (v / INITIAL_CAPITAL_USD) * 100;
+  const sign = pct > 0 ? "+" : pct < 0 ? "−" : "";
+  return `${sign}${Math.abs(pct).toFixed(2)}%`;
 }
 
 function tone(v: number): string {
@@ -51,6 +61,12 @@ export function PnlCards() {
             >
               {pnl ? fmtMoney(value, pnl.currency) : "—"}
             </div>
+            {key === "month" && (
+              <div className={cn("text-[11px] tabular-nums", pnl ? tone(value) : "text-zinc-600")}>
+                {pnl ? fmtPct(value) : "—"}
+                <span className="ml-1 text-zinc-500">do capital inicial</span>
+              </div>
+            )}
           </Card>
         );
       })}

@@ -163,11 +163,11 @@ async def build_container(settings: Settings) -> Container:
     push_day_outlook_alerts = PushDayOutlookAlertsUseCase(notifier=ntfy, cache=cache)
     assess_vix_price = AssessVixPriceUseCase()
     push_vix_price_alerts = PushVixPriceAlertsUseCase(notifier=ntfy, cache=cache)
-    # The MT5 collector pushes liquidity readings into the order-flow route's
-    # in-process store; the tick loop reads the latest snapshot from there.
-    # Imported lazily to keep the composition root free of an api→container
-    # import cycle.
-    from api.routes.orderflow import latest_liquidity
+    # The MT5 collector pushes liquidity readings and M5 candles into the
+    # order-flow route's in-process stores; the tick loop reads the latest
+    # snapshot from there. Imported lazily to keep the composition root free of
+    # an api→container import cycle.
+    from api.routes.orderflow import latest_candles, latest_liquidity
 
     run_tick = RunDashboardTickUseCase(
         fetch_market=fetch_market,
@@ -190,6 +190,7 @@ async def build_container(settings: Settings) -> Container:
         assess_vix_price=assess_vix_price,
         push_vix_price_alerts=push_vix_price_alerts,
         liquidity_provider=latest_liquidity,
+        bars_provider=latest_candles,
     )
 
     generate_briefing = GenerateBriefingUseCase(

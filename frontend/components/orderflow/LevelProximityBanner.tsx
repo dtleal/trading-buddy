@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowUpToLine, ArrowDownToLine } from "lucide-react";
-import { cn, fmtPrice } from "@/lib/utils";
+import { cn, fmtPrice, priceDigits } from "@/lib/utils";
 import type { LevelProximity } from "@/lib/alerts/levels";
 
 /**
@@ -67,7 +67,7 @@ function ProximityChip({ p }: { p: LevelProximity }) {
       </span>
       <span className="text-zinc-100">{fmtPrice(p.target)}</span>
       <span className="text-[11px] font-normal text-zinc-400">
-        {p.gap > 0 ? `${fmtPrice(Math.abs(p.gap))} pts` : "rompido"}
+        {p.gap > 0 ? `${fmtPrice(Math.abs(p.gap), priceDigits(p.target))} pts` : "rompido"}
       </span>
     </div>
   );

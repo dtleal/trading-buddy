@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { fmtPrice } from "@/lib/utils";
+import { fmtPrice, priceDigits } from "@/lib/utils";
 import type { OrderFlowSnapshot } from "@/lib/types";
 
 // Rolling tick window. Like an MT5 tick chart, the X axis is by quote change,
@@ -137,7 +137,7 @@ export function BidAskChart({ flow, now }: { flow: OrderFlowSnapshot | undefined
       {/* live read-out */}
       <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between px-1 text-[11px] font-semibold tabular-nums">
         <span className="text-rose-400">ask {fmtPrice(ask)}</span>
-        <span className="text-zinc-500">spread {fmtPrice(spread)}</span>
+        <span className="text-zinc-500">spread {fmtPrice(spread, priceDigits(bid))}</span>
         <span className="text-emerald-400">bid {fmtPrice(bid)}</span>
       </div>
 

@@ -8,17 +8,19 @@ import type { AssetSymbol } from "@/lib/types";
  * only: nothing blocks or closes orders, the dashboard just lights up the
  * symbol when the open volume reaches (or passes) the cap.
  *
- * Defaults are the trader's own risk sizes. They are stored in the browser
- * (localStorage), so each device keeps its own copy and editing them needs no
- * backend round-trip.
+ * Defaults match the ActivTrades account (about $1k), traded with 0.01 lots:
+ * 0.15 on every symbol, so the alert lights up after about 15 entries of the
+ * minimum size are open at once. They are stored in the browser (localStorage),
+ * so each device keeps its own copy and editing them needs no backend
+ * round-trip.
  */
 export const DEFAULT_LOT_LIMITS: Record<string, number> = {
-  USTEC: 40,
-  SPX: 70,
-  GOLD: 1,
-  US30: 20,
-  GER40: 20,
-  EURUSD: 5,
+  USTEC: 0.15,
+  SPX: 0.15,
+  GOLD: 0.15,
+  US30: 0.15,
+  GER40: 0.15,
+  EURUSD: 0.15,
 };
 
 const STORAGE_KEY = "orderflow.lotLimits";

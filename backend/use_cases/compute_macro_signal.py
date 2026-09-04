@@ -60,7 +60,9 @@ class ComputeMacroSignalUseCase:
 
             if dxy is not None:
                 sign = _delta_sign(dxy.delta_1w, threshold=0.2)
-                if asset == AssetSymbol.GOLD:
+                # EURUSD sits on gold's side of this rule for a different
+                # reason: a stronger dollar *is* a lower EURUSD, by definition.
+                if asset in (AssetSymbol.GOLD, AssetSymbol.EURUSD):
                     if sign > 0:
                         score -= 10
                         rationale.append("DXY rising (USD strength)")

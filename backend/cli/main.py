@@ -38,8 +38,8 @@ DEFAULT_CONTRACT_MULTIPLIER: dict[str, float] = {
     "SPX": 50.0,  # ES E-mini = $50/pt
     "GOLD": 100.0,  # GC full = $100/pt; MGC mini = $10
     "US30": 5.0,  # YM E-mini = $5/pt
-    "USOIL": 1000.0,  # CL = 1000 barrels, so $1000 per $1.00 move
-    "US2000": 50.0,  # RTY E-mini = $50/pt
+    "GER40": 25.0,  # FDAX full = €25/pt; FDXM mini = €5
+    "EURUSD": 125_000.0,  # 6E = 125,000 euros, so $125k per 1.00 move
 }
 
 app = typer.Typer(add_completion=False, help="day-trading-buddy CLI")
@@ -234,7 +234,7 @@ async def _snapshot(include_prompt: bool) -> None:
 @app.command()
 def signal(
     asset: str = typer.Option(
-        ..., "--asset", "-a", help="Asset: USTEC | SPX | GOLD | US30 | USOIL | US2000"
+        ..., "--asset", "-a", help="Asset: USTEC | SPX | GOLD | US30 | GER40 | EURUSD"
     ),
     interval: str = typer.Option("5m", "--interval", "-i", help="Bar interval (5m default)"),
     lookback_days: int = typer.Option(
@@ -336,7 +336,8 @@ def replay(
         [],
         "--usd-per-point",
         help="USD per 1.0 point per lot, e.g. --usd-per-point GOLD=100 (repeatable). "
-        "Defaults assume FTMO .cash (indices 1.0, gold 100).",
+        "Defaults assume the ActivTrades Sep26 index CFDs (USTEC 20, USA500 50, "
+        "US30 5, GER40 25, gold 100).",
     ),
     detail: bool = typer.Option(False, "--detail", help="Also list every close event."),
 ) -> None:

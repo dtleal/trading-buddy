@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { playAlertSound } from "@/lib/alerts/sound";
 import { useAlertsStore } from "@/lib/alerts/store";
 import type { Breakout, DashboardTick } from "@/lib/types";
+import { fmtPrice, priceDigits } from "@/lib/utils";
 
 // How recent a breakout has to be (in minutes) to still trigger an alert when
 // it first shows up after the page loads. Older signals get silently primed
@@ -67,12 +68,12 @@ export function useBreakoutAlerts(tick: DashboardTick | null): void {
 
 function titleFor(b: Breakout): string {
   const arrow = b.direction === "up" ? "↑" : "↓";
-  return `${arrow} ${b.asset} ${b.timeframe} breakout @ ${b.close.toFixed(2)}`;
+  return `${arrow} ${b.asset} ${b.timeframe} breakout @ ${fmtPrice(b.close)}`;
 }
 
 function detailFor(b: Breakout): string {
   const dir = b.direction === "up" ? "rompeu acima" : "rompeu abaixo";
-  return `${dir} de ${b.level.toFixed(2)} · expansão ${b.expansion_ratio.toFixed(2)}× ATR · strength ${b.strength.toFixed(0)}/100${b.squeeze ? " · pós-squeeze" : ""}`;
+  return `${dir} de ${fmtPrice(b.level, priceDigits(b.close))} · expansão ${b.expansion_ratio.toFixed(2)}× ATR · strength ${b.strength.toFixed(0)}/100${b.squeeze ? " · pós-squeeze" : ""}`;
 }
 
 function toneFor(b: Breakout): "info" | "warning" | "danger" {

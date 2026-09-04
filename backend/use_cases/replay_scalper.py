@@ -58,27 +58,30 @@ from use_cases.trade_signal import (
 
 # USD gained per 1.0 price-unit move per 1.0 lot. MUST match the broker's
 # contract spec for absolute P&L (and thus the USD thresholds) to be right.
-# FTMO .cash defaults: indices 1 lot = 1 USD/point; the commodity CFDs are
-# 100 units per lot (XAUUSD = 100 oz, USOIL = 100 barrels), so they earn 100 USD
-# per 1.00 price unit. Confirm against the broker's contract spec before
-# trusting absolute P&L on the newer instruments.
+# ActivTrades defaults (the Sep26 forward index CFDs, contract size read from
+# MT5): USTEC 20, USA500 50, US30 5, GER40 25 (pays in EUR, close enough to 1
+# USD for sizing). Gold is quoted per ounce and 1 lot = 100 oz, so 100 USD per
+# 1.00 move; EURUSD 1 lot = 100,000 euros, so 100,000 USD per 1.00 move (10 USD
+# per pip). These are 5x-50x the old FTMO .cash values (1 USD per index point),
+# so lots had to shrink by the same factor — see DEFAULT_LOTS. Re-check the
+# contract spec when the forward contract rolls to the next quarter.
 DEFAULT_USD_PER_POINT: dict[AssetSymbol, float] = {
-    AssetSymbol.USTEC: 1.0,
-    AssetSymbol.SPX: 1.0,
+    AssetSymbol.USTEC: 20.0,
+    AssetSymbol.SPX: 50.0,
     AssetSymbol.GOLD: 100.0,
-    AssetSymbol.US30: 1.0,
-    AssetSymbol.USOIL: 100.0,
-    AssetSymbol.US2000: 1.0,
+    AssetSymbol.US30: 5.0,
+    AssetSymbol.GER40: 25.0,
+    AssetSymbol.EURUSD: 100_000.0,
 }
 
 # Live per-symbol sizes (mirrors _DEFAULT_LOTS in the bot route).
 DEFAULT_LOTS: dict[AssetSymbol, float] = {
-    AssetSymbol.USTEC: 2.0,
-    AssetSymbol.SPX: 2.0,
+    AssetSymbol.USTEC: 0.1,
+    AssetSymbol.SPX: 0.04,
     AssetSymbol.GOLD: 0.12,
-    AssetSymbol.US30: 1.0,
-    AssetSymbol.USOIL: 0.1,
-    AssetSymbol.US2000: 1.0,
+    AssetSymbol.US30: 0.2,
+    AssetSymbol.GER40: 0.04,
+    AssetSymbol.EURUSD: 0.5,
 }
 
 

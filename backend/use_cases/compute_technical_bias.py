@@ -46,8 +46,8 @@ class ComputeTechnicalBiasUseCase:
                 rationale.append(f"price {distance_pct:+.1f}% below MA200 daily")
 
         # Risk-on assets move together vs the VIX: they rally in calm regimes
-        # and get hit when fear spikes. That covers the stock indices and oil
-        # (a fear spike hits demand). Gold is the odd one out — it tends to
+        # and get hit when fear spikes. That covers the stock indices and
+        # EURUSD (fear buys dollars). Gold is the odd one out — it tends to
         # catch a bid when stress rises.
         is_risk_on = asset in RISK_ON_ASSETS
 

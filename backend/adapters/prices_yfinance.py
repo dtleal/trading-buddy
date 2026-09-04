@@ -24,6 +24,8 @@ YAHOO_TICKERS: dict[str, str] = {
     "SPX": "^GSPC",
     "GOLD": "GC=F",
     "US30": "^DJI",
+    "GER40": "^GDAXI",
+    "EURUSD": "EURUSD=X",
     "USOIL": "CL=F",
     "US2000": "^RUT",
     "BITCOIN": "BTC-USD",
@@ -44,7 +46,10 @@ INTRADAY_TICKERS: dict[str, str] = {
     "SPX": "ES=F",  # S&P 500 future (~24h) instead of ^GSPC cash
     "US30": "YM=F",  # Dow 30 future (~24h) instead of ^DJI cash
     "US2000": "RTY=F",  # Russell 2000 future (~24h) instead of ^RUT cash
-    # USOIL needs no override: CL=F is already the ~23h continuous future.
+    # EURUSD needs no override: EURUSD=X already trades ~24h, Sunday to Friday.
+    # GER40 has no override either — Yahoo carries no continuous DAX future, so
+    # intraday bars only cover the Xetra session and the 200-bar 5m averages
+    # reach back further in time than they do on the US symbols.
 }
 
 

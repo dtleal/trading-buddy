@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import Callable
 
@@ -64,6 +65,12 @@ BREAKOUT_TIMEFRAMES: tuple[Timeframe, ...] = (
 # comfortably enough for indices; futures (GC=F, 23h) get even more bars.
 BREAKOUT_LOOKBACK_DAYS = 15
 
+# Fewest MT5 bars we trust instead of yfinance. 400 M5 bars ≈ 1.4 days of a
+# 24h instrument: enough for EMA200/SMA200 and for a previous-day session to
+# exist. Below that the collector is down or still backfilling its deep history,
+# so the tick falls back to Yahoo rather than publishing half-formed levels.
+MIN_MT5_BARS = 400
+
 # Lookback for the VIX 5m bars feeding the VIX×price stance. Two sessions give
 # the trend window plus a meaningful "position in recent range" read without
 # dragging in week-old vol levels.
@@ -98,6 +105,7 @@ class RunDashboardTickUseCase:
         assess_vix_price: AssessVixPriceUseCase | None = None,
         push_vix_price_alerts: PushVixPriceAlertsUseCase | None = None,
         liquidity_provider: Callable[[], dict[AssetSymbol, SessionLiquidity]] | None = None,
+        bars_provider: Callable[[], dict[AssetSymbol, list[IntradayBar]]] | None = None,
         intraday_assets: tuple[AssetSymbol, ...] = TRACKED_ASSETS,
     ) -> None:
         self._fetch_market = fetch_market
@@ -122,6 +130,9 @@ class RunDashboardTickUseCase:
         self._assess_vix_price = assess_vix_price
         self._push_vix_price_alerts = push_vix_price_alerts
         self._liquidity_provider = liquidity_provider
+        # M5 bars straight from MT5 (the collector). Preferred over yfinance —
+        # see `MIN_MT5_BARS` and `_compute_intraday_setups_breakouts`.
+        self._bars_provider = bars_provider
         self._intraday_assets = intraday_assets
 
     async def execute(self) -> DashboardTick:
@@ -257,7 +268,7 @@ class RunDashboardTickUseCase:
                 now=datetime.now(timezone.utc),
                 vix=market.vix,
                 vix_bars=vix_bars,
-                bars_by_asset=bars_by_asset,
+                bars_by_asset=_aligned_to_vix(bars_by_asset, vix_bars),
             )
         except Exception:
             logger.exception("VIX×price assessment failed (tick continues)")
@@ -272,15 +283,20 @@ class RunDashboardTickUseCase:
         list[Breakout],
         dict[AssetSymbol, list[IntradayBar]],
     ]:
-        """Best-effort: pull 5m bars per asset, compute intraday levels, trade
+        """Best-effort: read 5m bars per asset, compute intraday levels, trade
         setups, and breakout signals across all configured timeframes. The raw
         5m bars are also returned so downstream reads (VIX×price stance) reuse
-        them without a second yfinance round-trip.
+        them without fetching twice.
+
+        Bars come from MT5 (the collector) whenever it has enough history —
+        broker's own prices, real tick volume, no delay. Yahoo is the fallback
+        for when the collector is down.
 
         Failures on a single asset (rate limit, missing bars) are logged but
         do not break the tick — the dashboard simply omits that asset's data.
         """
         prices = self._prices
+        mt5_bars = self._bars_provider() if self._bars_provider is not None else {}
         compute_intraday = self._compute_intraday
         detect_setup = self._detect_setup
         detect_breakouts = self._detect_breakouts
@@ -297,7 +313,9 @@ class RunDashboardTickUseCase:
             list[IntradayBar],
         ]:
             try:
-                bars = await prices.get_intraday_bars(asset.value, "5m", BREAKOUT_LOOKBACK_DAYS)
+                bars: Sequence[IntradayBar] = mt5_bars.get(asset, [])
+                if len(bars) < MIN_MT5_BARS:
+                    bars = await prices.get_intraday_bars(asset.value, "5m", BREAKOUT_LOOKBACK_DAYS)
                 levels = compute_intraday.execute(asset.value, bars)
                 setup = None
                 if levels is not None:
@@ -329,6 +347,29 @@ class RunDashboardTickUseCase:
         # Most recent first — frontend slices for display.
         breakouts.sort(key=lambda b: b.signal_bar_at, reverse=True)
         return levels_map, setups, breakouts, bars_map
+
+
+def _aligned_to_vix(
+    bars_by_asset: dict[AssetSymbol, list[IntradayBar]],
+    vix_bars: Sequence[IntradayBar],
+) -> dict[AssetSymbol, list[IntradayBar]]:
+    """Cut the price bars off where the VIX bars end.
+
+    The stance compares a VIX state with a price state, so both sides have to
+    describe the same clock time. The price bars now come from MT5 and are live,
+    while the VIX only exists on Yahoo (no broker symbol for it) and runs ~15
+    minutes late — comparing them raw would read "price falling, VIX flat" purely
+    from the lag. Dropping the price bars newer than the last VIX bar costs three
+    bars of freshness and keeps the comparison honest.
+    """
+    if not vix_bars:
+        return bars_by_asset
+    cutoff = vix_bars[-1].timestamp
+    aligned: dict[AssetSymbol, list[IntradayBar]] = {}
+    for asset, bars in bars_by_asset.items():
+        trimmed = [b for b in bars if b.timestamp <= cutoff]
+        aligned[asset] = trimmed or bars
+    return aligned
 
 
 def _with_neutral_default(items: list[NewsItem]) -> list[NewsItem]:

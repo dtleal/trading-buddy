@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import { notifyAlert } from "@/lib/alerts/notify";
 import { useAlertsStore } from "@/lib/alerts/store";
-import { fmtPrice } from "@/lib/utils";
+import { fmtPrice, priceDigits } from "@/lib/utils";
 import type { AlertEvent } from "@/lib/alerts/types";
 import type { LevelProximity, ProximityTier } from "@/lib/alerts/levels";
 
@@ -49,7 +49,7 @@ export function useLevelAlerts(proximities: LevelProximity[]): void {
           ? `${p.label} ${p.broken ? "rompeu" : "NA"} ${levelName} (${p.kind})`
           : `${p.label} chegando na ${levelName} (${p.kind})`,
         detail: `Preço ${fmtPrice(p.price)} · ${p.kind} ${fmtPrice(p.target)} · ${
-          p.gap > 0 ? `${fmtPrice(Math.abs(p.gap))} pts para o nível` : "nível rompido"
+          p.gap > 0 ? `${fmtPrice(Math.abs(p.gap), priceDigits(p.price))} pts para o nível` : "nível rompido"
         }`,
         tone: atLevel ? "danger" : "warning",
         firedAt: now,

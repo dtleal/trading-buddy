@@ -162,6 +162,18 @@ def latest_liquidity() -> dict[AssetSymbol, SessionLiquidity]:
     return dict(_liquidity_store)
 
 
+def latest_candles() -> dict[AssetSymbol, list[IntradayBar]]:
+    """The M5 bars the collector has pushed so far, per symbol.
+
+    Read by `RunDashboardTickUseCase`, which prefers these over yfinance for
+    three reasons: they are the broker's own bars (the same feed the trader has
+    on screen), they carry MT5 tick volume — so VWAP works on EURUSD and GER40,
+    where Yahoo reports zero volume — and they are live instead of ~15 minutes
+    late. Copies the lists so the caller can iterate without racing a push.
+    """
+    return {symbol: list(bars) for symbol, bars in _candles_store.items()}
+
+
 # --- wire-format parsing -----------------------------------------------------
 
 
@@ -349,8 +361,8 @@ class _BotState:
         self.enabled: bool = False  # collector allow_auto_trade AND demo account
         self.armed: bool = False
         self.rearm: bool = True  # cycle after each win (24h) vs one-shot
-        self.profit_target: float = 350.0  # bank + re-arm at +this (floating)
-        self.loss_stop: float = 900.0  # hard stop for the day at −this (session)
+        self.profit_target: float = 35.0  # bank + re-arm at +this (floating)
+        self.loss_stop: float = 200.0  # hard stop for the day at −this (session)
         self.max_per_symbol: int = 6
         self.cooldown_s: float = 2.0  # min gap between adds on a symbol (paces scale-in)
         # Per-symbol hard USD stop (0 = off; see scalper.SYMBOL_STOP_USD).
@@ -371,20 +383,19 @@ class _BotState:
         self.last_result: str | None = None
 
 
-# Default per-symbol sizes. USTEC / SPX / GOLD are Diego's tested sizes (index
-# 2.0 lots, gold 0.12). The three newer instruments start deliberately small —
-# half an index lot, and only 0.1 on oil, whose per-lot point value is much
-# larger — because their sizing has not been traded yet. A symbol missing from
-# this map is skipped by the bot entirely, so these values are what let it work
-# the new instruments at all. Check them in the UI before arming on a funded
-# account; the per-symbol inputs in the bot panel overwrite them at runtime.
+# Default per-symbol sizes: the broker minimum, 0.01 lots on every symbol. The
+# ActivTrades account is small (about $1k), so the minimum is the whole setup —
+# on the Sep26 index CFDs 0.01 is $0.20 a point on USTEC, $0.50 on USA500, $0.05
+# on US30 and EUR 0.25 on GER40. A symbol missing from this map is skipped by
+# the bot entirely. The per-symbol inputs in the bot panel overwrite them at
+# runtime.
 _DEFAULT_LOTS: dict[AssetSymbol, float] = {
-    AssetSymbol.USTEC: 2.0,
-    AssetSymbol.SPX: 2.0,
-    AssetSymbol.GOLD: 0.12,
-    AssetSymbol.US30: 1.0,
-    AssetSymbol.USOIL: 0.1,
-    AssetSymbol.US2000: 1.0,
+    AssetSymbol.USTEC: 0.01,
+    AssetSymbol.SPX: 0.01,
+    AssetSymbol.GOLD: 0.01,
+    AssetSymbol.US30: 0.01,
+    AssetSymbol.GER40: 0.01,
+    AssetSymbol.EURUSD: 0.01,
 }
 
 _bot = _BotState()

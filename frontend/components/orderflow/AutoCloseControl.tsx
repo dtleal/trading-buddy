@@ -23,7 +23,7 @@ export function AutoCloseControl({
   arm: (targetUsd: number) => Promise<void>;
   disarm: () => Promise<void>;
 }) {
-  const [target, setTarget] = useState("500");
+  const [target, setTarget] = useState("35");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -114,7 +114,7 @@ export function AutoCloseControl({
                 value={target}
                 onChange={(e) => setTarget(e.target.value)}
                 className="w-20 bg-transparent px-1 py-1 text-[12px] tabular-nums text-zinc-100 outline-none"
-                placeholder="500"
+                placeholder="35"
               />
             </div>
             <button

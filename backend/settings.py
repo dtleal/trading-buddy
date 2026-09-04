@@ -109,7 +109,7 @@ class Settings(BaseSettings):
     # Symbols that carry order flow. Subset of AssetSymbol — the six FTMO
     # instruments the trader works. Each one also needs a matching entry in the
     # Windows collector's config.json (backend name → MT5 name).
-    orderflow_symbols: str = "USTEC,SPX,GOLD,US30,USOIL,US2000"
+    orderflow_symbols: str = "USTEC,SPX,GOLD,US30,GER40,EURUSD"
     # Footprint bar width in seconds (60 = 1-minute footprint bars).
     orderflow_footprint_interval_seconds: int = 60
     # How many footprint bars to retain / broadcast per symbol.
@@ -120,8 +120,9 @@ class Settings(BaseSettings):
     # auto-close arms itself at this target as soon as the collector connects
     # with close capability, and re-arms after each fire (so it stays on across
     # UI refreshes / backend restarts). 0 disables auto-arming. A manual disarm
-    # in the UI turns auto-arming off until you arm again.
-    orderflow_autoclose_default_usd: float = 500.0
+    # in the UI turns auto-arming off until you arm again. Sized for the
+    # ActivTrades account (about $1k), traded with 0.01 lots.
+    orderflow_autoclose_default_usd: float = 35.0
     # Directory for the raw ingest tape: every book/trades/liquidity message is
     # appended verbatim to one JSONL file per UTC day, so real sessions can be
     # replayed through the aggregator to backtest the scalper. Relative paths

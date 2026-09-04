@@ -1,6 +1,6 @@
 # trading-buddy
 
-Macro context co-pilot for day trading the six FTMO instruments **USTEC
+Macro context co-pilot for day trading the six ActivTrades instruments **USTEC
 (Nasdaq 100), USA500 (S&P 500), GOLD, US30 (Dow Jones), GER40 (DAX 40) and
 EURUSD**.
 
@@ -28,17 +28,19 @@ recordings — see "Raw tape recording" in [`backend/README.md`](backend/README.
 ### Tracked assets
 
 Six instruments, in screen order. The `backend` name is what the code and the
-API use; the `MT5` name is how FTMO spells it, which is what you see on your
-chart:
+API use; the `MT5` name is how ActivTrades spells it, which is what you see on
+your chart. The four index CFDs are **forward contracts**, so their name carries
+the expiry month and rolls every quarter (`Sep26` → `Dec26` → …) — when it rolls,
+update `symbols[]` in the collector config:
 
-| backend | UI label | MT5 (FTMO) | Yahoo (daily / intraday) |
-|---|---|---|---|
-| `USTEC` | USTEC | `US100.cash` | `^NDX` / `NQ=F` |
-| `SPX` | USA500 | `US500.cash` | `^GSPC` / `ES=F` |
-| `GOLD` | GOLD | `XAUUSD` | `GC=F` |
-| `US30` | US30 | `US30.cash` | `^DJI` / `YM=F` |
-| `GER40` | GER40 | `GER40.cash` | `^GDAXI` |
-| `EURUSD` | EURUSD | `EURUSD` | `EURUSD=X` |
+| backend | UI label | MT5 (ActivTrades) | USD per point, 1 lot | Yahoo (daily / intraday) |
+|---|---|---|---|---|
+| `USTEC` | USTEC | `UsaTecSep26` | 20 | `^NDX` / `NQ=F` |
+| `SPX` | USA500 | `Usa500Sep26` | 50 | `^GSPC` / `ES=F` |
+| `GOLD` | GOLD | `GOLD` | 100 | `GC=F` |
+| `US30` | US30 | `UsaIndSep26` | 5 | `^DJI` / `YM=F` |
+| `GER40` | GER40 | `Ger40Sep26` | 25 (EUR) | `^GDAXI` |
+| `EURUSD` | EURUSD | `EURUSD` | 100,000 | `EURUSD=X` |
 
 Bitcoin, USOIL and US2000 were dropped — Bitcoin to free up screen space, the
 other two because their round-trip cost (spread plus commission) is huge next to
@@ -207,7 +209,7 @@ genuinely changes mid-session) — see [phone push](#phone-push-notifications-nt
 ### Limite de lotes abertos — open-volume alert (dashboard)
 
 Next to each asset name in the flow strip there is a small chip with the **lots
-open right now / the limit for that asset** (e.g. `12/40`). It answers "how much
+open right now / the limit for that asset** (e.g. `0.08/0.15`). It answers "how much
 size am I already carrying here?" when the position was built from many small
 orders spread over different prices.
 
@@ -216,11 +218,12 @@ orders spread over different prices.
 - **Under the limit:** plain grey chip.
 - **At or over the limit:** the chip turns red and **blinks**, so it catches the
   eye while you scan the six columns.
-- The chip is **hidden while the asset is flat** — six `0/40` chips would just be
+- The chip is **hidden while the asset is flat** — six `0/0.15` chips would just be
   noise.
 
-Defaults (the trader's own risk sizes): USTEC 40, USA500 70, GOLD 1, US30 20,
-GER40 20, EURUSD 5.
+Defaults: **0.15 lots on every asset**, sized for the current ActivTrades
+account (about $1k traded with 0.01 lots) — the chip lights up after roughly 15
+minimum-size entries are open on the same symbol.
 
 To change them, click **Limite de lotes** in the card header: a panel opens with
 one box per asset. Every edit is saved right away — there is no save button — and
@@ -229,6 +232,31 @@ one box per asset. Every edit is saved right away — there is no save button �
 
 This is an **alert only**. Nothing is blocked and nothing is closed; it is there
 to make you notice, not to act for you.
+
+### Default sizes and targets (ActivTrades, ~$1k account)
+
+Every money default is sized for the account being traded now: about **$1,000**,
+worked with the broker minimum of **0.01 lots**. All of them can be changed in
+the UI at runtime — these are only the starting values.
+
+| Default | Value | Where it lives |
+| --- | --- | --- |
+| Trade size, every symbol | 0.01 lots | `_DEFAULT_LOTS` in `api/routes/orderflow.py` |
+| Open-lots alert per symbol | 0.15 lots | `DEFAULT_LOT_LIMITS` in `frontend/lib/lotLimits.ts` |
+| Whole-account auto-close target | **+$35** floating | `ORDERFLOW_AUTOCLOSE_DEFAULT_USD` (`settings.py`) |
+| Scalper bot profit target | **+$35** floating, per cycle | `_BotState.profit_target` |
+| Scalper bot daily stop | **−$200** session (realized + floating) | `_BotState.loss_stop` |
+
+The two bot numbers mean different things: the **target** is the floating P&L of
+the positions open in that cycle — it fires, banks the win, closes everything
+and re-arms, so it can hit several times a day. The **stop** is the session
+total (already realized plus what is still floating) and it stops the bot for
+the rest of the day.
+
+The three P&L cards at the top of the dashboard (**Hoje / Semana / Mês**) show
+the closed P&L for each period from the broker's deal history. The **Mês** card
+also shows that value as a **% of the $1,000 starting capital**
+(`INITIAL_CAPITAL_USD` in `frontend/components/orderflow/PnlCards.tsx`).
 
 ### VIX × Preço — per-asset stance from the VIX path vs the 5m tape (dashboard + push)
 

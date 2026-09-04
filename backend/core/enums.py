@@ -8,38 +8,43 @@ from enum import Enum
 class AssetSymbol(str, Enum):
     """Tradable assets the buddy tracks.
 
-    `BITCOIN` is kept here on purpose even though nothing tracks it any more:
-    snapshots saved before it was dropped still carry the string, so removing
-    the member would make those old rows fail to parse. The live asset list is
-    `TRACKED_ASSETS` below — that is what the dashboard reads.
+    `BITCOIN`, `USOIL` and `US2000` are kept here on purpose even though
+    nothing tracks them any more: snapshots saved before they were dropped
+    still carry the string, so removing the members would make those old rows
+    fail to parse. The live asset list is `TRACKED_ASSETS` below — that is what
+    the dashboard reads.
     """
 
     USTEC = "USTEC"  # Nasdaq 100 (Yahoo: ^NDX / NQ=F intraday)
     SPX = "SPX"  # S&P 500 (Yahoo: ^GSPC / ES=F intraday)
     GOLD = "GOLD"  # Gold futures (Yahoo: GC=F)
     US30 = "US30"  # Dow Jones 30 (Yahoo: ^DJI / YM=F intraday)
-    USOIL = "USOIL"  # WTI crude oil (Yahoo: CL=F)
-    US2000 = "US2000"  # Russell 2000 (Yahoo: ^RUT / RTY=F intraday)
+    GER40 = "GER40"  # DAX 40 (Yahoo: ^GDAXI)
+    EURUSD = "EURUSD"  # Euro vs US dollar (Yahoo: EURUSD=X)
+    USOIL = "USOIL"  # retired — see the class docstring
+    US2000 = "US2000"  # retired — see the class docstring
     BITCOIN = "BITCOIN"  # retired — see the class docstring
 
 
 """The assets the dashboard tracks, in display order.
 
 Every per-asset loop must walk this tuple rather than `AssetSymbol` itself,
-otherwise the retired `BITCOIN` member reappears in the output with empty
-scores. Bitcoin was dropped to make screen room for the three FTMO instruments
-the trader actually works (US30.cash / USOIL.cash / US2000.cash)."""
+otherwise the retired members (BITCOIN / USOIL / US2000) reappear in the output
+with empty scores. USOIL and US2000 were dropped because their FTMO spread is
+huge next to how far they travel in a day; GER40.cash (European session, own
+driver) and EURUSD took their slots."""
 TRACKED_ASSETS: tuple[AssetSymbol, ...] = (
     AssetSymbol.USTEC,
     AssetSymbol.SPX,
     AssetSymbol.GOLD,
     AssetSymbol.US30,
-    AssetSymbol.USOIL,
-    AssetSymbol.US2000,
+    AssetSymbol.GER40,
+    AssetSymbol.EURUSD,
 )
 
 """Assets that fall when fear rises. The stock indices are the obvious ones;
-oil belongs here too because a fear spike is read as a demand hit. Everything
+EURUSD belongs here too, because the dollar is the currency traders run to when
+stress rises, and a stronger dollar is a lower EURUSD by definition. Everything
 outside this set is treated as risk-off (gold catches a bid when stress rises),
 so the bias use cases only have to agree on this one list."""
 RISK_ON_ASSETS: frozenset[AssetSymbol] = frozenset(
@@ -47,8 +52,8 @@ RISK_ON_ASSETS: frozenset[AssetSymbol] = frozenset(
         AssetSymbol.USTEC,
         AssetSymbol.SPX,
         AssetSymbol.US30,
-        AssetSymbol.US2000,
-        AssetSymbol.USOIL,
+        AssetSymbol.GER40,
+        AssetSymbol.EURUSD,
     }
 )
 
