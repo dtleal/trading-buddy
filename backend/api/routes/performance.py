@@ -4,6 +4,10 @@ One endpoint: `GET /api/performance` returns the whole report for a filter
 selection — summary numbers, equity/drawdown curve, day/week/month buckets,
 breakdowns (asset, origin, side, weekday, hour) and the trade list.
 
+All the calendar work is done in Brazil time (America/Sao_Paulo): "hoje", the
+current week/month and any date typed without a timezone mean the BR day. The
+timestamps in the answer stay UTC-aware ISO, the frontend prints them in BR.
+
 The trades themselves come from the collector's `trade_history` push (handled
 in `api/routes/orderflow.py`, which owns the ingest socket) and live in the
 `TradeHistory` store below, shared by both modules.
@@ -20,7 +24,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from adapters.trade_history import TradeHistory
 from core.models import PerformanceReport
 from settings import get_settings
-from use_cases.compute_performance import compute_performance
+from use_cases.compute_performance import BRT, compute_performance
 
 router = APIRouter(tags=["performance"])
 
@@ -43,16 +47,20 @@ Preset = Literal["today", "week", "month", "last_month", "7d", "30d", "90d", "al
 def _resolve_window(
     preset: Preset | None, start: str | None, end: str | None, now: datetime
 ) -> tuple[datetime | None, datetime | None]:
-    """Turn a preset (or explicit ISO dates) into a UTC window.
+    """Turn a preset (or explicit ISO dates) into a window.
+
+    Days, weeks and months follow the BRAZIL calendar — "hoje" is the day the
+    user is living, not the UTC day. The bounds come back as timezone-aware
+    instants, so the comparison against the trades (UTC) is still exact.
 
     An explicit `start`/`end` always wins. A date without a time means the whole
-    day: `start` opens at 00:00 and `end` closes at 23:59:59.999.
+    day: `start` opens at 00:00 and `end` closes at 23:59:59.999, BR time.
     """
     if start or end:
         return _parse_bound(start, end_of_day=False), _parse_bound(end, end_of_day=True)
     if preset is None or preset == "all":
         return None, None
-    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today = now.astimezone(BRT).replace(hour=0, minute=0, second=0, microsecond=0)
     if preset == "today":
         return today, None
     if preset == "week":  # current ISO week (Monday-based)
@@ -77,8 +85,8 @@ def _parse_bound(raw: str | None, *, end_of_day: bool) -> datetime | None:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"data inválida: {raw} (use YYYY-MM-DD ou ISO 8601)",
         )
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+    if parsed.tzinfo is None:  # no offset given → the user meant BR time
+        parsed = parsed.replace(tzinfo=BRT)
     date_only = len(raw) <= 10
     if end_of_day and date_only:
         parsed = parsed.replace(hour=23, minute=59, second=59, microsecond=999999)
@@ -91,11 +99,16 @@ async def get_performance(
         None,
         description=(
             "Janela pronta: today, week (semana atual), month (mês atual), "
-            "last_month, 7d, 30d, 90d, all. Ignorada quando start/end vêm."
+            "last_month, 7d, 30d, 90d, all. Dia/semana/mês seguem o calendário "
+            "de Brasília. Ignorada quando start/end vêm."
         ),
     ),
-    start: str | None = Query(None, description="Início (YYYY-MM-DD ou ISO 8601, UTC)"),
-    end: str | None = Query(None, description="Fim (YYYY-MM-DD ou ISO 8601, UTC)"),
+    start: str | None = Query(
+        None, description="Início (YYYY-MM-DD ou ISO 8601; sem fuso = horário de Brasília)"
+    ),
+    end: str | None = Query(
+        None, description="Fim (YYYY-MM-DD ou ISO 8601; sem fuso = horário de Brasília)"
+    ),
     symbols: str | None = Query(None, description="Ativos separados por vírgula (vazio = todos)"),
     source: Literal["all", "manual", "bot"] = Query("all", description="Origem das operações"),
     trades_limit: int = Query(500, ge=1, le=5000, description="Máximo de trades na lista"),

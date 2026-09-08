@@ -10,6 +10,7 @@ import { PeriodTable } from "@/components/performance/PeriodTable";
 import { SummaryPanel } from "@/components/performance/SummaryPanel";
 import { TradesTable } from "@/components/performance/TradesTable";
 import { usePerformance } from "@/hooks/usePerformance";
+import { fmtDateTimeBoth } from "@/lib/performance";
 import type { PerformanceQuery } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -106,15 +107,15 @@ export default function PerformancePage() {
                 />
                 <BreakdownTable
                   title="Por dia da semana"
-                  description="fechamento em UTC"
+                  description="dia do fechamento, horário de Brasília"
                   rows={report.by_weekday}
                 />
               </div>
             </div>
 
             <BreakdownTable
-              title="Por hora do dia (UTC)"
-              description="a hora em que a operação foi fechada"
+              title="Por hora do dia (Brasília)"
+              description="a hora em que a operação foi fechada · UTC entre parênteses"
               rows={report.by_hour}
             />
           </>
@@ -129,12 +130,12 @@ export default function PerformancePage() {
             swap. Depósitos e saques entram como degrau na curva e{" "}
             <span className="text-zinc-400">nunca como resultado</span>: o
             retorno % é medido sobre o capital (saldo no início + depósitos do
-            período). Datas e horas dos agrupamentos estão em UTC. MEP/MEN e
+            período). Todas as datas e horas estão no horário de Brasília (o
+            equivalente em UTC aparece entre parênteses). MEP/MEN e
             máximo de contratos do relatório do Profit não têm equivalente aqui —
             o histórico da corretora não guarda o caminho do preço dentro da
             operação.
-            {report.asof &&
-              ` Última leitura: ${new Date(report.asof).toLocaleString("pt-BR")}.`}
+            {report.asof && ` Última leitura: ${fmtDateTimeBoth(report.asof)}.`}
           </p>
         )}
       </main>

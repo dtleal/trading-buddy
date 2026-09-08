@@ -137,6 +137,20 @@ def test_explicit_date_window_covers_the_whole_end_day(client: TestClient) -> No
     assert outside["summary"]["trades"] == 0
 
 
+def test_date_bounds_are_read_as_brazil_time(client: TestClient) -> None:
+    """A trade closed 01:30 UTC on 03/03 is 22:30 BR on 02/03, so it belongs to
+    the 02/03 window and NOT to the 03/03 one."""
+    push(
+        client,
+        [trade(1, 10.0, open_ts="2026-03-03T01:00:00+00:00", close_ts="2026-03-03T01:30:00+00:00")],
+        balance=1010.0,
+    )
+    br_day = client.get("/api/performance?start=2026-03-02&end=2026-03-02").json()
+    assert br_day["summary"]["trades"] == 1
+    utc_day = client.get("/api/performance?start=2026-03-03&end=2026-03-03").json()
+    assert utc_day["summary"]["trades"] == 0
+
+
 def test_a_bad_date_is_a_400(client: TestClient) -> None:
     assert client.get("/api/performance?start=ontem").status_code == 400
 

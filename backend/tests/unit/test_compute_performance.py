@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from core.models import CashFlow, ClosedTrade
 from use_cases.compute_performance import compute_performance, compute_stats
 
-BASE = datetime(2026, 3, 2, 14, 0, tzinfo=timezone.utc)  # a Monday
+BASE = datetime(2026, 3, 2, 14, 0, tzinfo=timezone.utc)  # a Monday, 11:00 in Brazil
 
 
 def trade(
@@ -180,8 +180,31 @@ def test_breakdowns_cover_symbol_source_side_weekday_and_hour() -> None:
     assert {g.key for g in report.by_source} == {"manual", "bot"}
     assert {g.key for g in report.by_side} == {"buy", "sell"}
     assert [g.label for g in report.by_weekday] == ["seg"]
-    assert [g.key for g in report.by_hour] == ["14"]
+    # 14:00 UTC is 11:00 in Brazil — the hour shown is the BR one, UTC in brackets.
+    assert [g.key for g in report.by_hour] == ["11"]
+    assert [g.label for g in report.by_hour] == ["11h (14h UTC)"]
     assert report.available_symbols == ["GOLD", "USTEC"]
+
+
+def test_days_follow_the_brazil_calendar() -> None:
+    """A trade closed 01:00 UTC is still the previous day in Brazil (22:00),
+    and that is the day it must be counted on."""
+    late = ClosedTrade(
+        id=1,
+        symbol="USTEC",
+        side="buy",
+        source="manual",
+        lots=0.01,
+        open_ts=datetime(2026, 3, 3, 0, 55, tzinfo=timezone.utc),
+        close_ts=datetime(2026, 3, 3, 1, 0, tzinfo=timezone.utc),
+        open_price=100.0,
+        close_price=101.0,
+        net=5.0,
+    )
+    report = compute_performance([late], account_balance=1005.0)
+    assert [b.key for b in report.by_day] == ["2026-03-02"]
+    assert [g.key for g in report.by_hour] == ["22"]
+    assert [g.label for g in report.by_weekday] == ["seg"]
 
 
 def test_trade_list_is_newest_first_and_capped() -> None:

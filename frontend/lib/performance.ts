@@ -1,7 +1,16 @@
 /**
  * Shared bits of the Performance tab: money/percent/duration formatting and
  * the ready-made date windows the filter bar offers.
+ *
+ * Every date and time on this tab is printed in Brazil time — the clock the
+ * user actually trades on — no matter what timezone the browser or the server
+ * is set to. Where UTC still helps (a chart read against a UTC clock), it goes
+ * in brackets next to the BR time.
  */
+
+/** The one timezone this tab shows. Fixed on purpose: the app also runs from
+ *  a machine whose clock is off, and "hoje" must not change because of it. */
+export const BR_TZ = "America/Sao_Paulo";
 
 /** Money with two decimals and the account currency, no sign. */
 export function fmtMoney(v: number | null | undefined, currency?: string | null): string {
@@ -58,14 +67,44 @@ export function netColor(v: number): string {
   return "text-zinc-400";
 }
 
-/** Date + time of day, in the browser's own timezone. */
+/** Day/month + time of day, Brazil time (e.g. "08/09 14:35"). */
 export function fmtDateTime(iso: string): string {
   return new Date(iso).toLocaleString("pt-BR", {
+    timeZone: BR_TZ,
     day: "2-digit",
     month: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+/** Full date + time, Brazil time, with the same moment in UTC in brackets —
+ *  for the one-line "last read at" note and for hover tooltips. */
+export function fmtDateTimeBoth(iso: string): string {
+  const d = new Date(iso);
+  const br = d.toLocaleString("pt-BR", {
+    timeZone: BR_TZ,
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const utc = d.toLocaleString("pt-BR", {
+    timeZone: "UTC",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return `${br} BR (${utc} UTC)`;
+}
+
+/** Seconds to add to a UTC timestamp so a lightweight-charts axis (which has
+ *  no timezone of its own) prints Brazil time. */
+export function brOffsetSeconds(iso: string): number {
+  const d = new Date(iso);
+  const asUtc = new Date(d.toLocaleString("en-US", { timeZone: "UTC" })).getTime();
+  const asBr = new Date(d.toLocaleString("en-US", { timeZone: BR_TZ })).getTime();
+  return Math.round((asBr - asUtc) / 1000);
 }
 
 /** The windows the filter bar offers, in the order they are shown. */

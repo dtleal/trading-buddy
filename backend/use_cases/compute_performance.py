@@ -32,6 +32,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Sequence
 from datetime import datetime, timedelta, timezone
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from core.models import (
     CashFlow,
@@ -45,6 +46,10 @@ from core.models import (
 )
 
 Source = Literal["all", "manual", "bot"]
+
+# Every date/hour the report shows is Brazil time (the user's own clock). The
+# timestamps themselves stay in UTC — only the grouping and the labels are BR.
+BRT = ZoneInfo("America/Sao_Paulo")
 
 _WEEKDAYS_PT = ["seg", "ter", "qua", "qui", "sex", "sáb", "dom"]
 
@@ -134,8 +139,10 @@ def _matches(
 
 def _bucket_key(ts: datetime, period: Literal["day", "week", "month"]) -> tuple[str, str, datetime]:
     """(key, label, slice start) for one timestamp. Weeks are ISO weeks
-    (Monday-based), months calendar months. Everything in UTC."""
-    day = ts.astimezone(timezone.utc)
+    (Monday-based), months calendar months. The day a trade lands on is its
+    Brazil-time day: a trade closed 23:00 BR is that day, not the next one in
+    UTC."""
+    day = ts.astimezone(BRT)
     if period == "day":
         start = day.replace(hour=0, minute=0, second=0, microsecond=0)
         return start.strftime("%Y-%m-%d"), start.strftime("%d/%m/%Y"), start
@@ -198,6 +205,14 @@ def _groups(
     else:
         rows.sort(key=lambda g: g.stats.net, reverse=True)
     return rows
+
+
+def _hour_key(trade: ClosedTrade) -> tuple[str, str]:
+    """Hour of the day the trade closed, Brazil time — with the same hour in
+    UTC in brackets, so a chart read against a UTC clock still lines up."""
+    br = trade.close_ts.astimezone(BRT).hour
+    utc = trade.close_ts.astimezone(timezone.utc).hour
+    return f"{br:02d}", f"{br:02d}h ({utc:02d}h UTC)"
 
 
 def _avg_time_between(trades: Sequence[ClosedTrade]) -> float:
@@ -318,17 +333,11 @@ def compute_performance(
         by_weekday=_groups(
             selected,
             lambda t: (
-                str(t.close_ts.astimezone(timezone.utc).weekday()),
-                _WEEKDAYS_PT[t.close_ts.astimezone(timezone.utc).weekday()],
+                str(t.close_ts.astimezone(BRT).weekday()),
+                _WEEKDAYS_PT[t.close_ts.astimezone(BRT).weekday()],
             ),
         ),
-        by_hour=_groups(
-            selected,
-            lambda t: (
-                f"{t.close_ts.astimezone(timezone.utc).hour:02d}",
-                f"{t.close_ts.astimezone(timezone.utc).hour:02d}h UTC",
-            ),
-        ),
+        by_hour=_groups(selected, _hour_key),
         trades=list(reversed(selected))[:trades_limit],
         trades_returned=min(len(selected), trades_limit),
         available_symbols=sorted({t.symbol for t in everything}),

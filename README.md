@@ -430,7 +430,7 @@ Lucro : Média Prejuízo, Patrimônio Máximo, Retorno sobre o Capital, TET).
   trades, hit rate, wins/losses, profit factor, result and the account balance
   at the end of the slice.
 - **Breakdowns:** per asset, **manual × bot**, buy × sell, weekday and hour of
-  day — where the money is really made or lost.
+  day (BR time, UTC in brackets) — where the money is really made or lost.
 - **Operações:** the trade list — close time, asset, side, origin, lots, entry
   and exit price, time in trade, costs and the net banked.
 - **Data path:** the collector groups the broker's DEALS by `position_id` into
@@ -458,9 +458,19 @@ Lucro : Média Prejuízo, Patrimônio Máximo, Retorno sobre o Capital, TET).
   always been there) instead of the real 6.77, flattering the return and
   understating the drawdown %. The reconciliation now closes exactly:
   `6.77 + 1,000 deposit + 25.54 traded = 1,032.31` = the broker's balance.
-- **Honest caveats:** day / week / month grouping and the hour breakdown are in
-  **UTC**. Trades still open are not in the report — there is nothing to score
-  yet. The Profit report's **MEP / MEN** (best and worst point reached inside a
+- **Everything on Brazil time.** Dates and hours on this tab are **horário de
+  Brasília** (`America/Sao_Paulo`), never UTC: the day/week/month buckets, the
+  weekday and hour breakdowns, the trade list, the capital-curve axis and the
+  "hoje / esta semana / este mês" buttons all follow the BR calendar, and a date
+  typed in the range boxes means the BR day (00:00–23:59:59 BR). So a trade
+  closed 01:00 UTC counts on the previous day, the one the trader lived. Where
+  UTC still helps it is shown **in brackets** next to the BR time: the hour
+  breakdown labels (`22h (01h UTC)`), the "última leitura" line and the hover
+  on a trade's close time. The timestamps in the API answer stay UTC-aware ISO —
+  only the grouping and the labels are BR (`BRT` in
+  `use_cases/compute_performance.py`, `BR_TZ` in `frontend/lib/performance.ts`).
+- **Honest caveats:** trades still open are not in the report — there is nothing
+  to score yet. The Profit report's **MEP / MEN** (best and worst point reached inside a
   trade) and "máximo de contratos" have no equivalent here: the broker's deal
   history does not keep the price path inside a trade.
 

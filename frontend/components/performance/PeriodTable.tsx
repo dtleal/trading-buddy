@@ -34,7 +34,9 @@ export function PeriodTable({ report }: { report: PerformanceReport }) {
         <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <CardTitle>Resultado por período</CardTitle>
-            <CardDescription>fechamentos em UTC · mais recente primeiro</CardDescription>
+            <CardDescription>
+              dia/semana/mês no horário de Brasília · mais recente primeiro
+            </CardDescription>
           </div>
           <div className="flex gap-1">
             {TABS.map((tab) => (

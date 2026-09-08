@@ -14,7 +14,13 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { chartColors, useTheme } from "@/lib/theme";
-import { fmtMoney, fmtPercent, fmtSigned, fmtSignedPercent } from "@/lib/performance";
+import {
+  brOffsetSeconds,
+  fmtMoney,
+  fmtPercent,
+  fmtSigned,
+  fmtSignedPercent,
+} from "@/lib/performance";
 import type { EquityCurvePoint, PerformanceReport } from "@/lib/types";
 
 const UP_LINE = "#10b981"; // emerald — above the period's opening balance
@@ -31,6 +37,9 @@ const DD_LINE = "#f59e0b"; // amber — the drawdown curve
  * but it is never part of the result, so it is called out in the header.
  * Both charts read the same `equity_curve` the backend computes, so the KPI
  * cards and the shapes here can never disagree.
+ *
+ * The time axis is Brazil time: the chart library has no timezone of its own,
+ * so each timestamp is shifted by the BR offset before it is drawn.
  */
 export function EquityCurveChart({ report }: { report: PerformanceReport }) {
   const theme = useTheme();
@@ -143,7 +152,7 @@ export function EquityCurveChart({ report }: { report: PerformanceReport }) {
             <CardDescription>
               saldo da conta a cada operação fechada · verde acima do início,
               vermelho abaixo · depósito/saque entra como degrau, não como
-              resultado
+              resultado · eixo em horário de Brasília
             </CardDescription>
           </div>
           <div className="flex flex-wrap items-baseline gap-3">
@@ -219,6 +228,7 @@ function toLine(byTime: Map<number, number>): LineData[] {
     .map(([time, value]) => ({ time: time as UTCTimestamp, value }));
 }
 
+/** Timestamp in seconds, shifted so the axis prints Brazil time. */
 function sec(iso: string): number {
-  return Math.floor(new Date(iso).getTime() / 1000);
+  return Math.floor(new Date(iso).getTime() / 1000) + brOffsetSeconds(iso);
 }

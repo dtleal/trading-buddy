@@ -2,7 +2,13 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { fmtDateTime, fmtDuration, fmtSigned, netColor } from "@/lib/performance";
+import {
+  fmtDateTime,
+  fmtDateTimeBoth,
+  fmtDuration,
+  fmtSigned,
+  netColor,
+} from "@/lib/performance";
 import type { PerformanceReport } from "@/lib/types";
 import { cn, fmtPrice } from "@/lib/utils";
 
@@ -10,6 +16,8 @@ import { cn, fmtPrice } from "@/lib/utils";
  * Every closed trade of the selection, newest first: when it closed, the
  * asset, side, origin (hand-placed or the scalper bot), size, entry and exit
  * price, how long it was open and what it banked.
+ *
+ * Times are Brazil time; hovering the close time shows it in UTC too.
  */
 export function TradesTable({ report }: { report: PerformanceReport }) {
   const rows = report.trades;
@@ -19,7 +27,7 @@ export function TradesTable({ report }: { report: PerformanceReport }) {
       <CardHeader>
         <CardTitle>Operações</CardTitle>
         <CardDescription>
-          {report.summary.trades} fechadas no filtro
+          {report.summary.trades} fechadas no filtro · horários em Brasília
           {report.trades_returned < report.summary.trades &&
             ` · mostrando as ${report.trades_returned} mais recentes`}
         </CardDescription>
@@ -29,7 +37,7 @@ export function TradesTable({ report }: { report: PerformanceReport }) {
           <table className="w-full text-xs tabular-nums">
             <thead className="sticky top-0 bg-zinc-950/90 text-left text-[11px] uppercase tracking-wider text-zinc-500 backdrop-blur">
               <tr>
-                <th className="px-2 py-1.5 font-medium">Fechou</th>
+                <th className="px-2 py-1.5 font-medium">Fechou (BR)</th>
                 <th className="px-2 py-1.5 font-medium">Ativo</th>
                 <th className="px-2 py-1.5 font-medium">Lado</th>
                 <th className="px-2 py-1.5 font-medium">Origem</th>
@@ -44,7 +52,12 @@ export function TradesTable({ report }: { report: PerformanceReport }) {
             <tbody>
               {rows.map((trade) => (
                 <tr key={trade.id} className="border-t border-zinc-900">
-                  <td className="px-2 py-1.5 text-zinc-400">{fmtDateTime(trade.close_ts)}</td>
+                  <td
+                    className="px-2 py-1.5 text-zinc-400"
+                    title={`abriu ${fmtDateTimeBoth(trade.open_ts)} · fechou ${fmtDateTimeBoth(trade.close_ts)}`}
+                  >
+                    {fmtDateTime(trade.close_ts)}
+                  </td>
                   <td className="px-2 py-1.5 text-zinc-200">{trade.symbol}</td>
                   <td className="px-2 py-1.5">
                     <span
