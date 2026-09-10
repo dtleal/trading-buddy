@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import {
   createChart,
   ColorType,
@@ -10,22 +10,9 @@ import {
   type ISeriesApi,
   type LineData,
   type UTCTimestamp,
-  type WhitespaceData,
 } from "lightweight-charts";
-import { Crosshair, Route } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { computeBandProjection, type BandPoint } from "@/lib/bollinger";
-import {
-  gradedWindows,
-  loadHistory,
-  saveHistory,
-  scoreForecast,
-  scoreRoute,
-  updateHistory,
-  type BandForecast,
-  type ForecastScore,
-  type RouteScore,
-} from "@/lib/bandForecast";
+import { computeBands, type BandPoint } from "@/lib/bollinger";
 import { ZonesPrimitive } from "@/lib/chartZones";
 import { BandOddsBadges } from "./BandOddsBadges";
 import { PressureGauge } from "@/components/orderflow/PressureGauge";
@@ -42,15 +29,8 @@ const UP = "#10b981"; // emerald — up candles
 const DOWN = "#ef4444"; // red — down candles
 const BAND = "#60a5fa"; // blue-400 — upper/lower band
 const MID = "#f59e0b"; // amber-500 — SMA20
-const ROUTE = "#38bdf8"; // sky-400 — the measured route ahead
-const PAST = "#c084fc"; // purple-400 — the frozen bands being graded
-const PAST_ROUTE = "#e879f9"; // fuchsia-400 — the frozen price route being graded
 
-/** Bars ahead when there is no measured route to follow (6 × 5min = 30 min). */
-const FALLBACK_HORIZON = 6;
-/** Real bars kept in view (the rest stay scrollable to the left). Kept tight on
- * purpose: with the graded windows covering the last ~20 candles, packing more
- * bars in only makes the lines overlap. */
+/** Real bars kept in view; the rest stay scrollable to the left. */
 const VISIBLE_BARS = 40;
 
 /** How far past the visible candles a zone may sit and still be drawn, as a
@@ -61,29 +41,18 @@ const VISIBLE_BARS = 40;
 const ZONE_REACH = 0.5;
 
 /**
- * One symbol's 5m candles with standard Bollinger (20, 2), the route price
- * usually took from here, and the bands' continuation under that same route.
- *
- * The route (sky, dashed) comes from the backend: every past bar where price
- * sat at this same spot inside the band, and what happened next. No measured
- * route (thin sample / cold start) → the bands fall back to a drift
- * extrapolation and no route is drawn.
- *
- * The last projection is also FROZEN (purple) and left pinned to its own
- * timestamps while the real candles fill in over it, so the forecast can be
- * compared with the bands that actually formed. The badge grades it.
+ * One symbol's 5m candles with standard Bollinger (20, 2) and the price zones
+ * shaded behind them. Nothing else on purpose: the chart is read for where
+ * price sits inside the bands and which region it is walking into.
  */
 export function BandProjectionChart({
   title,
-  symbol,
   bars,
   scenario,
   flow,
   zones,
 }: {
   title: string;
-  /** Stable key for the frozen forecast kept in localStorage. */
-  symbol: string;
   bars: IntradayBar[];
   scenario?: BandScenario;
   flow?: OrderFlowSnapshot;
@@ -97,12 +66,6 @@ export function BandProjectionChart({
   const linesRef = useRef<ISeriesApi<"Line">[]>([]);
   const zonesRef = useRef<ZonesPrimitive | null>(null);
   const lastBarTimeRef = useRef<number | null>(null);
-  // undefined = not read from storage yet.
-  const historyRef = useRef<BandForecast[] | undefined>(undefined);
-  const [score, setScore] = useState<ForecastScore | null>(null);
-  const [routeScore, setRouteScore] = useState<RouteScore | null>(null);
-  const scoreKeyRef = useRef<string>("");
-  const historySigRef = useRef<string>("");
 
   // Init chart once
   useEffect(() => {
@@ -129,29 +92,17 @@ export function BandProjectionChart({
       wickDownColor: DOWN,
       borderVisible: false,
     });
-    const line = (color: string, style: LineStyle, width: 1 | 2 = 1) =>
+    const line = (color: string) =>
       chart.addLineSeries({
         color,
-        lineWidth: width,
-        lineStyle: style,
+        lineWidth: 1,
+        lineStyle: LineStyle.Solid,
         priceLineVisible: false,
         lastValueVisible: false,
         crosshairMarkerVisible: false,
       });
     // Order matches the datasets pushed below.
-    linesRef.current = [
-      line(BAND, LineStyle.Solid),
-      line(MID, LineStyle.Solid),
-      line(BAND, LineStyle.Solid),
-      line(BAND, LineStyle.Dashed),
-      line(MID, LineStyle.Dashed),
-      line(BAND, LineStyle.Dashed),
-      line(ROUTE, LineStyle.Dashed, 2),
-      line(PAST, LineStyle.Dashed, 2),
-      line(PAST, LineStyle.Dotted),
-      line(PAST, LineStyle.Dashed, 2),
-      line(PAST_ROUTE, LineStyle.Solid, 2),
-    ];
+    linesRef.current = [line(BAND), line(MID), line(BAND)];
     // Shaded buy/sell zones, drawn under the candles.
     const zonePrimitive = new ZonesPrimitive();
     candles.attachPrimitive(zonePrimitive);
@@ -179,7 +130,7 @@ export function BandProjectionChart({
     });
   }, [theme]);
 
-  // Push the polled bars + recompute bands / route
+  // Push the polled bars + recompute the bands
   useEffect(() => {
     if (!candlesRef.current || bars.length === 0) return;
     const candleData: CandlestickData[] = bars.map((b) => ({
@@ -191,101 +142,21 @@ export function BandProjectionChart({
     }));
     candlesRef.current.setData(candleData);
 
+    const bands = computeBands(bars.map((b) => ({ time: sec(b.timestamp), close: b.close })));
+    const datasets = [bands.upper, bands.mid, bands.lower];
+    linesRef.current.forEach((s, i) => s.setData(toLineData(datasets[i])));
+
+    // Frame the last hours — but only when a NEW bar lands, so the 5s
+    // forming-bar refresh doesn't fight the user's own zoom/scroll.
     const lastTime = candleData[candleData.length - 1].time as number;
-    const lastClose = bars[bars.length - 1].close;
-    const route = scenario?.path ?? [];
-    const proj = computeBandProjection(
-      bars.map((b) => ({ time: sec(b.timestamp), close: b.close })),
-      {
-        horizon: FALLBACK_HORIZON,
-        futureCloses: route.length ? route.map((p) => p.median) : undefined,
-      },
-    );
-    // The route starts at the last real bar so it continues the price instead
-    // of floating detached from it.
-    const stepTime = (step: number) => lastTime + step * 300;
-    const routeLine = (pick: (p: BandScenario["path"][number]) => number) =>
-      route.length
-        ? [
-            { time: lastTime, value: lastClose },
-            ...route.map((p) => ({ time: stepTime(p.step), value: pick(p) })),
-          ]
-        : [];
-    // One snapshot per bar; draw the one that has fully played out, so the
-    // purple always shows a COMPLETE forecast against the candles that
-    // followed and slides forward a bar at a time instead of blanking out.
-    // Cold start (no snapshot old enough yet) → rebuild it from the trend.
-    const closes = bars.map((b) => ({ time: sec(b.timestamp), close: b.close }));
-    if (historyRef.current === undefined) historyRef.current = loadHistory(symbol);
-    const history = updateHistory(
-      historyRef.current,
-      proj,
-      closes,
-      routeLine((p) => p.median),
-    );
-    historyRef.current = history;
-    // Written once per bar, not on every 5s poll.
-    const sig = `${history.length}:${history[history.length - 1]?.anchor ?? 0}`;
-    if (sig !== historySigRef.current) {
-      historySigRef.current = sig;
-      saveHistory(symbol, history);
-    }
-    // Oldest first; the newest is the one the badge grades.
-    const windows = gradedWindows(history, closes);
-    const locked = windows[windows.length - 1] ?? null;
-    // Only push it to state when it really changed — this effect runs on every
-    // 5s poll and a fresh object would re-render the card for nothing.
-    const next = locked ? scoreForecast(locked, proj, closes) : null;
-    const nextRoute = locked ? scoreRoute(locked, closes) : null;
-    const key = JSON.stringify([next, nextRoute]);
-    if (key !== scoreKeyRef.current) {
-      scoreKeyRef.current = key;
-      setScore(next);
-      setRouteScore(nextRoute);
-    }
-    // Every window in one series, split by a blank bar between them so the
-    // segments read as separate forecasts instead of one wandering line.
-    const barIndex = new Map(closes.map((c, i) => [c.time, i]));
-    const pastLine = (pick: (f: BandForecast) => BandPoint[]) => {
-      const out: (LineData | WhitespaceData)[] = [];
-      for (const f of windows) {
-        if (out.length > 0) {
-          const i = barIndex.get(f.anchor);
-          if (i != null && i > 0) out.push({ time: closes[i - 1].time as UTCTimestamp });
-        }
-        for (const p of pick(f)) {
-          if (p.time <= lastTime) out.push({ time: p.time as UTCTimestamp, value: p.value });
-        }
-      }
-      return out.length >= 2 ? out : [];
-    };
-
-    const datasets: (LineData | WhitespaceData)[][] = [
-      toLineData(proj.upper),
-      toLineData(proj.mid),
-      toLineData(proj.lower),
-      toLineData(proj.projUpper),
-      toLineData(proj.projMid),
-      toLineData(proj.projLower),
-      toLineData(routeLine((p) => p.median)),
-      pastLine((f) => f.upper),
-      pastLine((f) => f.mid),
-      pastLine((f) => f.lower),
-      pastLine((f) => f.route ?? []),
-    ];
-    linesRef.current.forEach((s, i) => s.setData(datasets[i]));
-
-    // Frame the last hours + the projection — but only when a NEW bar lands,
-    // so the 5s forming-bar refresh doesn't fight the user's own zoom/scroll.
     if (lastBarTimeRef.current !== lastTime) {
       lastBarTimeRef.current = lastTime;
-      const ahead = route.length || FALLBACK_HORIZON;
       chartRef.current?.timeScale().setVisibleLogicalRange({
         from: candleData.length - VISIBLE_BARS,
-        to: candleData.length + ahead + 1,
+        to: candleData.length + 1,
       });
     }
-  }, [bars, scenario, symbol]);
+  }, [bars]);
 
   // Zones near enough to matter for this chart's view. The rest are real
   // levels, just not ones today's candles are anywhere near.
@@ -311,8 +182,6 @@ export function BandProjectionChart({
           <div className="flex flex-wrap items-center gap-2">
             <CardTitle>{title}</CardTitle>
             <BandOddsBadges scenario={scenario} closes={bars.map((b) => b.close)} />
-            {score && <ForecastScoreBadge score={score} />}
-            {routeScore && <RouteScoreBadge score={routeScore} />}
           </div>
           {/* Live buy/sell pressure — the tape's lean right now, next to the
               historical lean the badge carries. */}
@@ -338,64 +207,6 @@ export function BandProjectionChart({
         </div>
       </CardContent>
     </Card>
-  );
-}
-
-/** How the frozen (purple) forecast held up against the bands that actually
- * formed. The error is the typical gap between the two, measured in band
- * widths, so it means the same thing on GOLD and on US30: 10% = the forecast
- * line sat a tenth of a band width away from the real one. Green = it worked
- * out, amber = loose, red = it missed (or the middle band went the other way).
- */
-function ForecastScoreBadge({ score }: { score: ForecastScore }) {
-  const err = Math.round(score.errPct * 100);
-  const tone =
-    !score.dirOk || score.errPct > 0.35
-      ? "bg-red-500/15 text-red-400"
-      : score.errPct > 0.15
-        ? "bg-amber-500/15 text-amber-400"
-        : "bg-emerald-500/15 text-emerald-400";
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-semibold tabular-nums ${tone}`}
-      title={
-        `previsão roxa mais recente (feita ${score.total} candles atrás, ${score.bars} já julgados) ` +
-        `contra as bandas que se formaram: erro típico de ${err}% da largura da banda · ` +
-        `direção da média ${score.dirOk ? "certa" : "errada"} · ` +
-        `${score.outside} de ${score.bars} candles fecharam fora da previsão` +
-        (score.drift
-          ? " · esta foi reconstruída pela tendência do momento (a medida entra quando ela expirar)"
-          : "")
-      }
-    >
-      <Crosshair className="size-3.5" />
-      {`±${err}%`}
-    </span>
-  );
-}
-
-/** Did the frozen price route (fuchsia) point the right way. The route is the
- * TYPICAL path of past analogs, so the side it pointed to is the real claim —
- * that is what the tick/cross says. How far the closes ran from it lives in the
- * tooltip, in band widths. */
-function RouteScoreBadge({ score }: { score: RouteScore }) {
-  const err = Math.round(score.errPct * 100);
-  const tone = score.dirOk
-    ? "bg-emerald-500/15 text-emerald-400"
-    : "bg-red-500/15 text-red-400";
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-semibold ${tone}`}
-      title={
-        `caminho do preço previsto ${score.total} candles atrás (linha rosa no gráfico): ` +
-        `o preço foi pro lado ${score.dirOk ? "previsto" : "contrário"} · ` +
-        `distância típica do caminho: ${err}% da largura da banda ` +
-        `(${score.bars} de ${score.total} candles julgados)`
-      }
-    >
-      <Route className="size-3.5" />
-      {score.dirOk ? "caminho ✓" : "caminho ✗"}
-    </span>
   );
 }
 
