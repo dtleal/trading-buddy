@@ -38,6 +38,14 @@ import type {
 const FLOW_ASSETS = TRACKED_ASSETS;
 
 /**
+ * A symbol counts as live while its last snapshot landed less than this ago.
+ * Measured on the browser's monotonic clock (see `useOrderFlow`), so a wrong
+ * machine clock can no longer make live data look stale. The collector polls
+ * every 250ms, so 5s is ~20 missed pushes.
+ */
+const STALE_AFTER_MS = 5_000;
+
+/**
  * Blocos que ficam escondidos por padrão e só aparecem quando o botão do header
  * liga. A escolha fica salva no navegador (localStorage) com essas chaves.
  */
@@ -84,7 +92,7 @@ function ToggleButton({
  * a wide monitor gets the whole strip in a single row.
  */
 export function OrderFlowSection({ tick }: { tick: DashboardTick | null }) {
-  const { flows, status } = useOrderFlow();
+  const { flows, receivedAt, status } = useOrderFlow();
   // Mesmos números da aba Bandas (tocar a banda / voltar pra média), ao lado da
   // pressão do tape.
   const scenarios = useBandScenarios();
@@ -100,11 +108,11 @@ export function OrderFlowSection({ tick }: { tick: DashboardTick | null }) {
   const [showLotLimits, toggleLotLimits] = useSavedToggle("orderflow.showLotLimits");
   const { limits: lotLimits, setLimit, resetLimits } = useLotLimits();
 
-  // Ticking clock so per-symbol staleness is reactive without calling Date.now()
-  // during render.
+  // Ticking clock so per-symbol staleness is reactive without calling
+  // performance.now() during render. Same clock as `receivedAt`.
   const [now, setNow] = useState(0);
   useEffect(() => {
-    const tickNow = () => setNow(Date.now());
+    const tickNow = () => setNow(performance.now());
     const first = setTimeout(tickNow, 0);
     const id = setInterval(tickNow, 1_000);
     return () => {
@@ -115,10 +123,8 @@ export function OrderFlowSection({ tick }: { tick: DashboardTick | null }) {
 
   // Aggregate "is anything fresh?" for the header badge.
   const anyFresh = FLOW_ASSETS.some((a) => {
-    const f = flows[a.key];
-    if (!f) return false;
-    const asof = new Date(f.asof).getTime();
-    return now > 0 && now - asof <= 5_000;
+    const at = receivedAt[a.key];
+    return at != null && now > 0 && now - at <= STALE_AFTER_MS;
   });
 
   // Whichever symbol has a source string wins — in practice all symbols share
@@ -199,6 +205,7 @@ export function OrderFlowSection({ tick }: { tick: DashboardTick | null }) {
               label={a.label}
               symbol={a.key}
               flow={flows[a.key]}
+              receivedAt={receivedAt[a.key]}
               scenario={scenarios?.[a.key]}
               lotLimit={lotLimits[a.key]}
               now={now}
@@ -222,6 +229,7 @@ function SymbolColumn({
   label,
   symbol,
   flow,
+  receivedAt,
   scenario,
   lotLimit,
   now,
@@ -237,6 +245,7 @@ function SymbolColumn({
   label: string;
   symbol: AssetSymbol;
   flow: OrderFlowSnapshot | undefined;
+  receivedAt: number | undefined;
   scenario: BandScenario | undefined;
   lotLimit: number | undefined;
   now: number;
@@ -249,9 +258,8 @@ function SymbolColumn({
   onCloseSymbol: (symbol: string) => Promise<void>;
   onBreakevenSymbol: (symbol: string) => Promise<void>;
 }) {
-  const asof = flow?.asof ? new Date(flow.asof).getTime() : null;
-  const ageMs = asof != null && now > 0 ? now - asof : null;
-  const fresh = ageMs != null && ageMs <= 5_000;
+  const ageMs = receivedAt != null && now > 0 ? Math.round(now - receivedAt) : null;
+  const fresh = ageMs != null && ageMs <= STALE_AFTER_MS;
 
   return (
     <div className="flex min-w-0 flex-col gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-2">

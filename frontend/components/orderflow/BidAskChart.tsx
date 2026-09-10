@@ -29,10 +29,11 @@ type Pt = { bid: number; ask: number };
 export function BidAskChart({ flow, now }: { flow: OrderFlowSnapshot | undefined; now: number }) {
   const [points, setPoints] = useState<Pt[]>([]);
   const lastQuote = useRef<string>("");
-  // Wall-clock of the last actual quote change. State (not a ref) so the render
-  // can read it for the staleness check. We can't compare book.asof to the
-  // snapshot's asof — they come from different clocks (broker server time vs
-  // collector wall-clock) — so freshness is tracked from when a point lands.
+  // Monotonic (performance.now) time of the last actual quote change. State
+  // (not a ref) so the render can read it for the staleness check. We can't
+  // compare book.asof to the snapshot's asof — they come from different
+  // clocks (broker server time vs collector wall-clock) — so freshness is
+  // tracked from when a point lands, on the same clock `now` uses.
   const [lastChangeAt, setLastChangeAt] = useState(0);
 
   const bid = flow?.book?.bids?.[0]?.price ?? null;
@@ -43,7 +44,7 @@ export function BidAskChart({ flow, now }: { flow: OrderFlowSnapshot | undefined
     const key = `${bid}:${ask}`;
     if (key === lastQuote.current) return; // unchanged quote → no new tick
     lastQuote.current = key;
-    setLastChangeAt(Date.now());
+    setLastChangeAt(performance.now());
     setPoints((prev) => {
       const next = prev.length >= MAX_POINTS ? prev.slice(prev.length - MAX_POINTS + 1) : prev.slice();
       next.push({ bid, ask });
