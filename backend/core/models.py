@@ -966,6 +966,45 @@ class OrderFlowSnapshot(_Frozen):
 
 
 # -----------------------------------------------------------------------------
+# Price zones (repeated touches that held)
+# -----------------------------------------------------------------------------
+
+
+ZoneSide = Literal["buy", "sell"]
+ZoneKind = Literal["top", "bottom", "both"]
+
+
+class PriceZone(_Frozen):
+    """A price band the market turned at repeatedly and never closed through.
+
+    Built by `FindPriceZonesUseCase` from swing pivots on D1, M15 and M5:
+    pivots that sit within the same tolerance are one zone, and a zone is kept
+    only when at least `_MIN_TOUCHES` pivots landed in it on some timeframe.
+    `low`/`high` are the band's real edges (the extremes of its touches), so it
+    is a REGION, not a line.
+
+    `side` is where the zone sits relative to the current price — above =
+    "sell" (resistance ahead), below = "buy" (support below). `kind` says what
+    formed it: `top` = swing highs, `bottom` = swing lows, `both` = the level
+    held from both directions (the strongest kind). `timeframes` lists every
+    timeframe that produced touches, so agreement across them is visible.
+    `strength` is `score` normalised to 0-1 for drawing.
+    """
+
+    symbol: AssetSymbol
+    low: float
+    high: float
+    side: ZoneSide
+    kind: ZoneKind
+    touches: int  # total pivots in the zone, summed across timeframes
+    timeframes: list[str] = Field(default_factory=list)  # e.g. ["1d", "15m"]
+    score: float
+    strength: float  # 0-1, for the drawing's opacity
+    last_touch: datetime
+    distance_pct: float  # signed distance from the current price, in %
+
+
+# -----------------------------------------------------------------------------
 # VIX × price stance (5m correlation read)
 # -----------------------------------------------------------------------------
 

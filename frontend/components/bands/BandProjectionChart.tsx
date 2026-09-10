@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createChart,
   ColorType,
@@ -26,9 +26,16 @@ import {
   type ForecastScore,
   type RouteScore,
 } from "@/lib/bandForecast";
+import { ZonesPrimitive } from "@/lib/chartZones";
 import { BandOddsBadges } from "./BandOddsBadges";
 import { PressureGauge } from "@/components/orderflow/PressureGauge";
-import type { BandRegime, BandScenario, IntradayBar, OrderFlowSnapshot } from "@/lib/types";
+import type {
+  BandRegime,
+  BandScenario,
+  IntradayBar,
+  OrderFlowSnapshot,
+  PriceZone,
+} from "@/lib/types";
 import { chartColors, useTheme } from "@/lib/theme";
 
 const UP = "#10b981"; // emerald — up candles
@@ -45,6 +52,13 @@ const FALLBACK_HORIZON = 6;
  * purpose: with the graded windows covering the last ~20 candles, packing more
  * bars in only makes the lines overlap. */
 const VISIBLE_BARS = 40;
+
+/** How far past the visible candles a zone may sit and still be drawn, as a
+ * multiple of the visible high-low range. Scales itself: a quiet chart shows
+ * only the zones right there, a wide-range one reaches further. Zones beyond
+ * this would squash the candles into a sliver (the price scale stretches to
+ * fit them) for a level price cannot reach today anyway. */
+const ZONE_REACH = 0.5;
 
 /**
  * One symbol's 5m candles with standard Bollinger (20, 2), the route price
@@ -65,6 +79,7 @@ export function BandProjectionChart({
   bars,
   scenario,
   flow,
+  zones,
 }: {
   title: string;
   /** Stable key for the frozen forecast kept in localStorage. */
@@ -72,12 +87,15 @@ export function BandProjectionChart({
   bars: IntradayBar[];
   scenario?: BandScenario;
   flow?: OrderFlowSnapshot;
+  /** Price zones for this symbol; the near ones are shaded on the chart. */
+  zones?: PriceZone[];
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const theme = useTheme();
   const chartRef = useRef<IChartApi | null>(null);
   const candlesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const linesRef = useRef<ISeriesApi<"Line">[]>([]);
+  const zonesRef = useRef<ZonesPrimitive | null>(null);
   const lastBarTimeRef = useRef<number | null>(null);
   // undefined = not read from storage yet.
   const historyRef = useRef<BandForecast[] | undefined>(undefined);
@@ -134,6 +152,10 @@ export function BandProjectionChart({
       line(PAST, LineStyle.Dashed, 2),
       line(PAST_ROUTE, LineStyle.Solid, 2),
     ];
+    // Shaded buy/sell zones, drawn under the candles.
+    const zonePrimitive = new ZonesPrimitive();
+    candles.attachPrimitive(zonePrimitive);
+    zonesRef.current = zonePrimitive;
     chartRef.current = chart;
     candlesRef.current = candles;
     return () => {
@@ -141,6 +163,7 @@ export function BandProjectionChart({
       chartRef.current = null;
       candlesRef.current = null;
       linesRef.current = [];
+      zonesRef.current = null;
       lastBarTimeRef.current = null;
     };
   }, []);
@@ -263,6 +286,21 @@ export function BandProjectionChart({
       });
     }
   }, [bars, scenario, symbol]);
+
+  // Zones near enough to matter for this chart's view. The rest are real
+  // levels, just not ones today's candles are anywhere near.
+  const nearZones = useMemo(() => {
+    if (!zones?.length || bars.length === 0) return [];
+    const view = bars.slice(-VISIBLE_BARS);
+    const hi = Math.max(...view.map((b) => b.high));
+    const lo = Math.min(...view.map((b) => b.low));
+    const reach = (hi - lo) * ZONE_REACH;
+    return zones.filter((z) => z.low <= hi + reach && z.high >= lo - reach);
+  }, [zones, bars]);
+
+  useEffect(() => {
+    zonesRef.current?.setZones(nearZones);
+  }, [nearZones]);
 
   const last = bars.length > 0 ? bars[bars.length - 1].close : null;
 

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import type { BandScenariosBySymbol, CandlesBySymbol } from "@/lib/types";
+import type { BandScenariosBySymbol, CandlesBySymbol, ZonesBySymbol } from "@/lib/types";
 
 /**
  * Polls the per-symbol M5 candle history. The collector pushes it every ~5s,
@@ -60,4 +60,31 @@ export function useBandScenarios(): BandScenariosBySymbol | null {
   }, [refresh]);
 
   return scenarios;
+}
+
+/** Price zones move over days, not seconds — the backend rescans them from the
+ * stored bars on every call, so there is no point polling them fast. */
+const ZONES_POLL_MS = 60_000;
+
+export function useZones(): ZonesBySymbol | null {
+  const [zones, setZones] = useState<ZonesBySymbol | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      setZones(await api.getZones());
+    } catch {
+      /* transient; next poll retries */
+    }
+  }, []);
+
+  useEffect(() => {
+    const first = setTimeout(refresh, 0);
+    const id = setInterval(refresh, ZONES_POLL_MS);
+    return () => {
+      clearTimeout(first);
+      clearInterval(id);
+    };
+  }, [refresh]);
+
+  return zones;
 }

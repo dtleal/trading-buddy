@@ -148,6 +148,30 @@ export type BandScenario = z.infer<typeof BandScenario>;
 export const BandScenariosBySymbol = z.record(AssetSymbol, BandScenario);
 export type BandScenariosBySymbol = z.infer<typeof BandScenariosBySymbol>;
 
+/** GET /api/orderflow/zones — a price band the market turned at 3+ times and
+ * never closed through, found on the daily, 15m and 5m bars at once.
+ * `low`/`high` are the real edges of the touches (it is a region, not a line);
+ * `side` is where it sits versus the current price; `kind` is what formed it
+ * (`top` = swing highs, `bottom` = swing lows, `both` = held from both sides);
+ * `strength` is 0-1 for the drawing. */
+export const PriceZone = z.object({
+  symbol: AssetSymbol,
+  low: z.number(),
+  high: z.number(),
+  side: z.enum(["buy", "sell"]),
+  kind: z.enum(["top", "bottom", "both"]),
+  touches: z.number(),
+  timeframes: z.array(z.string()).default([]),
+  score: z.number(),
+  strength: z.number(),
+  last_touch: z.string(),
+  distance_pct: z.number(),
+});
+export type PriceZone = z.infer<typeof PriceZone>;
+
+export const ZonesBySymbol = z.record(AssetSymbol, z.array(PriceZone));
+export type ZonesBySymbol = z.infer<typeof ZonesBySymbol>;
+
 export const EconomicEvent = z.object({
   name: z.string(),
   currency: z.string(),

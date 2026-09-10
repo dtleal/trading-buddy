@@ -1193,21 +1193,36 @@ def _read_session_liquidity(
     return msg
 
 
-def _read_candles(backend: str, broker: str, count: int) -> dict[str, Any] | None:
-    """Last `count` M5 bars (newest last; the final bar is still forming).
+def _read_candles(
+    backend: str, broker: str, count: int, *, daily: bool = False
+) -> dict[str, Any] | None:
+    """Last `count` bars (newest last; the final bar is still forming).
 
-    Bar times are converted from the broker's server clock to true UTC with
+    M5 by default — the Bollinger-projection tab. With `daily=True` it reads D1
+    bars instead and sends them as `candles_d1`, which the backend keeps in its
+    own store (the price-zone read needs months of daily swings, far more
+    history than the intraday store holds).
+
+    M5 bar times are converted from the broker's server clock to true UTC with
     the shared `_server_offset_ms`, so the backend can line them up with every
-    other UTC timestamp it holds. Feeds the Bollinger-projection tab.
+    other UTC timestamp it holds. DAILY bars keep the broker's own date: a D1
+    bar opens at midnight server time and shifting it by the offset would move
+    it into the previous day, which is exactly the day label a daily bar is.
     """
     if mt5 is None:
         return None
-    rates = mt5.copy_rates_from_pos(broker, mt5.TIMEFRAME_M5, 0, count)
+    timeframe = mt5.TIMEFRAME_D1 if daily else mt5.TIMEFRAME_M5
+    rates = mt5.copy_rates_from_pos(broker, timeframe, 0, count)
     if rates is None or len(rates) == 0:
         return None
+    stamp = (
+        (lambda ms: datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc).isoformat())
+        if daily
+        else _server_ms_to_utc_iso
+    )
     bars = [
         {
-            "ts": _server_ms_to_utc_iso(int(r["time"]) * 1000),
+            "ts": stamp(int(r["time"]) * 1000),
             "o": float(r["open"]),
             "h": float(r["high"]),
             "l": float(r["low"]),
@@ -1216,7 +1231,12 @@ def _read_candles(backend: str, broker: str, count: int) -> dict[str, Any] | Non
         }
         for r in rates
     ]
-    return {"type": "candles", "symbol": backend, "asof": _now_iso(), "bars": bars}
+    return {
+        "type": "candles_d1" if daily else "candles",
+        "symbol": backend,
+        "asof": _now_iso(),
+        "bars": bars,
+    }
 
 
 def _quantize(price: float, tick: float | None) -> float:
@@ -1564,6 +1584,12 @@ def run(cfg: dict[str, Any]) -> None:
     hist_period = float(cfg.get("candles_history_seconds", 600))
     hist_bars = int(cfg.get("candles_history_bars", 1500))
     next_hist_at = 0.0
+    # Daily bars for the price-zone read (levels touched 3+ times on the daily).
+    # Very slow cadence — a daily bar only changes its high/low as the session
+    # runs, and the zones it produces move over weeks, not minutes.
+    d1_period = float(cfg.get("candles_daily_seconds", 900))
+    d1_bars = int(cfg.get("candles_daily_bars", 260))
+    next_d1_at = 0.0
     # Account P&L (day/week/month) cadence. `next_pnl_at = 0` forces a first read
     # so the top-of-screen cards populate as soon as the stream is up.
     next_pnl_at = 0.0
@@ -1637,6 +1663,7 @@ def run(cfg: dict[str, Any]) -> None:
                 next_pos_at = 0.0
                 # The backend may have restarted and lost its candle history.
                 next_hist_at = 0.0
+                next_d1_at = 0.0
                 next_trades_at = 0.0
             # Keep the socket alive by replying to server pings before polling,
             # and handle any control command (close_all / close_symbol / open).
@@ -1734,6 +1761,18 @@ def run(cfg: dict[str, Any]) -> None:
                         hist = None
                     if hist:
                         ws.send(json.dumps(hist))
+            # Push daily bars (price zones). Slowest candle cadence of the
+            # three: the zones are levels from months of daily swings.
+            if d1_period > 0 and d1_bars > 0 and now_mono >= next_d1_at:
+                next_d1_at = now_mono + d1_period
+                for m in cfg["symbols"]:
+                    try:
+                        daily = _read_candles(m["backend"], m["mt5"], d1_bars, daily=True)
+                    except Exception as exc:  # never let the daily read break the stream
+                        logger.debug("daily candles read failed for %s: %s", m["mt5"], exc)
+                        daily = None
+                    if daily:
+                        ws.send(json.dumps(daily))
             # Push realized account P&L (day/week/month). Own slow cadence — it
             # only moves when a trade closes, and the read scans the whole month.
             if now_mono >= next_pnl_at:

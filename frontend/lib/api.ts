@@ -16,6 +16,7 @@ import {
   QAEntryInput,
   QAEntryList,
   VixHistoryResponse,
+  ZonesBySymbol,
 } from "@/lib/types";
 
 /**
@@ -114,6 +115,7 @@ export const api = {
   getCandles: () => fetchJson("/api/orderflow/candles", CandlesBySymbol),
   getBandScenarios: () =>
     fetchJson("/api/orderflow/bands", BandScenariosBySymbol),
+  getZones: () => fetchJson("/api/orderflow/zones", ZonesBySymbol),
   getAccountPnl: () => fetchJson("/api/orderflow/pnl", AccountPnl),
   getBalanceHistory: () =>
     fetchJson("/api/orderflow/balance/history", AccountBalanceHistory),

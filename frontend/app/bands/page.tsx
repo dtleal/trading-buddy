@@ -2,13 +2,15 @@
 
 import { Header } from "@/components/shared/Header";
 import { BandProjectionChart } from "@/components/bands/BandProjectionChart";
-import { useBandScenarios, useCandles } from "@/hooks/useCandles";
+import { useBandScenarios, useCandles, useZones } from "@/hooks/useCandles";
 import { useOrderFlow } from "@/hooks/useOrderFlow";
 import { TRACKED_ASSETS } from "@/lib/types";
 
 export default function BandsPage() {
   const candles = useCandles();
   const scenarios = useBandScenarios();
+  // Regiões de compra/venda (toques repetidos que não romperam).
+  const zones = useZones();
   // Live buy/sell pressure, same feed the Dashboard reads.
   const { flows } = useOrderFlow();
 
@@ -32,7 +34,14 @@ export default function BandsPage() {
           previsto nesses mesmos trechos. Os selos{" "}
           <span className="text-purple-400">±%</span> e{" "}
           <span className="text-fuchsia-400">caminho ✓/✗</span> dão a nota do
-          trecho mais recente (passe o mouse).
+          trecho mais recente (passe o mouse). As faixas{" "}
+          <span className="text-red-400">vermelhas</span> e{" "}
+          <span className="text-emerald-400">verdes</span> são as{" "}
+          <span className="text-zinc-300">regiões</span>: preços onde o mercado
+          virou 3 vezes ou mais e nunca fechou do outro lado, procurados no
+          diário, no 15m e no 5m ao mesmo tempo. O selo na faixa diz quantos
+          toques e em quais tempos — quanto mais forte, mais escura. Vermelha
+          acima do preço = zona de venda, verde abaixo = zona de compra.
         </p>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {TRACKED_ASSETS.map(({ key, label }) => (
@@ -43,6 +52,7 @@ export default function BandsPage() {
               bars={candles?.[key] ?? []}
               scenario={scenarios?.[key]}
               flow={flows[key]}
+              zones={zones?.[key]}
             />
           ))}
         </div>

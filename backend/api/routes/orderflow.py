@@ -45,12 +45,14 @@ from core.models import (
     IntradayBar,
     OrderFlowSnapshot,
     Position,
+    PriceZone,
     SessionLiquidity,
 )
 from settings import get_settings
 from use_cases.aggregate_orderflow import OrderFlowAggregator
 from use_cases.assess_trade_signals import assess_trade_signals
 from use_cases.autoclose import should_autoclose
+from use_cases.find_price_zones import FindPriceZonesUseCase
 from use_cases.orderflow_wire import (
     parse_book,
     parse_dt,
@@ -83,6 +85,9 @@ from use_cases.trade_signal import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["orderflow"])
+
+# Stateless — one instance is enough for every symbol.
+_price_zones = FindPriceZonesUseCase()
 
 
 def _build_aggregator() -> OrderFlowAggregator:
@@ -138,22 +143,39 @@ _candles_store: dict[AssetSymbol, list[IntradayBar]] = {}
 # scenario's analog search.
 _MAX_CANDLES = 2000
 
+# Daily bars per symbol, pushed by the collector on its own slow cadence. Kept
+# apart from the M5 store because the price-zone read needs MONTHS of daily
+# swings, which no intraday store can hold. Merged by bar timestamp the same
+# way, so today's still-forming bar is overwritten, not appended.
+_candles_d1_store: dict[AssetSymbol, list[IntradayBar]] = {}
+
+# ~2 years of sessions. Cheap (one bar a day) and more than the zone read uses.
+_MAX_CANDLES_D1 = 500
+
 # Bars the chart itself draws — the default slice served to the UI, so the deep
 # history never has to travel over the wire.
 _CHART_CANDLES = 120
 
 
-def _merge_candles(symbol: AssetSymbol, incoming: list[IntradayBar]) -> None:
+def _merge_candles(
+    symbol: AssetSymbol,
+    incoming: list[IntradayBar],
+    *,
+    store: dict[AssetSymbol, list[IntradayBar]] | None = None,
+    cap: int = _MAX_CANDLES,
+) -> None:
     """Fold a candle push into the stored history, newest last.
 
     Keyed by bar timestamp so the still-forming last bar is overwritten on
     every push (not appended twice) and a deep backfill slots in behind the
-    bars already held.
+    bars already held. `store`/`cap` pick which history is being folded into —
+    the M5 one by default, the daily one for `candles_d1` pushes.
     """
-    merged = {bar.timestamp: bar for bar in _candles_store.get(symbol, ())}
+    target = _candles_store if store is None else store
+    merged = {bar.timestamp: bar for bar in target.get(symbol, ())}
     merged.update({bar.timestamp: bar for bar in incoming})
     ordered = [merged[ts] for ts in sorted(merged)]
-    _candles_store[symbol] = ordered[-_MAX_CANDLES:]
+    target[symbol] = ordered[-cap:]
 
 
 def latest_liquidity() -> dict[AssetSymbol, SessionLiquidity]:
@@ -874,20 +896,11 @@ async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
         # M5 bars for the symbol, merged into the stored history. A malformed
         # bar raises and the ingest loop skips the whole message (so a bad push
         # can never half-write the history).
-        _merge_candles(
-            symbol,
-            [
-                IntradayBar(
-                    timestamp=_parse_dt(raw["ts"]),
-                    open=float(raw["o"]),
-                    high=float(raw["h"]),
-                    low=float(raw["l"]),
-                    close=float(raw["c"]),
-                    volume=float(raw.get("v", 0.0) or 0.0),
-                )
-                for raw in msg.get("bars", ())
-            ],
-        )
+        _merge_candles(symbol, _parse_bars(msg))
+        return set()
+    if mtype == "candles_d1":
+        # Daily bars, same merge into their own store. Feeds the price zones.
+        _merge_candles(symbol, _parse_bars(msg), store=_candles_d1_store, cap=_MAX_CANDLES_D1)
         return set()
     if mtype == "positions":
         # Open positions for this symbol (read-only). An empty list is a valid,
@@ -898,6 +911,21 @@ async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
         return {symbol}
     logger.debug("Ignoring unknown order-flow message type: %r", mtype)
     return set()
+
+
+def _parse_bars(msg: dict) -> list[IntradayBar]:
+    """The `bars` array of a candle push, wire keys → `IntradayBar`."""
+    return [
+        IntradayBar(
+            timestamp=_parse_dt(raw["ts"]),
+            open=float(raw["o"]),
+            high=float(raw["h"]),
+            low=float(raw["l"]),
+            close=float(raw["c"]),
+            volume=float(raw.get("v", 0.0) or 0.0),
+        )
+        for raw in msg.get("bars", ())
+    ]
 
 
 def _stamp_snapshot(snapshot: "OrderFlowSnapshot") -> "OrderFlowSnapshot":
@@ -1100,6 +1128,27 @@ async def get_band_scenarios() -> dict[AssetSymbol, BandScenario]:
         if scenario is not None:
             scenarios[symbol] = scenario
     return scenarios
+
+
+@router.get(
+    "/api/orderflow/zones",
+    response_model=dict[AssetSymbol, list[PriceZone]],
+    tags=["orderflow"],
+)
+async def get_price_zones() -> dict[AssetSymbol, list[PriceZone]]:
+    """Price zones per symbol: bands the market turned at 3+ times without
+    closing through, from the daily, 15m and 5m bars at once.
+
+    Computed here rather than in the browser because the deep M5 history and
+    the daily bars both live server side — the UI only draws the rectangles.
+    Symbols without enough bars are absent.
+    """
+    zones: dict[AssetSymbol, list[PriceZone]] = {}
+    for symbol, bars in _candles_store.items():
+        found = _price_zones.execute(symbol, bars, _candles_d1_store.get(symbol, []))
+        if found:
+            zones[symbol] = found
+    return zones
 
 
 @router.get("/api/orderflow/autoclose", response_model=AutoCloseStatus, tags=["orderflow"])
