@@ -38,7 +38,7 @@ const VISIBLE_BARS = 40;
  * only the zones right there, a wide-range one reaches further. Zones beyond
  * this would squash the candles into a sliver (the price scale stretches to
  * fit them) for a level price cannot reach today anyway. */
-const ZONE_REACH = 0.5;
+const ZONE_REACH = 1.0;
 
 /**
  * One symbol's 5m candles with standard Bollinger (20, 2) and the price zones

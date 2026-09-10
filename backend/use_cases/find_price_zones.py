@@ -86,6 +86,15 @@ _TF_WEIGHT: dict[str, float] = {"1d": 3.0, "15m": 1.5, "5m": 1.0}
 # for the drawing). Three daily touches alone (9.0) is already very strong.
 _FULL_SCORE = 12.0
 
+# M5 bars in a trading day, used as the yardstick for how far away a zone can
+# still matter (see `_MAX_REACH_DAYS`). 24h of 5-minute bars.
+_BARS_PER_DAY = 288
+
+# How far from the price a zone may sit, in days of trading range. 1.5 keeps
+# everything price could plausibly reach in a session or two and drops the
+# levels from months ago that sit 10% away.
+_MAX_REACH_DAYS = 1.5
+
 # Zones returned per symbol on each side of price. More than this is noise on
 # a chart and the trader stops reading any of them.
 _MAX_PER_SIDE = 4
@@ -317,16 +326,26 @@ class FindPriceZonesUseCase:
         if not clusters or not m5:
             return []
 
-        # Merge tolerance comes from the DAILY range when we have it: on the
-        # daily scale a 5m level 2 points away from a daily shelf is the same
-        # shelf. Falling back to the M5 ATR (no daily feed yet) just means
-        # zones merge less eagerly.
-        tol = _TOL_ATR * (_atr(d1) if len(d1) > _ATR_BARS else _atr(m5))
+        # Merge slack is sized on the M5 bars — the SMALLEST scale in play — on
+        # purpose. Sizing it on the daily ATR (which is tens of times bigger)
+        # let neighbouring intraday levels chain into one band hundreds of
+        # points wide. A wide daily shelf still absorbs the intraday levels
+        # inside it, because that is an overlap, not a gap.
+        tol = _TOL_ATR * _atr(m5)
         price = m5[-1].close
+
+        # A level further than this from the price is real but out of reach
+        # today, and keeping it would spend one of the few slots per side on a
+        # band the chart never draws. Measured against the last day of trading
+        # range, so it scales itself per asset.
+        day = m5[-_BARS_PER_DAY:]
+        reach = _MAX_REACH_DAYS * (max(b.high for b in day) - min(b.low for b in day))
 
         zones: list[PriceZone] = []
         for zone in _merge_zones(clusters, tol):
             mid = (zone.low + zone.high) / 2
+            if reach > 0 and abs(mid - price) > reach:
+                continue
             zones.append(
                 PriceZone(
                     symbol=symbol,
