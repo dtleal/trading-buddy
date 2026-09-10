@@ -34,6 +34,7 @@ from core.enums import AssetSymbol
 from core.models import (
     AccountBalanceHistory,
     AccountPnl,
+    AutoBreakevenStatus,
     AutoCloseStatus,
     BalanceStep,
     BandScenario,
@@ -51,6 +52,7 @@ from core.models import (
 from settings import get_settings
 from use_cases.aggregate_orderflow import OrderFlowAggregator
 from use_cases.assess_trade_signals import assess_trade_signals
+from use_cases.auto_breakeven import protected_count, tickets_to_protect
 from use_cases.autoclose import should_autoclose
 from use_cases.find_price_zones import FindPriceZonesUseCase
 from use_cases.orderflow_wire import (
@@ -360,6 +362,95 @@ async def _maybe_autoclose() -> None:
         _autoclose.last_result = f"disparo: P&L {profit:.2f} >= alvo {target:.2f} — fechando tudo"
     logger.info("Auto-close firing: %s", _autoclose.last_result)
     await _send_to_collector({"type": "close_all", "reason": _autoclose.last_result})
+
+
+# --- per-position auto-breakeven --------------------------------------------
+
+
+class _BreakevenState:
+    """Mutable per-position auto-breakeven state. One per process.
+
+    Unlike the account auto-close this rule never disarms itself: it has to keep
+    protecting each new position as it crosses the threshold. `asked` remembers
+    the tickets already sent to the collector so the same position is not asked
+    again on every message while the SL change is in flight — the collector
+    reports the new SL on its next position push, and from then on the position
+    is filtered out by `at_breakeven_or_better`.
+    """
+
+    def __init__(self) -> None:
+        self.enabled: bool = False  # collector permits execution (allow_auto_close)
+        self.armed: bool = False
+        self.threshold_usd: float | None = None
+        self.asked: dict[int, float] = {}  # ticket → monotonic time of last request
+        self.last_fired_at: datetime | None = None
+        self.last_result: str | None = None
+
+
+# How long before the same ticket may be asked again. Long enough for the SL
+# change to round-trip through the collector's next position push, short enough
+# that a rejected modification (off-quotes, market moving) is retried.
+_BREAKEVEN_RETRY_S = 10.0
+
+_breakeven = _BreakevenState()
+# Default threshold from settings (0 = the rule stays off until armed in the
+# UI). Arming happens on the collector's `hello`, once its execution capability
+# is known — arming before that could only end in "abortado".
+_breakeven.threshold_usd = get_settings().orderflow_breakeven_default_usd or None
+
+
+def _open_positions() -> list[Position]:
+    """Every open position across all tracked symbols."""
+    return [p for ps in _positions_store.values() for p in ps]
+
+
+def _breakeven_status() -> AutoBreakevenStatus:
+    positions = _open_positions()
+    return AutoBreakevenStatus(
+        enabled=_breakeven.enabled,
+        armed=_breakeven.armed,
+        threshold_usd=_breakeven.threshold_usd,
+        open_positions=len(positions),
+        protected=protected_count(positions),
+        last_fired_at=_breakeven.last_fired_at,
+        last_result=_breakeven.last_result,
+    )
+
+
+async def _maybe_breakeven() -> None:
+    """Move to breakeven every position that just crossed the threshold."""
+    if not _breakeven.armed:
+        return
+    positions = _open_positions()
+    tickets = tickets_to_protect(positions, _breakeven.threshold_usd, _breakeven.armed)
+    now = time.monotonic()
+    # Forget tickets that are gone (position closed), so the map can't grow.
+    live = {p.ticket for p in positions}
+    _breakeven.asked = {t: at for t, at in _breakeven.asked.items() if t in live}
+    due = [
+        t
+        for t in tickets
+        if now - _breakeven.asked.get(t, -_BREAKEVEN_RETRY_S) >= _BREAKEVEN_RETRY_S
+    ]
+    if not due:
+        return
+    threshold = _breakeven.threshold_usd
+    if not _breakeven.enabled:
+        # Armed but the collector can't execute (reconnected without the flag).
+        _breakeven.armed = False
+        _breakeven.last_result = "abortado: collector sem allow_auto_close"
+        logger.warning("Breakeven threshold hit but collector cannot execute")
+        return
+    for ticket in due:
+        _breakeven.asked[ticket] = now
+    _breakeven.last_fired_at = datetime.now(timezone.utc)
+    _breakeven.last_result = (
+        f"stop no zero a zero: {len(due)} posição(ões) passaram de ${threshold:.2f}"
+    )
+    logger.info("Auto-breakeven firing for tickets %s (>= %.2f)", due, threshold)
+    await _send_to_collector(
+        {"type": "breakeven_tickets", "tickets": due, "reason": _breakeven.last_result}
+    )
 
 
 # --- explosion-scalper bot (opens AND closes; demo only) ---------------------
@@ -696,6 +787,18 @@ async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
             _autoclose.cooling = False
             _autoclose.last_result = f"auto-armado: alvo {_autoclose.target_usd:.2f}"
             logger.info("Auto-close auto-armed at %.2f", _autoclose.target_usd)
+        # The per-position breakeven rides the same close capability (an SL
+        # change is an order_send too) and re-arms on connect while a threshold
+        # is configured, so it survives backend restarts / UI refreshes.
+        _breakeven.enabled = _autoclose.enabled
+        _breakeven.asked.clear()  # new collector session: no request is in flight
+        if not _breakeven.enabled and _breakeven.armed:
+            _breakeven.armed = False
+            _breakeven.last_result = "desarmado: collector reconectou sem allow_auto_close"
+        elif _breakeven.enabled and not _breakeven.armed and _breakeven.threshold_usd:
+            _breakeven.armed = True
+            _breakeven.last_result = f"auto-armado: zero a zero em ${_breakeven.threshold_usd:.2f}"
+            logger.info("Auto-breakeven auto-armed at %.2f", _breakeven.threshold_usd)
         # Scalper bot needs to BOTH open and close, on a demo account: it requires
         # auto-trade AND auto-close capability (else it could open and never be
         # able to exit — the −loss_stop guard would be unable to close).
@@ -858,16 +961,27 @@ async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
 
     if mtype == "breakeven_result":
         # The collector reporting the outcome of a breakeven SL modification.
+        # `auto` marks the ones the per-position rule asked for, so the manual
+        # per-symbol button and the automatic rule report in their own panels.
         ok = bool(msg.get("ok"))
         moved = msg.get("moved")
         skipped = msg.get("skipped")
         err = msg.get("error") or msg.get("errors")
         if ok:
-            _autoclose.last_result = f"breakeven: {moved} movida(s)" + (
+            text = f"stop no zero a zero: {moved} movida(s)" + (
                 f", {skipped} sem lucro ainda" if skipped else ""
             )
         else:
-            _autoclose.last_result = f"falha no breakeven: {err}"
+            text = f"falha no breakeven: {err}"
+        if msg.get("auto"):
+            _breakeven.last_result = text
+            if not ok:
+                # Let the rule retry instead of waiting out the whole window:
+                # a rejection is usually a moving market, not a bad request.
+                for ticket in msg.get("tickets", ()):
+                    _breakeven.asked.pop(int(ticket), None)
+        else:
+            _autoclose.last_result = text
         logger.info("Breakeven result: ok=%s moved=%s skipped=%s err=%s", ok, moved, skipped, err)
         return set()
 
@@ -1002,6 +1116,9 @@ async def ingest_ws(websocket: WebSocket) -> None:
             # Evaluate the profit-target auto-close after each message (cheap; the
             # P&L only moves on position updates). Disarms itself on fire.
             await _maybe_autoclose()
+            # Then protect the winners: any position past the breakeven
+            # threshold gets its stop moved to entry.
+            await _maybe_breakeven()
             # Run the scalper bot (entries on the touched symbols + account exits).
             await _run_bot(stamped)
     except WebSocketDisconnect:
@@ -1207,6 +1324,48 @@ async def close_symbol(symbol: str) -> dict[str, Any]:
         raise HTTPException(status_code=503, detail="Collector não conectado.")
     logger.info("Manual close requested for %s", sym.value)
     return {"ok": True, "detail": f"Fechamento de {sym.value} enviado ao collector."}
+
+
+class AutoBreakevenRequest(BaseModel):
+    """Arm/disarm the per-position auto-breakeven from the UI."""
+
+    armed: bool
+    threshold_usd: float | None = None
+
+
+@router.get("/api/orderflow/autobreakeven", response_model=AutoBreakevenStatus, tags=["orderflow"])
+async def get_autobreakeven() -> AutoBreakevenStatus:
+    return _breakeven_status()
+
+
+@router.post("/api/orderflow/autobreakeven", response_model=AutoBreakevenStatus, tags=["orderflow"])
+async def set_autobreakeven(req: AutoBreakevenRequest) -> AutoBreakevenStatus:
+    """Arm the rule at a USD threshold, or disarm it.
+
+    Arming is refused when the collector cannot execute — the same gate the
+    account auto-close uses, since moving a stop is still an order_send.
+    """
+    if not req.armed:
+        _breakeven.armed = False
+        _breakeven.asked.clear()
+        _breakeven.last_result = "desarmado pelo usuário"
+        logger.info("Auto-breakeven disarmed")
+        return _breakeven_status()
+    if not _breakeven.enabled:
+        raise HTTPException(
+            status_code=409,
+            detail="Collector sem allow_auto_close — não é possível mover stops.",
+        )
+    if req.threshold_usd is None or req.threshold_usd <= 0:
+        raise HTTPException(status_code=422, detail="threshold_usd deve ser positivo.")
+    _breakeven.threshold_usd = req.threshold_usd
+    _breakeven.armed = True
+    # A fresh threshold must be able to act on positions already open, even ones
+    # asked for at the old value moments ago.
+    _breakeven.asked.clear()
+    _breakeven.last_result = f"armado: zero a zero em ${req.threshold_usd:.2f}"
+    logger.info("Auto-breakeven armed at %.2f", req.threshold_usd)
+    return _breakeven_status()
 
 
 @router.post("/api/orderflow/breakeven/{symbol}", tags=["orderflow"])

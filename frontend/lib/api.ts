@@ -4,6 +4,7 @@
 import {
   AccountPnl,
   AccountBalanceHistory,
+  AutoBreakevenStatus,
   AutoCloseStatus,
   BandScenariosBySymbol,
   BotStatus,
@@ -125,6 +126,14 @@ export const api = {
       method: "POST",
       headers: JSON_HEADERS,
       body: JSON.stringify({ armed, target_usd: targetUsd }),
+    }),
+  getAutoBreakeven: () =>
+    fetchJson("/api/orderflow/autobreakeven", AutoBreakevenStatus),
+  setAutoBreakeven: (armed: boolean, thresholdUsd: number | null) =>
+    fetchJson("/api/orderflow/autobreakeven", AutoBreakevenStatus, {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ armed, threshold_usd: thresholdUsd }),
     }),
   closeSymbol: (symbol: string) =>
     fetchVoid(`/api/orderflow/close/${symbol}`, { method: "POST" }),

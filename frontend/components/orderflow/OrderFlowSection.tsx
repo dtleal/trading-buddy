@@ -11,6 +11,7 @@ import { PressureGauge } from "./PressureGauge";
 import { PositionPanel } from "./PositionPanel";
 import { PositionControls } from "./PositionControls";
 import { AutoCloseControl } from "./AutoCloseControl";
+import { AutoBreakevenControl } from "./AutoBreakevenControl";
 import { ScalperBotControl } from "./ScalperBotControl";
 import { FootprintPanel } from "./FootprintPanel";
 import { TapePanel } from "./TapePanel";
@@ -20,6 +21,7 @@ import { BandOddsBadges } from "@/components/bands/BandOddsBadges";
 import { useBandScenarios } from "@/hooks/useCandles";
 import { useOrderFlow } from "@/hooks/useOrderFlow";
 import { useAutoClose } from "@/hooks/useAutoClose";
+import { useAutoBreakeven } from "@/hooks/useAutoBreakeven";
 import { useScalperBot } from "@/hooks/useScalperBot";
 import { useLevelAlerts } from "@/hooks/useLevelAlerts";
 import { openLots, useLotLimits } from "@/lib/lotLimits";
@@ -98,6 +100,11 @@ export function OrderFlowSection({ tick }: { tick: DashboardTick | null }) {
   const scenarios = useBandScenarios();
   const { status: autoClose, arm, disarm, closeSymbol, breakevenSymbol } = useAutoClose();
   const { status: bot, arm: armBot, saveLots: saveBotLots, disarm: disarmBot } = useScalperBot();
+  const {
+    status: breakeven,
+    arm: armBreakeven,
+    disarm: disarmBreakeven,
+  } = useAutoBreakeven();
   const executionEnabled = autoClose?.enabled ?? false;
 
   // Blocos opcionais, ligados/desligados pelos botões do header.
@@ -198,6 +205,11 @@ export function OrderFlowSection({ tick }: { tick: DashboardTick | null }) {
         )}
         <ScalperBotControl status={bot} arm={armBot} saveLots={saveBotLots} disarm={disarmBot} />
         <AutoCloseControl status={autoClose} arm={arm} disarm={disarm} />
+        <AutoBreakevenControl
+          status={breakeven}
+          arm={armBreakeven}
+          disarm={disarmBreakeven}
+        />
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
           {FLOW_ASSETS.map((a) => (
             <SymbolColumn

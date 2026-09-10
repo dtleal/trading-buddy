@@ -909,10 +909,14 @@ def _close_all_positions(broker_symbols: set[str] | None = None) -> dict[str, An
     return {"ok": not errors, "closed": closed, "pnl": pnl, "errors": errors}
 
 
-def _move_to_breakeven(broker_symbols: set[str] | None = None) -> dict[str, Any]:
+def _move_to_breakeven(
+    broker_symbols: set[str] | None = None, tickets: set[int] | None = None
+) -> dict[str, Any]:
     """Move each open position's stop-loss to its entry price (breakeven). With
-    `broker_symbols`, only those MT5 symbols; None = all. Best-effort: keeps going
-    past a failure and reports a summary the backend surfaces in the UI.
+    `broker_symbols`, only those MT5 symbols; with `tickets`, only those position
+    ids (what the automatic per-position rule sends); None = no filter. Both
+    filters apply when both are given. Best-effort: keeps going past a failure
+    and reports a summary the backend surfaces in the UI.
 
     An SL only belongs at entry once price has moved in the trade's favour — for a
     still-underwater position the entry sits on the wrong side of the market and
@@ -926,6 +930,8 @@ def _move_to_breakeven(broker_symbols: set[str] | None = None) -> dict[str, Any]
     errors: list[str] = []
     for p in raw:
         if broker_symbols is not None and p.symbol not in broker_symbols:
+            continue
+        if tickets is not None and int(p.ticket) not in tickets:
             continue
         entry = float(p.price_open)
         current = float(p.price_current)
@@ -1499,6 +1505,25 @@ def _drain_control(
         res = _move_to_breakeven(brokers_set)
         logger.info("Breakeven %s: %s", backend_sym, res)
         ws.send(json.dumps({"type": "breakeven_result", "symbol": backend_sym, **res}))
+        return
+
+    if ctype == "breakeven_tickets":
+        # Automatic per-position breakeven: the backend decided which positions
+        # crossed the threshold and sends their tickets. Same execution gate as
+        # the manual per-symbol breakeven.
+        tickets = {int(t) for t in cmd.get("tickets", ()) if str(t).lstrip("-").isdigit()}
+        if not tickets:
+            return
+        if not allow_auto_close:
+            logger.warning("Refusing auto-breakeven: allow_auto_close is false on this collector")
+            ws.send(json.dumps({"type": "breakeven_result", "auto": True, "ok": False,
+                                "moved": 0, "tickets": sorted(tickets),
+                                "error": "allow_auto_close=false no collector"}))
+            return
+        res = _move_to_breakeven(tickets=tickets)
+        logger.info("Auto-breakeven %s: %s", sorted(tickets), res)
+        ws.send(json.dumps({"type": "breakeven_result", "auto": True,
+                            "tickets": sorted(tickets), **res}))
         return
 
     if ctype not in ("close_all", "close_symbol"):

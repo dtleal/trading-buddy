@@ -638,6 +638,26 @@ class AutoCloseStatus(_Frozen):
     last_result: str | None = None
 
 
+class AutoBreakevenStatus(_Frozen):
+    """State of the per-position auto-breakeven.
+
+    Same shape as `AutoCloseStatus` on purpose: `enabled` is the collector's
+    `allow_auto_close` capability (an SL change is still an order_send), and
+    `armed` + `threshold_usd` come from the UI. Unlike the account auto-close
+    this rule is NOT one-shot — it stays armed and protects each new position
+    as it crosses the threshold. `open_positions` / `protected` let the UI show
+    how many trades are already safe.
+    """
+
+    enabled: bool = False
+    armed: bool = False
+    threshold_usd: float | None = None
+    open_positions: int = 0
+    protected: int = 0
+    last_fired_at: datetime | None = None
+    last_result: str | None = None
+
+
 class AccountPnl(_Frozen):
     """Realized account P&L over the calendar day / week / month.
 

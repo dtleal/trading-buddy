@@ -35,6 +35,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     of._liquidity_store.clear()
     of._candles_store.clear()
     of._autoclose = of._AutoCloseState()
+    of._breakeven = of._BreakevenState()
     of._auto_trade_enabled = False
     of._bot = of._BotState()
     of._bot.lots = dict(of._DEFAULT_LOTS)
@@ -285,6 +286,19 @@ def test_ingest_rejects_bad_token(client: TestClient) -> None:
             ws.receive_json()
 
 
+def _record_commands(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
+    """Capture what the backend sends to the collector instead of writing it to
+    the socket, so a test can assert on the exact sequence of commands."""
+    sent: list[dict] = []
+
+    async def fake_send(payload: dict) -> bool:
+        sent.append(payload)
+        return True
+
+    monkeypatch.setattr(of, "_send_to_collector", fake_send)
+    return sent
+
+
 def _positions_msg(symbol: str = "USTEC", **over) -> dict:
     pos = {
         "ticket": 12345,
@@ -517,6 +531,110 @@ def test_autoclose_fires_close_all_over_target(client: TestClient) -> None:
         cmd = ws.receive_json()
     assert cmd["type"] == "close_all"
     assert of._autoclose.armed is False  # one-shot (auto_arm off)
+
+
+# --- per-position auto-breakeven --------------------------------------------
+
+
+def test_autobreakeven_status_defaults(client: TestClient) -> None:
+    st = client.get("/api/orderflow/autobreakeven").json()
+    assert st["enabled"] is False and st["armed"] is False and st["threshold_usd"] is None
+
+
+def test_autobreakeven_arm_refused_when_collector_cannot_execute(client: TestClient) -> None:
+    of._breakeven.enabled = False
+    resp = client.post("/api/orderflow/autobreakeven", json={"armed": True, "threshold_usd": 6.0})
+    assert resp.status_code == 409
+
+
+def test_autobreakeven_arm_refused_with_non_positive_threshold(client: TestClient) -> None:
+    of._breakeven.enabled = True
+    resp = client.post("/api/orderflow/autobreakeven", json={"armed": True, "threshold_usd": 0.0})
+    assert resp.status_code == 422
+
+
+def test_autobreakeven_arm_and_disarm(client: TestClient) -> None:
+    of._breakeven.enabled = True
+    armed = client.post(
+        "/api/orderflow/autobreakeven", json={"armed": True, "threshold_usd": 6.0}
+    ).json()
+    assert armed["armed"] is True and armed["threshold_usd"] == 6.0
+    disarmed = client.post("/api/orderflow/autobreakeven", json={"armed": False}).json()
+    assert disarmed["armed"] is False
+
+
+def test_autobreakeven_sends_ticket_over_threshold(client: TestClient) -> None:
+    of._breakeven.enabled = True
+    of._breakeven.armed = True
+    of._breakeven.threshold_usd = 6.0
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json(_positions_msg(profit=7.0, sl=99.0))
+        cmd = ws.receive_json()
+    assert cmd["type"] == "breakeven_tickets" and cmd["tickets"] == [12345]
+    # NOT one-shot: it must stay armed to protect the next position too.
+    assert of._breakeven.armed is True
+
+
+def test_autobreakeven_quiet_below_threshold(client: TestClient) -> None:
+    of._breakeven.enabled = True
+    of._breakeven.armed = True
+    of._breakeven.threshold_usd = 6.0
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json(_positions_msg(profit=2.0, sl=99.0))
+        of._positions_store.clear()  # nothing sent → nothing to receive
+    assert of._breakeven.last_result is None
+
+
+def test_autobreakeven_asks_once_per_ticket(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same position must not be re-asked on every message while the SL
+    change is still in flight."""
+    sent = _record_commands(monkeypatch)
+    of._breakeven.enabled = True
+    of._breakeven.armed = True
+    of._breakeven.threshold_usd = 6.0
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json(_positions_msg(profit=7.0, sl=99.0))
+        ws.send_json(_positions_msg(profit=8.0, sl=99.0))
+        ws.send_json(_positions_msg(profit=9.0, sl=99.0))
+    assert [c["type"] for c in sent] == ["breakeven_tickets"]
+
+
+def test_autobreakeven_retries_after_a_rejection(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sent = _record_commands(monkeypatch)
+    of._breakeven.enabled = True
+    of._breakeven.armed = True
+    of._breakeven.threshold_usd = 6.0
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json(_positions_msg(profit=7.0, sl=99.0))
+        ws.send_json(
+            {"type": "breakeven_result", "auto": True, "ok": False, "moved": 0,
+             "tickets": [12345], "error": "off quotes"}
+        )
+        ws.send_json(_positions_msg(profit=7.5, sl=99.0))
+    # Two requests: the first one, then a retry once the rejection came back.
+    assert [c["type"] for c in sent] == ["breakeven_tickets", "breakeven_tickets"]
+
+
+def test_autobreakeven_auto_arms_on_collector_connect(client: TestClient) -> None:
+    of._breakeven.threshold_usd = 6.0
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json({"type": "hello", "auto_close_enabled": True})
+    st = client.get("/api/orderflow/autobreakeven").json()
+    assert st["armed"] is True and st["threshold_usd"] == 6.0
+
+
+def test_autobreakeven_disarms_when_capability_is_lost(client: TestClient) -> None:
+    of._breakeven.enabled = True
+    of._breakeven.armed = True
+    of._breakeven.threshold_usd = 6.0
+    with client.websocket_connect(f"/ws/ingest/orderflow?token={TOKEN}") as ws:
+        ws.send_json({"type": "hello", "auto_close_enabled": False})
+    st = client.get("/api/orderflow/autobreakeven").json()
+    assert st["armed"] is False and st["enabled"] is False
 
 
 def test_autoclose_auto_arms_on_collector_connect(client: TestClient) -> None:

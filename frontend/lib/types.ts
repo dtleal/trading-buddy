@@ -482,6 +482,21 @@ export const AutoCloseStatus = z.object({
 });
 export type AutoCloseStatus = z.infer<typeof AutoCloseStatus>;
 
+/** State of the per-position auto-breakeven (/api/orderflow/autobreakeven).
+ * Any open position whose floating profit reaches `threshold_usd` has its stop
+ * moved to its entry price, so that trade can no longer lose. Stays armed —
+ * unlike the account auto-close it is not one-shot. */
+export const AutoBreakevenStatus = z.object({
+  enabled: z.boolean(), // collector permits execution (allow_auto_close)
+  armed: z.boolean(),
+  threshold_usd: z.number().nullable().default(null),
+  open_positions: z.number(),
+  protected: z.number(), // how many already have the stop at entry or better
+  last_fired_at: z.string().nullable().default(null),
+  last_result: z.string().nullable().default(null),
+});
+export type AutoBreakevenStatus = z.infer<typeof AutoBreakevenStatus>;
+
 /** Realized account P&L over calendar day/week/month (/api/orderflow/pnl). */
 export const AccountPnl = z.object({
   day: z.number(),

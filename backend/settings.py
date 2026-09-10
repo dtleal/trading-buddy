@@ -123,6 +123,12 @@ class Settings(BaseSettings):
     # in the UI turns auto-arming off until you arm again. Sized for the
     # ActivTrades account (about $1k), traded with 0.01 lots.
     orderflow_autoclose_default_usd: float = 35.0
+    # Default per-position auto-breakeven threshold in USD. When > 0, the rule
+    # arms itself as soon as the collector connects with close capability: any
+    # position whose floating profit reaches this has its stop moved to its
+    # entry price, so that trade can no longer lose. 0 disables auto-arming; a
+    # manual disarm in the UI turns it off until armed again.
+    orderflow_breakeven_default_usd: float = 6.0
     # Directory for the raw ingest tape: every book/trades/liquidity message is
     # appended verbatim to one JSONL file per UTC day, so real sessions can be
     # replayed through the aggregator to backtest the scalper. Relative paths
