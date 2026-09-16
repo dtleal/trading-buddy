@@ -12,6 +12,7 @@ import {
   CandlesBySymbol,
   DashboardTick,
   PerformanceQuery,
+  PlayersResponse,
   PerformanceReport,
   QAEntry,
   QAEntryInput,
@@ -154,6 +155,7 @@ export const api = {
     const qs = params.toString();
     return fetchJson(`/api/performance${qs ? `?${qs}` : ""}`, PerformanceReport);
   },
+  getPlayers: () => fetchJson("/api/players", PlayersResponse),
   setBot: (
     armed: boolean,
     profitTarget: number | null,

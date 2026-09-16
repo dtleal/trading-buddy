@@ -7,8 +7,9 @@ them; REST routes serve the latest cached snapshot and on-demand history.
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import AsyncIterator
 
 from fastapi import FastAPI
@@ -19,6 +20,7 @@ from adapters.db_qa import PostgresQARepository
 from api.routes import brief as brief_route
 from api.routes import orderflow as orderflow_route
 from api.routes import performance as performance_route
+from api.routes import players as players_route
 from api.routes import qa as qa_route
 from api.routes import tick as tick_route
 from api.routes import vix as vix_route
@@ -62,9 +64,15 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     bot_trade_repository = PostgresBotTradeRepository(dsn=get_settings().postgres_dsn)
     app.state.bot_trade_repository = bot_trade_repository
     orderflow_route.set_bot_trade_repo(bot_trade_repository)
+    # Players tab: one background reader tails the Profit `.trd` files so no
+    # request ever pays for a cold parse of a whole session.
+    players_task = asyncio.create_task(players_route.refresh_loop())
     try:
         yield
     finally:
+        players_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await players_task
         orderflow_route.set_bot_trade_repo(None)
         await bot_trade_repository.close()
         await qa_repository.close()
@@ -103,6 +111,7 @@ def create_app() -> FastAPI:
     app.include_router(ws_route.router)
     app.include_router(orderflow_route.router)
     app.include_router(performance_route.router)
+    app.include_router(players_route.router)
 
     @app.get("/health", tags=["meta"])
     async def health() -> dict[str, str]:

@@ -474,6 +474,61 @@ Lucro : Média Prejuízo, Patrimônio Máximo, Retorno sobre o Capital, TET).
   trade) and "máximo de contratos" have no equivalent here: the broker's deal
   history does not keep the price path inside a trade.
 
+### Players — Baleia x Banco x Sardinha na B3 (`/players`)
+
+A tab that answers a different question from the rest of the app: **who is on
+the other side?** WDO and WIN side by side, read trade by trade from the B3
+tape, because B3 is the only feed here that names *who* traded.
+
+**Where the data comes from.** Nelogica Profit stores every print it received
+in `database/assets/<contract>/*.trd`, and each 45-byte record carries the
+buying broker, the selling broker and the trade type. The format is decoded in
+`adapters/profit_tape.py` (checked against a full session: 534,719 prints, zero
+leftover bytes, every broker code resolving against Profit's own
+`newagents.dat`). No ProfitDLL licence needed to read it.
+
+- **Three groups, and they add up to zero.** Every aggression print has a buyer
+  and a seller and every broker belongs to exactly one group, so BALEIA + BANCO
+  + SARDINHA is always 0. The tab shows a red `resto R$ …` badge if it is not —
+  that means a broker fell outside the map and the picture is lying.
+- **Baleia** = foreign desks and interdealer brokers (UBS, Morgan, Goldman,
+  J.P. Morgan, Tullett, BGC). **Banco** = the bank *desks* only. **Sardinha** =
+  everything else, which includes the banks' own brokerages.
+- **Why a bank's brokerage counts as sardinha:** RLP (Retail Liquidity
+  Provider) is a B3 mechanism that by rule only covers retail clients, so the
+  share of a broker's flow that arrives as RLP measures how retail it is.
+  Measured on WIN: BTG 21%, Itaú 26%, Santander 29% — the same range as XP at
+  25%; UBS, Morgan, Goldman and Tullett are flat 0%. Filing "Itaú" under BANCO
+  made the bank line read +R$ 776 mi when it belongs near zero.
+- **RLP has its own line.** Internalised prints never reach the book, so they
+  stay out of the partition. It is the only retail marking that comes from B3
+  itself instead of from reading a broker name, and the tab says which is which
+  (`B3` vs `leitura`) on every row.
+- **Money, not contracts.** The headline number is in reais, taken from the
+  financial field the tape already carries (B3's multiplier baked in: ×10 for
+  WDO, ×0.20 for WIN), because that is the only unit that makes the dollar and
+  the index comparable.
+- **Freshness is a number, not a dot.** Profit writes the `.trd` in bursts, not
+  print by print, so the header shows the age of the last print (`ao vivo ·
+  25s`, `atraso 2m10s`, `fita parada · 24m`). **This is not a live feed** — the
+  file is a history cache. Real time needs the ProfitDLL (whose
+  `TConnectorTrade` carries the same `BuyAgent` / `SellAgent` fields, so only
+  the collector would change).
+- **The tape is archived.** Profit only keeps the sessions whose Times & Trades
+  window was opened, and a contract roll leaves the old folder behind, so each
+  session is copied to `data/b3_tape/<contract>_<date>.trd`. Open Profit after
+  the close with WDO and WIN on screen and the whole session lands there — that
+  is what feeds the backtest.
+- **Reading is a background loop**, not part of the request: a cold start on a
+  200 MB WIN session took ~50s inside the endpoint, and two concurrent requests
+  double-counted the file. One loop owns the readers, reads at most 32 MB per
+  pass and reports `loading` while it catches up.
+- **Honest caveat:** broker is not investor type. XP routes institutional
+  orders, a bank's code mixes desk and customer. The grouping is a reading, and
+  the plan is to calibrate it against B3's free D+1 investor panel rather than
+  keep guessing. Backend `use_cases/aggregate_players.py`, route
+  `GET /api/players`, frontend `app/players/`.
+
 ### LLM features (need `CLAUDE_API_KEY`)
 
 - `dtb brief` — pre-market briefing in PT-BR via Claude Opus 4.7.

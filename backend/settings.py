@@ -86,6 +86,24 @@ class Settings(BaseSettings):
     # KVM:  CORS_EXTRA_ORIGINS=http://72.62.15.111:3057
     cors_extra_origins: str = ""
 
+    # --- Players B3 (Baleia / Banco / Sardinha, tape do Profit) ------------
+
+    # Folder where Nelogica Profit keeps its data, as the backend sees it.
+    # Holds `newagents.dat` (broker code -> name) and `database/assets/<contract>/*.trd`
+    # (times & trades with the broker on both sides). On WSL the Windows path
+    # is /mnt/c/Users/<user>/AppData/Roaming/Nelogica/Profit; in Docker it is
+    # whatever that folder is bind-mounted to. Empty = tab shows "sem fonte"
+    # instead of failing.
+    profit_data_dir: str = ""
+    # Contracts to read, by prefix. The newest session file wins, so rolling
+    # from WDOV26 to WDOX26 needs no config change.
+    players_assets: str = "WDO,WIN"
+    # Where to keep a copy of every session tape we see. The Profit folder only
+    # holds the sessions whose Times & Trades window was opened, and a contract
+    # roll leaves the old folder behind, so without a copy the history the
+    # backtest needs never accumulates. Empty = do not archive.
+    players_archive_dir: str = "data/b3_tape"
+
     # --- ntfy.sh push notifications --------------------------------------
 
     # Secret topic name the backend will POST breakout alerts to. Leave

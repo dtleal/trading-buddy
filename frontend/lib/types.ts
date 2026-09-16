@@ -731,3 +731,73 @@ export const BriefResponse = z.object({
   note: z.string().nullable().default(null),
 });
 export type BriefResponse = z.infer<typeof BriefResponse>;
+
+/** One player group (Baleia / Banco / Sardinha / Varejo) from /api/players. */
+export const PlayerRead = z.object({
+  key: z.string(),
+  label: z.string(),
+  papel: z.string(),
+  /** "rlp" = marcado pela B3, "corretora" = leitura nossa de quem é a corretora. */
+  fonte: z.enum(["rlp", "corretora"]),
+  /** Saldo em reais — o número grande da linha. Vem do campo financeiro do
+   * próprio tape, que já traz o multiplicador da B3 (×10 no WDO, ×0,20 no WIN). */
+  saldo_rs: z.number(),
+  saldo_recente_rs: z.number(),
+  saldo: z.number(),
+  saldo_recente: z.number(),
+  volume: z.number(),
+  volume_rs: z.number(),
+  forca_pct: z.number(),
+  agressao_pct: z.number(),
+  lado: z.enum(["BUY", "SELL", "NEUTRAL"]),
+});
+export type PlayerRead = z.infer<typeof PlayerRead>;
+
+export const PlayersBucket = z.object({
+  at: z.string(),
+  baleia: z.number(),
+  banco: z.number(),
+  sardinha: z.number(),
+  rlp: z.number(),
+  price: z.number(),
+});
+export type PlayersBucket = z.infer<typeof PlayersBucket>;
+
+export const PlayersBroker = z.object({
+  code: z.number(),
+  name: z.string(),
+  volume: z.number(),
+  saldo: z.number(),
+  grupo: z.string(),
+});
+export type PlayersBroker = z.infer<typeof PlayersBroker>;
+
+export const AssetPlayers = z.object({
+  asset: z.string(),
+  symbol: z.string(),
+  session: z.string(),
+  first_trade: z.string().nullable(),
+  last_trade: z.string().nullable(),
+  trades: z.number(),
+  contracts: z.number(),
+  /** Soma dos três grupos. Tem que ser 0 — se não for, falta corretora no mapa. */
+  residual_rs: z.number(),
+  last_price: z.number().nullable(),
+  /** Segundos entre o último negócio lido e agora. O Profit grava em blocos,
+   * então isso é o atraso real da leitura, não o tempo de rede. */
+  lag_seconds: z.number().nullable(),
+  players: z.array(PlayerRead),
+  series: z.array(PlayersBucket),
+  top_brokers: z.array(PlayersBroker),
+  stale: z.boolean(),
+});
+export type AssetPlayers = z.infer<typeof AssetPlayers>;
+
+/** Response from /api/players. `source` empty = sem fonte configurada. */
+export const PlayersResponse = z.object({
+  source: z.string(),
+  /** true = ainda lendo o arquivo de tape; os números são o dia até agora. */
+  loading: z.boolean(),
+  assets: z.array(AssetPlayers),
+});
+export type PlayersResponse = z.infer<typeof PlayersResponse>;

@@ -10,6 +10,7 @@ services:
     environment:
       POSTGRES_HOST: postgres
       REDIS_HOST: redis
+      PROFIT_DATA_DIR: /profit
     ports:
       # Host port comes from .env (BACKEND_PORT, default 8000). On the shared
       # KVM box we set it to 8057 so we never collide with polymarket / kalshi.
@@ -33,6 +34,15 @@ services:
       # bind-mounted so the trade record survives rebuilds and grows past the
       # window the collector re-pushes.
       - ../data/trade_history:/app/data/trade_history
+      # Nelogica Profit folder, read-only: `newagents.dat` (broker code ->
+      # name) plus the `.trd` times & trades the Players tab reads. Host path
+      # comes from PROFIT_DIR_HOST in .env; on a box without Profit the mount
+      # is just an empty folder and the tab shows "sem fonte".
+      - ${PROFIT_DIR_HOST:-/mnt/c/Users/diego/AppData/Roaming/Nelogica/Profit}:/profit:ro
+      # Nossa cópia dos tapes de B3. O Profit só guarda a sessão cuja janela de
+      # Times & Trades foi aberta, então sem esta cópia o histórico que o
+      # backtest precisa nunca se acumula.
+      - ../data/b3_tape:/app/data/b3_tape
 
   postgres:
     image: postgres:16-alpine
