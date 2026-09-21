@@ -18,14 +18,20 @@ that by overlap — find where the top of the previous read sits inside the new
 one, and everything above it is new. Validated live on 20/09/2026: 41 prints
 captured against 41 of delta on the asset's own trade counter, zero loss.
 
-TIMING, and the one real limit: the window holds 500 lines (a hard cap in
-Profit, checked). That is plenty when the tape is calm and thin when it is
-not — measured on a replay of 18/09/2026, a burst put all 500 lines inside
-65ms, which is ~7.700 prints/s and matches the 8.924/s peak of that session.
-A read costs 0,5-2ms typically but up to ~70ms with 3.000 topics, so during a
-burst the gap between two reads can outrun the window and prints are lost.
-The log says so: every pass reports how much of Profit's own trade counter we
-actually captured, and each overflow prints the span of tape still on screen.
+TIMING, and where the prints go when they go: the window holds 500 lines (a
+hard cap in Profit, checked). Measured on a replay of 18/09/2026, a burst put
+all 500 lines inside 65ms — ~7.700 prints/s, matching that session's 8.924/s
+peak. So the whole game is keeping a read cycle well under that.
+
+The RTD call itself is not the problem: profiled at 10ms average and 22ms
+worst for 3.000 topics, with the Python side under 1ms. What did hurt was the
+sender thread taking the GIL away — reads were landing at 90ms and 14% of the
+tape was being lost. Sending in fatter, rarer batches and giving the reader
+priority brought passes back to ~22ms and the loss to 1,7-3,9%.
+
+Losses are still possible in the worst bursts, so they are always reported:
+every pass logs how much of Profit's own trade counter was captured, and each
+overflow prints the span of tape still on screen.
 
 USAGE (PowerShell / cmd, on the machine running Profit):
     pip install comtypes websocket-client
@@ -39,6 +45,7 @@ closed, or the WIN/WDO windows will not be found.
 from __future__ import annotations
 
 import argparse
+import ctypes
 import json
 import logging
 import queue
@@ -388,23 +395,46 @@ class Sender(threading.Thread):
             self.dropped += len(message.get("trades", ()))
             logger.warning("fila cheia: %d negocios descartados no total", self.dropped)
 
+    def _drain(self, first: dict[str, Any]) -> list[dict[str, Any]]:
+        """`first` plus everything already queued, merged per window.
+
+        One send per read was the wrong shape. Every wake-up of this thread
+        takes the GIL away from the reader, and the reader is the one on a
+        clock: profiled against the replay, the RTD call itself never passes
+        22ms, yet the reader was seeing 90ms passes — long enough for a burst
+        to outrun the 500-line window. Fewer, fatter sends give the reader its
+        cadence back.
+        """
+        merged: dict[str, dict[str, Any]] = {first["tool"]: first}
+        while True:
+            try:
+                message = self._queue.get_nowait()
+            except queue.Empty:
+                return list(merged.values())
+            held = merged.get(message["tool"])
+            if held is None or held["asset"] != message["asset"]:
+                merged[message["tool"]] = message
+            else:
+                held["trades"].extend(message["trades"])
+
     def run(self) -> None:
         ws = _connect_backend(self._url, self._token)
         while True:
-            message = self._queue.get()
-            while True:
-                try:
-                    if _peer_gone(ws):
-                        raise ConnectionError("backend fechou a conexao")
-                    ws.send(json.dumps(message))
-                    break
-                except Exception as exc:
-                    # Same batch again after reconnecting: it is already out of
-                    # the reader's window, so dropping it would lose prints
-                    # with nothing to show for it.
-                    logger.warning("backend caiu (%s), reconectando", exc)
-                    ws = _connect_backend(self._url, self._token)
-            self.sent += len(message.get("trades", ()))
+            messages = self._drain(self._queue.get())
+            for message in messages:
+                while True:
+                    try:
+                        if _peer_gone(ws):
+                            raise ConnectionError("backend fechou a conexao")
+                        ws.send(json.dumps(message))
+                        break
+                    except Exception as exc:
+                        # Same batch again after reconnecting: it is already out
+                        # of the reader's window, so dropping it would lose
+                        # prints with nothing to show for it.
+                        logger.warning("backend caiu (%s), reconectando", exc)
+                        ws = _connect_backend(self._url, self._token)
+                self.sent += len(message["trades"])
 
 
 def _peer_gone(ws: Any) -> bool:
@@ -433,6 +463,22 @@ def _peer_gone(ws: Any) -> bool:
     return False
 
 
+def _prioritise_reader() -> None:
+    """Give the read loop the edge over the sender thread.
+
+    The reader is the one on a deadline — miss its beat and prints fall off the
+    window for good, while the sender only has to keep up on average. Both
+    knobs aim at the same thing: a shorter wait for the GIL after each RTD
+    call, which is where the 90ms passes were coming from.
+    """
+    sys.setswitchinterval(0.001)  # default 5ms: too long to wait on a 20ms beat
+    try:
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        kernel32.SetThreadPriority(kernel32.GetCurrentThread(), 1)  # ABOVE_NORMAL
+    except Exception:  # pragma: no cover - not Windows, or no permission
+        logger.debug("nao deu pra subir a prioridade da thread de leitura")
+
+
 def _profit_is_running() -> bool:
     """Whether Profit is already open.
 
@@ -458,6 +504,7 @@ def run(cfg: dict[str, Any]) -> None:
         raise SystemExit("websocket-client nao instalado: pip install websocket-client")
     if not _profit_is_running():
         raise SystemExit("Profit fechado. Abra o ProfitChart e linke a janela de T&T.")
+    _prioritise_reader()
 
     lines = min(int(cfg.get("lines", MAX_LINES)), MAX_LINES)
     interval = float(cfg.get("read_interval_ms", 20)) / 1000.0

@@ -509,14 +509,21 @@ own and the card's "first trade" time says so honestly.
 
 ## How much of the tape it actually captures
 
-**98,96%**, measured against the `.trd` of 18/09/2026 replayed through Profit:
-28.895 prints captured against 29.198 in the file over the same stretch.
+**96 to 98%**, measured against the `.trd` of 18/09/2026 replayed through
+Profit: 1,7% and 3,9% lost over two busy two-minute stretches. On the session
+balance that is a 2,7-5,1% error on a group's net, same direction.
 
 The loss is not spread out — it is entirely in bursts. The window holds 500
 lines, and in a burst those 500 lines span **65 milliseconds** (~7.700
-prints/s, matching that session's 8.924/s peak), while one read of 3.000 topics
-costs up to ~90ms. When the gap outruns the window, prints fall off the bottom.
-That is the ceiling of this mechanism, not a bug to fix.
+prints/s, matching that session's 8.924/s peak), so a read cycle has to stay
+well inside that.
+
+Getting there took finding out that the RTD call was never the bottleneck
+(10ms average, 22ms worst for 3.000 topics; the Python side under 1ms). The
+sender thread was: every wake-up took the GIL from the reader and passes were
+landing at 90ms, losing 14% of the tape. It now drains its queue into fatter,
+rarer sends and the reader runs at above-normal thread priority, which put
+passes back at ~22ms.
 
 The collector reports it every minute, against Profit's own session trade
 counter:
