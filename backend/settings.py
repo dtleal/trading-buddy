@@ -110,6 +110,15 @@ class Settings(BaseSettings):
     # session day, in Profit's own record layout. Empty = do not record.
     players_live_dir: str = "data/b3_live"
 
+    # --- Jev (TypeSafe AI) — segunda opinião na entrada do scalper --------
+
+    # Chave da API. Vazia = o portão não existe e o bot opera só pela regra
+    # determinística, como sempre operou.
+    jev_api_key: SecretStr | None = None
+    # Confiança mínima (0..1) pra deixar a entrada passar. Abaixo disso a
+    # operação é vetada. 0,6 é "mais a favor que contra" com folga.
+    jev_min_confidence: float = 0.6
+
     # --- ntfy.sh push notifications --------------------------------------
 
     # Secret topic name the backend will POST breakout alerts to. Leave

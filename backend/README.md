@@ -143,6 +143,15 @@ identical to the old `detect_explosion` gate) and `signal_says_reverse`
 `against`/`exhaustion` exits are **advisory** UI alerts the bot does not trade
 on. `strength` is a UI conviction cue only — the bot ignores it.
 
+**Segunda opinião do Jev (21/09/2026).** Antes de mandar a ordem de abertura, a
+entrada aprovada pela regra determinística é descrita em texto e passa pelo Jev
+(TypeSafe AI, `adapters/jev.py`): um `noul` de 0 a 1 respondendo "vale abrir
+agora?". Abaixo de `JEV_MIN_CONFIDENCE` (0,6) a operação é vetada e fica no
+`last_result` do bot. É **só veto** — o Jev não escolhe ativo, lado, tamanho
+nem momento, e sem resposta (sem chave, timeout, fornecedor fora) a entrada
+segue pela regra, porque um fornecedor fora do ar não pode parar o robô em
+silêncio. Chave em `JEV_API_KEY`.
+
 Closes the bot issues are tagged `origin:"bot"` and persisted to `bot_trades`
 with a `reason` (`lock` / `reverse` / `target` / `stop`); manual closes are
 never recorded. To diagnose *why* a position was closed, read that `reason`

@@ -50,6 +50,7 @@ from core.models import (
     SessionLiquidity,
 )
 from settings import get_settings
+from adapters.jev import confirm_entry
 from use_cases.aggregate_orderflow import OrderFlowAggregator
 from use_cases.assess_trade_signals import assess_trade_signals
 from use_cases.auto_breakeven import protected_count, tickets_to_protect
@@ -554,6 +555,44 @@ def _bot_status() -> BotStatus:
     )
 
 
+async def _jev_allows(
+    symbol: AssetSymbol,
+    direction: Direction,
+    snap: OrderFlowSnapshot,
+    bid: float,
+    ask: float,
+    range_per_bar: float,
+    liq: SessionLiquidity | None,
+) -> bool:
+    """Second opinion on an entry the deterministic engine already approved.
+
+    Veto only: Jev never opens anything, it can only stop what the tape read
+    decided. No answer (no key, timeout, vendor down) means the entry goes
+    through — the engine is still the thing that trades.
+    """
+    signal = snap.flow_signal
+    state = (
+        f"{symbol.value}: entrada {direction} pela regra de explosão. "
+        f"Sinal: {signal.basis if signal else 'none'}, "
+        f"força {signal.strength if signal else 0.0:.2f}. "
+        f"Bid {bid} / ask {ask} (spread {ask - bid:.4f}), "
+        f"amplitude por barra {range_per_bar:.4f}. "
+        f"Liquidez da sessão: {'sem leitura' if liq is None else f'{liq.ratio:.2f}x o normal'}. "
+        f"Sessão do robô: {_bot.realized:.2f} USD realizados, "
+        f"{_open_profit():.2f} flutuando, meta {_bot.profit_target:.2f}."
+    )
+    score = await confirm_entry(state)
+    if score is None:
+        return True
+    minimum = get_settings().jev_min_confidence
+    if score < minimum:
+        _bot.last_result = f"jev vetou {direction} {symbol.value}: {score:.2f} < {minimum:.2f}"
+        logger.info("Bot entry vetoed by Jev: %s", _bot.last_result)
+        return False
+    logger.info("Jev confirmou %s %s: %.2f", direction, symbol.value, score)
+    return True
+
+
 async def _run_bot(snaps: dict[AssetSymbol, OrderFlowSnapshot]) -> None:
     """One bot tick: settle a pending close, then account-wide exit, then
     explosion entries on the symbols that just updated. Called from the ingest
@@ -733,6 +772,8 @@ async def _run_bot(snaps: dict[AssetSymbol, OrderFlowSnapshot]) -> None:
         if ba is None or rpb <= 0:
             continue  # need a quote + range to size the grid
         bid, ask = ba
+        if not await _jev_allows(symbol, direction, snap, bid, ask, rpb, liq):
+            continue
         entry = ask if direction == "buy" else bid
         levels = grid_levels(entry, direction, rpb)
         breach = grid_breach_price(entry, direction, rpb)
