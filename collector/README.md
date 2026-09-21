@@ -459,7 +459,10 @@ contract with a paid activation key.
    installed.
 
 Within a minute the watchdog starts the collector and the tab fills. The tab
-shows an **RTD** badge on a card that is live.
+shows an **RTD** badge on a card that is live. Each card carries the session
+total per group on the bars, and below them a row of three cells with the same
+groups over the **last 15 minutes** — the session number says what was built
+all day, that row says what is happening now.
 
 If a window is missing, the collector says so instead of leaving you guessing:
 

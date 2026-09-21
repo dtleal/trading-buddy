@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 
-import { PlayerRow, money } from "@/components/players/PlayerRow";
+import { LABEL_TONE, MASCOT, PlayerRow, money } from "@/components/players/PlayerRow";
 import { PlayersFlowChart } from "@/components/players/PlayersFlowChart";
 import { cn } from "@/lib/utils";
 import type { AssetPlayers } from "@/lib/types";
@@ -121,22 +121,55 @@ export function AssetPlayersPanel({ data }: { data: AssetPlayers }) {
             );
           })()}
         </DetailLine>
-        <DetailLine label="últimos 15 min">
+      </div>
+
+      {/* Os últimos 15 minutos estavam numa linha só, em 10px cinza escuro, com
+          os três grupos espremidos — ilegível. Agora é uma coluna por grupo, na
+          mesma régua das barras, com o mesmo bicho e a mesma cor de cima pra
+          não ter que reler quem é quem. */}
+      <div className="mt-3 flex items-stretch gap-3">
+        <div className="flex w-[118px] shrink-0 flex-col justify-center">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+            últimos 15 min
+          </span>
+          <span className="text-[10px] text-zinc-600">o que está fazendo agora</span>
+        </div>
+        <div className="grid min-w-0 flex-1 grid-cols-3 gap-2">
           {MAIN_ROWS.map((key) => {
             const player = data.players.find((p) => p.key === key);
             if (!player) return null;
+            const bought = player.saldo_recente_rs > 0;
+            const flat = player.saldo_recente_rs === 0;
             return (
-              <span key={key} className="mr-4 whitespace-nowrap">
-                <span className="text-zinc-600">{player.label.toLowerCase()} </span>
-                <span
-                  className={player.saldo_recente_rs >= 0 ? "text-sky-500" : "text-red-500"}
+              <div
+                key={key}
+                className="rounded-sm border border-zinc-800 bg-zinc-900/50 px-2 py-1.5"
+              >
+                <div className="flex items-center gap-1.5">
+                  <span aria-hidden className="text-[11px] leading-none">
+                    {MASCOT[key]}
+                  </span>
+                  <span
+                    className={cn(
+                      "text-[10px] font-bold uppercase tracking-wide",
+                      LABEL_TONE[key],
+                    )}
+                  >
+                    {player.label}
+                  </span>
+                </div>
+                <div
+                  className={cn(
+                    "mt-0.5 text-[13px] font-bold tabular-nums",
+                    flat ? "text-zinc-500" : bought ? "text-sky-400" : "text-red-400",
+                  )}
                 >
                   {money(player.saldo_recente_rs)}
-                </span>
-              </span>
+                </div>
+              </div>
             );
           })}
-        </DetailLine>
+        </div>
       </div>
 
       <div className="mt-4">

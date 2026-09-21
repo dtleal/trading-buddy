@@ -3,13 +3,13 @@
 import { cn } from "@/lib/utils";
 import type { PlayerRead } from "@/lib/types";
 
-const MASCOT: Record<string, string> = {
+export const MASCOT: Record<string, string> = {
   baleia: "🐳",
   banco: "🏛️",
   sardinha: "🐟",
 };
 
-const LABEL_TONE: Record<string, string> = {
+export const LABEL_TONE: Record<string, string> = {
   baleia: "text-sky-400",
   banco: "text-amber-400",
   sardinha: "text-zinc-300",
