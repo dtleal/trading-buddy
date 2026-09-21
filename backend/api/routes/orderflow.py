@@ -513,6 +513,8 @@ _DEFAULT_LOTS: dict[AssetSymbol, float] = {
     AssetSymbol.US30: 0.01,
     AssetSymbol.GER40: 0.01,
     AssetSymbol.EURUSD: 0.01,
+    AssetSymbol.BRA50: 0.01,
+    AssetSymbol.MINDOL: 0.01,
 }
 
 _bot = _BotState()

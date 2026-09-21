@@ -17,6 +17,8 @@ export const AssetSymbol = z.enum([
   "US30",
   "GER40",
   "EURUSD",
+  "BRA50",
+  "MINDOL",
   "USOIL",
   "US2000",
   "BITCOIN",

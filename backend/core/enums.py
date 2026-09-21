@@ -21,6 +21,11 @@ class AssetSymbol(str, Enum):
     US30 = "US30"  # Dow Jones 30 (Yahoo: ^DJI / YM=F intraday)
     GER40 = "GER40"  # DAX 40 (Yahoo: ^GDAXI)
     EURUSD = "EURUSD"  # Euro vs US dollar (Yahoo: EURUSD=X)
+    # B3 via CFD na ActivTrades: índice Bovespa (BRA50Oct26) e dólar futuro
+    # (MinDolOct26). Só order flow — não entram em TRACKED_ASSETS porque o
+    # dashboard (macro, VIX, notícia) é do mercado americano.
+    BRA50 = "BRA50"  # mini índice / Ibovespa
+    MINDOL = "MINDOL"  # mini dólar
     USOIL = "USOIL"  # retired — see the class docstring
     US2000 = "US2000"  # retired — see the class docstring
     BITCOIN = "BITCOIN"  # retired — see the class docstring
