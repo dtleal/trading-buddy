@@ -790,6 +790,9 @@ export const AssetPlayers = z.object({
   series: z.array(PlayersBucket),
   top_brokers: z.array(PlayersBroker),
   stale: z.boolean(),
+  /** true = fluxo ao vivo do RTD do Profit. O arquivo `.trd` para de crescer
+   * quando o Profit termina o download, então ao vivo só vem por aqui. */
+  live: z.boolean(),
 });
 export type AssetPlayers = z.infer<typeof AssetPlayers>;
 

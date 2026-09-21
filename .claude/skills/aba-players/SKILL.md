@@ -592,3 +592,46 @@ Sobrou:
 Não amarra em DLL de Windows nem em corretora, e o collector viraria um
 processo normal em vez de um binário Windows. Vale pedir preço nos dois e
 comparar antes de decidir.
+
+## 9. Resolvido: tempo real pelo RTD do Profit (20/09/2026)
+
+A seção 8 fechava dizendo que o `.trd` não serve pra gatilho e que o caminho
+era contratar a ProfitDLL. **Não é mais.** O Profit expõe um servidor RTD
+(`Arquivo → Exportar → Em tempo real RTD`, ou botão direito numa janela →
+"Linkar Janela com Excel (RTD)") que entrega o Times & Trades negócio a
+negócio, com corretora dos dois lados e agressor, já incluso na licença.
+
+Não precisa de Excel. É COM local, sem porta TCP:
+`RTDTrading.RtdServer`, CLSID `{272D2E65-05FB-4500-BD7B-5905D5B0A1B8}`.
+Tópico do T&T = `(ferramenta, campo, linha)`, linha 0 = mais recente.
+Campos: `DAT`, `ACP` (corretora compradora), `PRE`, `QUL`, `AVD` (vendedora),
+`AGR`. `(ferramenta, "INFO", "ATV")` diz qual ativo a janela mostra.
+
+O que isso muda no plano:
+- Fases que dependiam de tempo real deixam de depender da chave da Nelogica.
+- O e-mail pro `corporativo@nelogica.com.br` e a cotação da Cedro deixam de ser
+  caminho crítico. Continuam valendo se um dia a fidelidade de 99% não bastar.
+
+Implementação: `collector/profit_rtd_collector.py` (Windows) +
+`backend/adapters/profit_rtd.py` + ingest em
+`/api/players/ws/ingest/b3tape`. Detalhes de operação, limites medidos e
+pegadinhas estão em `collector/README.md`, seção "Profit RTD B3 Tape
+Collector".
+
+### Limites medidos (não são bugs, são o teto do mecanismo)
+- **Fidelidade 98,96%** contra o `.trd` de 18/09/2026 reproduzido no Replay.
+  A perda é toda em rajada: a janela de 500 linhas cobre **65 ms** no pico
+  (~7.700 negócios/s) e uma leitura de 3.000 tópicos custa até 90 ms.
+- **Só um programa por vez.** Profit e BlackArrow registram o mesmo CLSID e
+  quem abriu primeiro atende. Não dá pra escolher pelo cliente (a ROT está
+  vazia e só existe um CLSID no registro).
+- **Sem leilão e sem negócio direto.** A coluna de agressor só tem
+  `Comprador`, `Vendedor` e `RLP` — o RLP vem, o resto é descartado e contado.
+- **Corretora vem por nome, não por código.** Os 20 nomes vistos num replay
+  inteiro batem com o `newagents.dat`; `BTG` e `Santander` são ambíguos e estão
+  fixados no código que de fato opera (85 e 4090).
+
+### Testar fora do pregão
+Replay do Profit. A janela de T&T enche como se fosse ao vivo e o RTD serve
+igual — foi assim que tudo acima foi medido num domingo. No replay o feed de
+cotação fica congelado, então a aferição tem que ser contra o `.trd`.

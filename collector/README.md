@@ -425,3 +425,131 @@ Quick health check from the backend host:
 ```
 curl -s http://localhost:8000/api/orderflow      # [] means nothing is feeding
 ```
+
+---
+
+# Profit RTD B3 Tape Collector (Windows)
+
+A second, independent collector: `profit_rtd_collector.py`. It streams the
+**B3 times & trades of WIN and WDO** — price, size, the broker on *both* sides
+and who aggressed — from a running Nelogica ProfitChart to the backend, which
+feeds the **Players tab** (Baleia / Banco / Sardinha).
+
+It has nothing to do with the MT5 collector above. The Players tab works with
+the MT5 collector switched off, and vice versa.
+
+## Why it exists
+
+The Players tab used to read Profit's `.trd` file. That file is a **history
+cache, not a log**: measured on 16/09/2026, Profit wrote it once when the Times
+& Trades window opened and then went 33 minutes without touching it. Fine for
+replay, useless as a trigger. Profit's RTD server hands out the same prints as
+they happen, and it is included in the licence — ProfitDLL is a separate
+contract with a paid activation key.
+
+## Your morning routine (two steps)
+
+1. **Open ProfitChart.** If BlackArrow is also open, open Profit **first** —
+   both register the same RTD class and COM hands out whichever registered
+   first. There is no way to pick from the client side (checked: the Running
+   Object Table is empty and there is a single CLSID in the registry).
+2. **Open Times & Trades for WIN and for WDO**, and on each window: right click
+   → **"Linkar Janela com Excel (RTD)"**. Nothing is copied to Excel — the
+   dialog just turns that window into an RTD source. No Excel needed or
+   installed.
+
+Within a minute the watchdog starts the collector and the tab fills. The tab
+shows an **RTD** badge on a card that is live.
+
+If a window is missing, the collector says so instead of leaving you guessing:
+
+    WARNING sem janela de WDO: a aba Players nao vai ter esse ativo.
+
+And if every window belongs to another asset (which in practice means BlackArrow
+answered), it stops with the reason rather than streaming something useless.
+
+## Start it automatically
+
+    powershell -NoProfile -ExecutionPolicy Bypass -File <path>\install_rtd_watchdog_task.ps1
+
+Registers the **`ProfitRtdCollector`** scheduled task, which runs
+`watchdog_rtd.ps1` every minute. The watchdog only launches the collector when
+`profitchart.exe` is already running — **this guard is not optional**. The RTD
+CLSID is registered against `profitchart.exe`, so asking COM for it with Profit
+closed does not fail: it *starts Profit*. On a one-minute timer that would pile
+up instances.
+
+Manual run, for debugging:
+
+    pip install comtypes websocket-client
+    python profit_rtd_collector.py --config config.json
+
+## Config
+
+Shares `config.json` with the MT5 collector and reuses its `token`:
+
+    "b3_ws_url": "ws://127.0.0.1:8000/api/players/ws/ingest/b3tape",
+    "lines": 500,
+    "read_interval_ms": 20,
+
+Use `127.0.0.1`, not `localhost`: on Windows `localhost` resolves to IPv6 first
+and nothing listens there.
+
+## The day starts at the open, not when you start the collector
+
+The RTD window only holds the last 500 prints, so a collector that joins at
+10:30 would show "the day" starting at 10:30. It does not: when the collector
+connects, the backend hands the live feed the accumulator the **file reader**
+already built from the session (Profit downloads the day up to the moment the
+T&T window opens), and the live feed carries on from its last print. Prints
+older than that seam are dropped so the morning is not counted twice.
+
+If the file is from another day, or never shows up, the live feed starts on its
+own and the card's "first trade" time says so honestly.
+
+## How much of the tape it actually captures
+
+**98,96%**, measured against the `.trd` of 18/09/2026 replayed through Profit:
+28.895 prints captured against 29.198 in the file over the same stretch.
+
+The loss is not spread out — it is entirely in bursts. The window holds 500
+lines, and in a burst those 500 lines span **65 milliseconds** (~7.700
+prints/s, matching that session's 8.924/s peak), while one read of 3.000 topics
+costs up to ~90ms. When the gap outruns the window, prints fall off the bottom.
+That is the ceiling of this mechanism, not a bug to fix.
+
+The collector reports it every minute, against Profit's own session trade
+counter:
+
+    T&T0 WINV26: capturado 98.96% (28895/29198)
+    32570 enviados | 0 na fila | 0 ilegiveis | 0 descartados | 7 estouros | leitura mais lenta 64 ms
+
+`ilegiveis` counts rows the window handed back malformed (seen once in 8.503
+rows: a broker name in the quantity column). `descartados` counts prints
+dropped because the queue to the backend was full.
+
+## What the tab loses against the file
+
+Nothing on the three groups or on RLP — the aggressor column carries
+`Comprador`, `Vendedor` and `RLP`, so the retail line is B3's own marking here
+too. Auction prints and broker crossings are not marked in the window, so they
+are dropped rather than guessed at; the backend logs one rejected row a minute
+so a surprise shows up immediately:
+
+    WARNING WIN: 1 negocios descartados no ao vivo; exemplo do que nao foi lido: {...}
+
+Broker names, not codes, come over the wire. All 20 names seen in a full replay
+resolve against `newagents.dat`. Two names cover codes in different groups —
+`BTG` (85 brokerage / 1026 bank) and `Santander` (4090 brokerage / 622-635
+bank) — and are pinned to the code that actually trades: on 18/09/2026, BTG 85
+did 3.505.111 contracts against zero for 1026, and Santander 4090 did 726.866
+against zero for 622 and 635.
+
+## Testing without the market open
+
+Use Profit's **Replay** of a past session. The Times & Trades window fills as
+if it were live and the RTD serves it, which is how the aggressor values, the
+broker names and the 98,96% figure above were all measured on a Sunday. One
+caveat: in replay the quote feed stays frozen at the last close, so `NEG`/`ULT`
+do not move and the capture percentage reads `n/d` — compare against the `.trd`
+instead.

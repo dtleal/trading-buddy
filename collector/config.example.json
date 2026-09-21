@@ -1,5 +1,9 @@
 {
   "backend_ws_url": "ws://72.62.15.111:8057/ws/ingest/orderflow",
+  "_comment_b3_rtd": "profit_rtd_collector.py only: live B3 times & trades from Profit's RTD server (WIN/WDO, with the broker on both sides). Link the Times & Trades window in Profit first (right click > Linkar Janela com Excel (RTD)). lines is capped at 500 by Profit; read_interval_ms of 20 keeps ~2x margin over the busiest second measured on WIN. Uses the same token as the order-flow ingest.",
+  "b3_ws_url": "ws://72.62.15.111:8057/api/players/ws/ingest/b3tape",
+  "lines": 500,
+  "read_interval_ms": 20,
   "token": "CHANGE_ME_to_match_ORDERFLOW_INGEST_TOKEN_on_the_backend",
   "poll_interval_ms": 100,
   "book_depth": 10,

@@ -52,6 +52,14 @@ export function AssetPlayersPanel({ data }: { data: AssetPlayers }) {
         <div className="flex items-baseline gap-2">
           <h2 className="text-sm font-semibold text-zinc-100">{data.asset}</h2>
           <span className="text-[11px] text-zinc-500">{data.symbol}</span>
+          {data.live && (
+            <span
+              className="rounded bg-emerald-950 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-emerald-400"
+              title="Negócio a negócio pelo RTD do Profit, sem esperar o arquivo gravar."
+            >
+              RTD
+            </span>
+          )}
           {data.last_price !== null && (
             <span className="text-sm font-semibold tabular-nums text-zinc-200">
               {data.last_price.toLocaleString("pt-BR")}
