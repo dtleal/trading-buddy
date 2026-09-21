@@ -635,3 +635,35 @@ Collector".
 Replay do Profit. A janela de T&T enche como se fosse ao vivo e o RTD serve
 igual — foi assim que tudo acima foi medido num domingo. No replay o feed de
 cotação fica congelado, então a aferição tem que ser contra o `.trd`.
+
+## 10. A fazer (aberto em 20/09/2026)
+
+### Buraco do restart do backend no meio do pregão
+**Problema.** O acumulador ao vivo mora na memória do backend. Hoje ele começa
+adotando o que o leitor de arquivo já montou (o `.trd` do dia) e segue dali com
+o RTD. Só que o Profit para de escrever o `.trd` logo depois de abrir a janela
+de T&T — por volta das 10h. Então, se o backend reiniciar às 14h, ele relê o
+arquivo (que termina às 10h), o ao vivo recomeça daquele ponto e **some tudo
+entre 10h e 14h**.
+
+**Como fechar.** Gravar em disco cada negócio que o collector manda (um `.jsonl`
+por dia e por contrato, no mesmo espírito do `orderflow_record_dir` que já
+existe) e, no startup, reprocessar esse arquivo antes de aceitar o ao vivo. A
+ordem vira: `.trd` do dia → gravação nossa → RTD ao vivo, cada um cortado pelo
+horário do último negócio do anterior (o corte por `cut` já existe em
+`_feed_live`).
+
+**Onde mexer.** `backend/api/routes/players.py` (`_try_seed`, `_feed_live`) e
+provavelmente um adapter novo pro arquivo de gravação. O teste de costura já
+existe em `backend/tests/unit/test_players_live_seed.py` e é o lugar de somar
+os casos novos.
+
+**Como saber que ficou pronto.** Reiniciar o backend no meio de um replay e a
+aba continuar mostrando o mesmo total de negócios de antes do restart, em vez
+de recomeçar do zero.
+
+### Menor
+- A linha do RLP no card usa `text-zinc-700` em 10px e está quase invisível,
+  igual a linha dos 15 min estava antes de ser refeita.
+- O card de "últimos 15 min" mostra número igual ao do dia enquanto a fita tiver
+  menos de 15 minutos. Decidir se esconde ou marca "= o dia".
