@@ -35,6 +35,7 @@ from adapters.profit_rtd import multiplier_for, name_to_code, parse_trade
 from adapters.profit_tape import (
     TapeFile,
     Trade,
+    append_trades,
     archive_tape,
     find_tape_files,
     load_agents,
@@ -105,12 +106,33 @@ class PlayersResponse(BaseModel):
 
 @dataclass
 class _Reader:
-    """Where we are inside one asset's tape file."""
+    """Where we are inside one asset's tape file, and inside our own recording.
+
+    Two files, read in that order: Profit's `.trd` holds the session up to the
+    moment the Times & Trades window opened, and our recording holds what the
+    live feed saw after that (see `_record_path`). Both are tailed by offset,
+    so a poll only parses what was appended since the last one.
+    """
 
     file: TapeFile
+    # Session the accumulator stands for. Normally the file's own day; today's
+    # date when the newest file is old and our recording is all there is.
+    day: date
     offset: int
     accumulator: PlayersAccumulator
     pending_bytes: int = 0
+    record_offset: int = 0
+    record_pending: int = 0
+    # A brand new reader has read nothing yet, and "nothing read" looks exactly
+    # like "nothing left to read". The live feed must not adopt an accumulator
+    # that is empty only because the first pass has not run, so the reader is
+    # born busy and clears the flag once a pass has been through it.
+    read_once: bool = False
+
+    @property
+    def busy(self) -> bool:
+        """True while either file still has bytes we have not read."""
+        return not self.read_once or self.pending_bytes > 0 or self.record_pending > 0
 
 
 @dataclass
@@ -163,23 +185,78 @@ def _read_once(
             # to stall the event loop — which showed up as the ingest socket
             # timing out while the collector was mid-send.
             continue
+        # Which session to build: Profit's file when it is from today, and
+        # otherwise our own recording — a file from last week next to prints
+        # recorded this morning means the window was never reopened, so the
+        # recording is the only account of today there is.
+        day = _session_day(prefix, tape, now.date())
         reader = _readers.get(prefix)
-        if reader is None or reader.file.path != tape.path:
-            reader = _Reader(file=tape, offset=0, accumulator=PlayersAccumulator())
+        if reader is None or reader.file.path != tape.path or reader.day != day:
+            reader = _Reader(file=tape, day=day, offset=0, accumulator=PlayersAccumulator())
             _readers[prefix] = reader
-        trades, reader.offset, reader.pending_bytes = read_trades(
-            tape.path, reader.offset, _SLICE_BYTES
-        )
+        if reader.day == tape.day:
+            trades, reader.offset, reader.pending_bytes = read_trades(
+                tape.path, reader.offset, _SLICE_BYTES
+            )
+            if trades:
+                reader.accumulator.feed(trades)
         if archive_dir is not None:
             archive_tape(tape, archive_dir)
-        if trades:
-            reader.accumulator.feed(trades)
-        if reader.pending_bytes > 0:
+        if reader.pending_bytes == 0 and reader.day == now.date():
+            _replay_record(prefix, reader)
+        reader.read_once = True
+        if reader.busy:
             catching_up = True
         snapshots.append(
-            reader.accumulator.snapshot(_agents, prefix, tape.symbol, tape.day.isoformat(), now)
+            reader.accumulator.snapshot(_agents, prefix, tape.symbol, reader.day.isoformat(), now)
         )
     return snapshots, catching_up
+
+
+def _session_day(prefix: str, tape: TapeFile, today: date) -> date:
+    """The day the reader should build: the tape's, or today's when only our
+    recording has today in it."""
+    if tape.day == today:
+        return today
+    path = _record_path(prefix, today)
+    return today if path is not None and path.exists() else tape.day
+
+
+def _record_path(prefix: str, day: date) -> Path | None:
+    """Our own recording of one session, or None when recording is off."""
+    directory = get_settings().players_live_dir.strip()
+    return Path(directory) / f"{prefix}_{day.isoformat()}.trd" if directory else None
+
+
+def _replay_record(prefix: str, reader: _Reader) -> None:
+    """Fold our recording of the live feed back in, on top of the file.
+
+    Profit stops writing the `.trd` right after the Times & Trades window
+    opens, so a backend started at 14h reads a file that ends at 10h and the
+    middle of the day would simply be missing. The recording holds exactly that
+    gap (`_feed_live` writes it), and reading it here — in the reader's own
+    thread, right behind the file — means the live feed later adopts a session
+    that already runs up to the last print seen before the restart.
+
+    Prints at or before what the file already counted are dropped, the same
+    seam rule the live feed uses for its own first batch.
+    """
+    path = _record_path(prefix, reader.day)
+    if path is None:
+        return
+    trades, reader.record_offset, reader.record_pending = read_trades(
+        path, reader.record_offset, _SLICE_BYTES
+    )
+    cut = reader.accumulator.last_trade
+    fresh = [trade for trade in trades if cut is None or trade.at > cut]
+    if fresh:
+        reader.accumulator.feed(fresh)
+        logger.info(
+            "%s: %d negocios recuperados da gravacao (ate %s)",
+            prefix,
+            len(fresh),
+            reader.accumulator.last_trade,
+        )
 
 
 async def refresh_loop() -> None:
@@ -309,11 +386,11 @@ def _try_seed(prefix: str, live: _Live) -> None:
     as a later "first trade".
     """
     reader = _readers.get(prefix)
-    not_ready = reader is None or reader.pending_bytes > 0
+    not_ready = reader is None or reader.busy
     if not_ready and len(live.pending) < _MAX_PENDING and monotonic() < live.deadline:
         return  # the reader is still working on this contract; keep holding
     live.seeded = True
-    if reader is None or reader.pending_bytes > 0 or reader.file.day != live.day:
+    if reader is None or reader.busy or reader.day != live.day:
         logger.info("%s: ao vivo comeca do zero (sem arquivo de hoje)", prefix)
         return
     live.accumulator = reader.accumulator
@@ -371,6 +448,11 @@ def _feed_live(message: dict[str, Any]) -> None:
         _warn_dropped(prefix, live.dropped, rejected)
     if trades:
         live.accumulator.feed(trades)
+        path = _record_path(prefix, live.day)
+        if path is not None:
+            # Only what was actually counted goes to disk, so reading the file
+            # back is the same as having received the batch again.
+            append_trades(path, trades)
 
 
 # One line per contract per minute: at 8.900 prints/s a per-print log would

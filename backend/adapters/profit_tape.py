@@ -202,3 +202,40 @@ def read_trades(
     ]
     new_offset = offset + usable
     return trades, new_offset, max(0, size - new_offset - (size - new_offset) % RECORD_SIZE)
+
+
+def append_trades(path: Path, trades: list[Trade]) -> None:
+    """Append prints to a tape file of ours, in Profit's own record layout.
+
+    The live RTD feed is the only source for the part of the session Profit
+    stops writing (it closes the `.trd` right after the Times & Trades window
+    opens), and that part lives only in the backend's memory. Writing it here
+    means a restart in the middle of the afternoon can read the day back
+    instead of starting over — see `read_trades`, which reads this file the
+    same way it reads Profit's.
+
+    A write failure is logged and dropped: the live tab must keep working even
+    when the disk does not.
+    """
+    if not trades:
+        return
+    blob = b"".join(
+        RECORD.pack(
+            (trade.at - _DELPHI_EPOCH).total_seconds() / 86400.0,
+            trade.seq,
+            trade.price,
+            trade.qty,
+            0,
+            trade.financial,
+            trade.buyer,
+            trade.seller,
+            trade.kind,
+        )
+        for trade in trades
+    )
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("ab") as handle:
+            handle.write(blob)
+    except OSError as exc:
+        logger.warning("nao consegui gravar %d negocios em %s: %s", len(trades), path.name, exc)

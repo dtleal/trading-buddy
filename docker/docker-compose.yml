@@ -43,6 +43,10 @@ services:
       # Times & Trades foi aberta, então sem esta cópia o histórico que o
       # backtest precisa nunca se acumula.
       - ../data/b3_tape:/app/data/b3_tape
+      # Os negócios que só o RTD ao vivo vê. O Profit fecha o `.trd` logo depois
+      # de abrir a janela de Times & Trades, então sem esta gravação um restart
+      # no meio do pregão perde o miolo do dia.
+      - ../data/b3_live:/app/data/b3_live
 
   postgres:
     image: postgres:16-alpine

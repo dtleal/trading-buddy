@@ -103,6 +103,12 @@ class Settings(BaseSettings):
     # roll leaves the old folder behind, so without a copy the history the
     # backtest needs never accumulates. Empty = do not archive.
     players_archive_dir: str = "data/b3_tape"
+    # Where to write the prints that only the live RTD feed ever sees. Profit
+    # closes the `.trd` right after the Times & Trades window opens (~10h), so
+    # from then on the session exists only in memory and a backend restart at
+    # 14h would lose the middle of the day. One file per contract prefix per
+    # session day, in Profit's own record layout. Empty = do not record.
+    players_live_dir: str = "data/b3_live"
 
     # --- ntfy.sh push notifications --------------------------------------
 
