@@ -19,6 +19,7 @@ Profit appended since the last one, which is a few kilobytes.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
@@ -311,6 +312,77 @@ async def players() -> PlayersResponse:
         loading=_loading and not ready,
         assets=assets,
     )
+
+
+class PlayersTickModel(BaseModel):
+    """The three numbers that move on every print. Everything else on the card
+    (series, corretoras, os saldos por grupo) changes slowly enough to ride the
+    full poll."""
+
+    asset: str
+    last_price: float | None
+    last_trade: datetime | None
+    trades: int
+
+
+# How often the stream looks for something new. The collector lands a print
+# ~100ms after it happened, so looking faster would only find the same numbers.
+_STREAM_SECONDS = 0.1
+
+
+def _ticks() -> list[PlayersTickModel]:
+    """Price and print count per contract, straight off the accumulators. The
+    live feed wins over the file for the same contract, same rule as the card."""
+    ticks = [
+        PlayersTickModel(
+            asset=prefix,
+            last_price=state.accumulator.last_price,
+            last_trade=state.accumulator.last_trade,
+            trades=state.accumulator.trades,
+        )
+        for prefix, state in _live.items()
+        if state.seeded
+    ]
+    seen = {item.asset for item in ticks}
+    ticks.extend(
+        PlayersTickModel(
+            asset=snapshot.asset,
+            last_price=snapshot.last_price,
+            last_trade=snapshot.last_trade,
+            trades=snapshot.trades,
+        )
+        for snapshot in _snapshots
+        if snapshot.asset not in seen
+    )
+    ticks.sort(key=lambda item: item.asset)
+    return ticks
+
+
+@router.websocket("/ws/tick")
+async def tick_stream(websocket: WebSocket) -> None:
+    """Streams the price to the browser instead of being asked for it.
+
+    The card used to poll, and a poll can only be as fresh as its interval —
+    at 3s the price visibly trailed the Profit window, and asking ten times a
+    second to fix that is a request per print. Here the socket stays open and
+    the payload goes out when it changes, which is the shape the rest of the
+    live data already uses (see the order-flow channel).
+
+    Only the three fields that move on every print travel this way. The series,
+    the corretoras and the group totals keep riding the full REST read, which
+    changes slowly enough for it.
+    """
+    await websocket.accept()
+    last: str | None = None
+    try:
+        while True:
+            payload = json.dumps([item.model_dump(mode="json") for item in _ticks()])
+            if payload != last:
+                await websocket.send_text(payload)
+                last = payload
+            await asyncio.sleep(_STREAM_SECONDS)
+    except WebSocketDisconnect:
+        return
 
 
 # --- ingest (RTD collector → backend) ---------------------------------------

@@ -10,7 +10,8 @@ const LINES = [
 ] as const;
 
 const WIDTH = 720;
-const HEIGHT = 150;
+// Alto o bastante pra separar quatro linhas que andam juntas boa parte do dia.
+const HEIGHT = 240;
 
 /**
  * Cumulative net per group over the session, in reais, with price on the same
@@ -21,7 +22,7 @@ const HEIGHT = 150;
 export function PlayersFlowChart({ series }: { series: PlayersBucket[] }) {
   if (series.length < 2) {
     return (
-      <p className="py-8 text-center text-xs text-zinc-600">
+      <p className="py-8 text-center text-xs text-zinc-400">
         aguardando fita suficiente pra desenhar
       </p>
     );
@@ -49,7 +50,7 @@ export function PlayersFlowChart({ series }: { series: PlayersBucket[] }) {
     <div>
       <svg
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-        className="h-[150px] w-full"
+        className="h-[240px] w-full"
         preserveAspectRatio="none"
         role="img"
         aria-label="Saldo acumulado em reais por player ao longo do pregão"
@@ -59,17 +60,17 @@ export function PlayersFlowChart({ series }: { series: PlayersBucket[] }) {
           y1={HEIGHT / 2}
           x2={WIDTH}
           y2={HEIGHT / 2}
-          stroke="#3f3f46"
-          strokeWidth={1}
-          strokeDasharray="3 3"
+          stroke="#52525b"
+          strokeWidth={1.5}
+          strokeDasharray="4 4"
         />
         <polyline
           points={series
             .map((bucket, index) => `${x(index)},${yPrice(bucket.price)}`)
             .join(" ")}
           fill="none"
-          stroke="#52525b"
-          strokeWidth={1}
+          stroke="#71717a"
+          strokeWidth={1.5}
           vectorEffect="non-scaling-stroke"
         />
         {cumulative.map((line) => (
@@ -78,25 +79,27 @@ export function PlayersFlowChart({ series }: { series: PlayersBucket[] }) {
             points={line.points.map((value, index) => `${x(index)},${yFlow(value)}`).join(" ")}
             fill="none"
             stroke={line.color}
-            strokeWidth={1.5}
+            strokeWidth={3}
+            strokeLinecap="round"
+            strokeLinejoin="round"
             vectorEffect="non-scaling-stroke"
           />
         ))}
       </svg>
-      <div className="mt-1 flex flex-wrap items-center gap-3 text-[10px] text-zinc-500">
-        <span className="text-zinc-600">saldo acumulado (R$)</span>
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-zinc-300">
+        <span className="text-zinc-400">saldo acumulado (R$)</span>
         {LINES.map((line) => (
           <span key={line.key} className="flex items-center gap-1">
             <span
               aria-hidden
-              className="inline-block h-0.5 w-3"
+              className="inline-block h-[3px] w-4 rounded-full"
               style={{ background: line.color }}
             />
             {line.label}
           </span>
         ))}
         <span className="flex items-center gap-1">
-          <span aria-hidden className="inline-block h-0.5 w-3 bg-zinc-600" />
+          <span aria-hidden className="inline-block h-[3px] w-4 rounded-full bg-zinc-500" />
           preço
         </span>
       </div>

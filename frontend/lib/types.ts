@@ -804,3 +804,46 @@ export const PlayersResponse = z.object({
   assets: z.array(AssetPlayers),
 });
 export type PlayersResponse = z.infer<typeof PlayersResponse>;
+
+/** Response from /api/players/tick: so o que muda a cada negocio. */
+export const PlayersTick = z.object({
+  asset: z.string(),
+  last_price: z.number().nullable(),
+  last_trade: z.string().nullable(),
+  trades: z.number(),
+});
+export type PlayersTick = z.infer<typeof PlayersTick>;
+export const PlayersTickList = z.array(PlayersTick);
+
+/** Uma acao do top de pesos do Ibov. `contrib_pct` = peso x variacao, ou seja
+ *  quanto dela sozinha esta empurrando o indice hoje. */
+export const IbovStock = z.object({
+  cod: z.string(),
+  nome: z.string(),
+  peso: z.number(),
+  var_pct: z.number().nullable(),
+  contrib_pct: z.number().nullable(),
+});
+export type IbovStock = z.infer<typeof IbovStock>;
+
+/** Uma faixa de variacao: quantas acoes passaram dela pra cima e pra baixo.
+ *  Cumulativa — a faixa de 1% inclui as que passaram de 2%. */
+export const IbovLevel = z.object({
+  nivel: z.number(),
+  sobe: z.number(),
+  cai: z.number(),
+});
+export type IbovLevel = z.infer<typeof IbovLevel>;
+
+/** Response from /api/ibov. `carteira` = data da carteira teorica da B3. */
+export const IbovResponse = z.object({
+  carteira: z.string(),
+  peso: z.number(),
+  contrib_pct: z.number().nullable(),
+  acoes: z.array(IbovStock),
+  universo: z.number(),
+  abertas: z.number(),
+  pct_sobe: z.number().nullable(),
+  niveis: z.array(IbovLevel),
+});
+export type IbovResponse = z.infer<typeof IbovResponse>;

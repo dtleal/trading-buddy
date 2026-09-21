@@ -2,26 +2,21 @@
 
 import { Header } from "@/components/shared/Header";
 import { AssetPlayersPanel } from "@/components/players/AssetPlayersPanel";
+import { IbovBreadth } from "@/components/players/IbovBreadth";
+import { IbovTop10 } from "@/components/players/IbovTop10";
 import { usePlayers } from "@/hooks/usePlayers";
+import { usePlayersTick } from "@/hooks/usePlayersTick";
+import { useIbov } from "@/hooks/useIbov";
 
 export default function PlayersPage() {
   const { data, error } = usePlayers();
+  const ibov = useIbov();
+  const ticks = usePlayersTick();
 
   return (
     <>
       <Header />
       <main className="mx-auto w-full max-w-[2100px] flex-1 px-4 py-6">
-        <p className="mb-4 max-w-4xl text-xs text-zinc-500">
-          Quem está do outro lado no <span className="text-zinc-300">WDO</span> e no{" "}
-          <span className="text-zinc-300">WIN</span>, lido negócio a negócio do tape da
-          B3 (Times &amp; Trades do Profit, que traz a corretora dos dois lados).{" "}
-          <span className="text-emerald-400">B3 / RLP</span> é marcação dura: negócio RLP
-          só existe pra cliente de varejo, então é sardinha por regra.{" "}
-          <span className="text-zinc-300">leitura</span> é palpite nosso — agrupamos por
-          corretora, e corretora não é o mesmo que tipo de investidor (a XP roteia
-          institucional, o código do Itaú mistura mesa e cliente).
-        </p>
-
         {error && (
           <p className="mb-4 rounded border border-red-900 bg-red-950/40 p-3 text-xs text-red-300">
             backend fora do ar ou sem resposta.
@@ -49,12 +44,20 @@ export default function PlayersPage() {
           </p>
         )}
 
+        {/* Quem puxa à esquerda, quantos vieram junto à direita. */}
+        {ibov && ibov.acoes.length > 0 && (
+          <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-[1fr_260px]">
+            <IbovTop10 data={ibov} />
+            <IbovBreadth data={ibov} />
+          </div>
+        )}
+
         {/* WDO e WIN lado a lado: o que interessa é a discordância entre os
             dois, e pra isso os dois têm que caber na mesma tela. Empilha
             de novo abaixo de lg, onde não cabe. */}
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {data?.assets.map((asset) => (
-            <AssetPlayersPanel key={asset.asset} data={asset} />
+            <AssetPlayersPanel key={asset.asset} data={asset} tick={ticks[asset.asset]} />
           ))}
         </div>
       </main>

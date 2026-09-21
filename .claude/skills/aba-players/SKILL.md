@@ -673,3 +673,35 @@ negócios esperam enquanto a gravação está sendo lida.
   menos de 15 minutos. Decidir se esconde ou marca "= o dia".
 - A pasta `data/b3_live` cresce e ninguém limpa (um dia de WIN dá umas centenas
   de MB). Mesma situação de `data/b3_tape`.
+
+## 11. O que a aba tem hoje (21/09/2026)
+
+### Preço ao vivo por websocket
+`/api/players/ws/tick` empurra **preço, hora do último negócio e contagem** a
+cada 100 ms, que é o ritmo em que o collector entrega o negócio. O resto do
+card (saldos por grupo, série e tabela de corretoras) continua no poll REST de
+1 s — muda devagar o bastante. Poll de 100 ms chegou a existir e foi trocado:
+era uma requisição por negócio pra fazer o trabalho de um socket aberto.
+
+### Painel do Ibov (topo da aba)
+- **Top 10 pesos** (`/api/ibov`): a barra é dimensionada pela **contribuição**
+  (peso × variação), não pela variação — 3% numa ação de 0,5% de peso não move
+  o índice e não pode desenhar igual à Vale.
+- **Ações por nível**: quantas das 76 passaram de cada faixa (0/0,5/1/2/3/4/5%),
+  cumulativo, com a barra de amplitude embaixo. Diz se a alta é do mercado
+  inteiro ou de três nomes.
+- Pesos: carteira teórica oficial da B3, em `backend/adapters/ibov_pesos.json`
+  (fica junto do código porque `data/` é gitignored). Rebalanceia 3x por ano.
+- Cotação: Yahoo, **atrasada 15 min** — está escrito no painel. O jeito certo é
+  uma lista de ativos no Profit linkada no RTD; ficou pra depois.
+
+### Tabela de corretoras
+Filtro por grupo e por lado (comprado/vendido) e os quatro títulos ordenam a
+lista (clique inverte, seta mostra por onde está). Tudo no cliente, em cima do
+top 12 que o backend já manda.
+
+### Leitura visual
+Cinza escuro sobre fundo preto não se lia: `zinc-700/600` viraram `zinc-400`,
+`zinc-500` virou `zinc-300`, os textos de 9-10 px foram pra 11 px. O gráfico de
+saldo acumulado dobrou de altura (150 → 240) e as linhas foram de 1,5 pra 3 px.
+O texto de abertura da aba saiu.

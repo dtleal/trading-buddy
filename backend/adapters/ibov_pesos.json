@@ -1,0 +1,462 @@
+{
+ "data": "21/09/26",
+ "fonte": "B3 carteira teorica IBOV",
+ "acoes": [
+  {
+   "cod": "VALE3",
+   "nome": "VALE",
+   "peso": 10.41,
+   "acumulado": 10.41
+  },
+  {
+   "cod": "ITUB4",
+   "nome": "ITAUUNIBANCO",
+   "peso": 8.695,
+   "acumulado": 19.105
+  },
+  {
+   "cod": "PETR4",
+   "nome": "PETROBRAS",
+   "peso": 8.232,
+   "acumulado": 27.337
+  },
+  {
+   "cod": "PETR3",
+   "nome": "PETROBRAS",
+   "peso": 5.019,
+   "acumulado": 32.356
+  },
+  {
+   "cod": "AXIA3",
+   "nome": "AXIA ENERGIA",
+   "peso": 4.717,
+   "acumulado": 37.073
+  },
+  {
+   "cod": "SBSP3",
+   "nome": "SABESP",
+   "peso": 3.704,
+   "acumulado": 40.777
+  },
+  {
+   "cod": "BBDC4",
+   "nome": "BRADESCO",
+   "peso": 3.531,
+   "acumulado": 44.308
+  },
+  {
+   "cod": "B3SA3",
+   "nome": "B3",
+   "peso": 3.375,
+   "acumulado": 47.683
+  },
+  {
+   "cod": "ITSA4",
+   "nome": "ITAUSA",
+   "peso": 3.228,
+   "acumulado": 50.911
+  },
+  {
+   "cod": "WEGE3",
+   "nome": "WEG",
+   "peso": 2.905,
+   "acumulado": 53.816
+  },
+  {
+   "cod": "BPAC11",
+   "nome": "BTGP BANCO",
+   "peso": 2.823,
+   "acumulado": 56.639
+  },
+  {
+   "cod": "EMBJ3",
+   "nome": "EMBRAER",
+   "peso": 2.659,
+   "acumulado": 59.298
+  },
+  {
+   "cod": "BBAS3",
+   "nome": "BRASIL",
+   "peso": 2.538,
+   "acumulado": 61.836
+  },
+  {
+   "cod": "ABEV3",
+   "nome": "AMBEV S/A",
+   "peso": 2.393,
+   "acumulado": 64.229
+  },
+  {
+   "cod": "ENEV3",
+   "nome": "ENEVA",
+   "peso": 2.001,
+   "acumulado": 66.23
+  },
+  {
+   "cod": "EQTL3",
+   "nome": "EQUATORIAL",
+   "peso": 1.897,
+   "acumulado": 68.127
+  },
+  {
+   "cod": "PRIO3",
+   "nome": "PRIO",
+   "peso": 1.834,
+   "acumulado": 69.961
+  },
+  {
+   "cod": "CPLE3",
+   "nome": "COPEL",
+   "peso": 1.827,
+   "acumulado": 71.788
+  },
+  {
+   "cod": "VBBR3",
+   "nome": "VIBRA",
+   "peso": 1.821,
+   "acumulado": 73.609
+  },
+  {
+   "cod": "UGPA3",
+   "nome": "ULTRAPAR",
+   "peso": 1.608,
+   "acumulado": 75.217
+  },
+  {
+   "cod": "RDOR3",
+   "nome": "REDE D OR",
+   "peso": 1.476,
+   "acumulado": 76.693
+  },
+  {
+   "cod": "RENT3",
+   "nome": "LOCALIZA",
+   "peso": 1.361,
+   "acumulado": 78.054
+  },
+  {
+   "cod": "GGBR4",
+   "nome": "GERDAU",
+   "peso": 1.213,
+   "acumulado": 79.267
+  },
+  {
+   "cod": "SUZB3",
+   "nome": "SUZANO S.A.",
+   "peso": 1.123,
+   "acumulado": 80.39
+  },
+  {
+   "cod": "RADL3",
+   "nome": "RAIADROGASIL",
+   "peso": 1.022,
+   "acumulado": 81.412
+  },
+  {
+   "cod": "BBSE3",
+   "nome": "BBSEGURIDADE",
+   "peso": 0.969,
+   "acumulado": 82.381
+  },
+  {
+   "cod": "BBDC3",
+   "nome": "BRADESCO",
+   "peso": 0.89,
+   "acumulado": 83.271
+  },
+  {
+   "cod": "VIVT3",
+   "nome": "TELEF BRASIL",
+   "peso": 0.842,
+   "acumulado": 84.113
+  },
+  {
+   "cod": "CSMG3",
+   "nome": "COPASA",
+   "peso": 0.825,
+   "acumulado": 84.938
+  },
+  {
+   "cod": "RAIL3",
+   "nome": "RUMO S.A.",
+   "peso": 0.81,
+   "acumulado": 85.748
+  },
+  {
+   "cod": "CMIG4",
+   "nome": "CEMIG",
+   "peso": 0.787,
+   "acumulado": 86.535
+  },
+  {
+   "cod": "ENGI11",
+   "nome": "ENERGISA",
+   "peso": 0.718,
+   "acumulado": 87.253
+  },
+  {
+   "cod": "TOTS3",
+   "nome": "TOTVS",
+   "peso": 0.681,
+   "acumulado": 87.934
+  },
+  {
+   "cod": "MOTV3",
+   "nome": "MOTIVA SA",
+   "peso": 0.622,
+   "acumulado": 88.556
+  },
+  {
+   "cod": "TIMS3",
+   "nome": "TIM",
+   "peso": 0.581,
+   "acumulado": 89.137
+  },
+  {
+   "cod": "KLBN11",
+   "nome": "KLABIN S/A",
+   "peso": 0.58,
+   "acumulado": 89.717
+  },
+  {
+   "cod": "ALOS3",
+   "nome": "ALLOS",
+   "peso": 0.532,
+   "acumulado": 90.249
+  },
+  {
+   "cod": "ASAI3",
+   "nome": "ASSAI",
+   "peso": 0.527,
+   "acumulado": 90.776
+  },
+  {
+   "cod": "EGIE3",
+   "nome": "ENGIE BRASIL",
+   "peso": 0.518,
+   "acumulado": 91.294
+  },
+  {
+   "cod": "ISAE4",
+   "nome": "ISA ENERGIA",
+   "peso": 0.485,
+   "acumulado": 91.779
+  },
+  {
+   "cod": "CXSE3",
+   "nome": "CAIXA SEGURI",
+   "peso": 0.477,
+   "acumulado": 92.256
+  },
+  {
+   "cod": "MBRF3",
+   "nome": "MARFRIG",
+   "peso": 0.477,
+   "acumulado": 92.733
+  },
+  {
+   "cod": "LREN3",
+   "nome": "LOJAS RENNER",
+   "peso": 0.419,
+   "acumulado": 93.152
+  },
+  {
+   "cod": "SANB11",
+   "nome": "SANTANDER BR",
+   "peso": 0.404,
+   "acumulado": 93.556
+  },
+  {
+   "cod": "MULT3",
+   "nome": "MULTIPLAN",
+   "peso": 0.38,
+   "acumulado": 93.936
+  },
+  {
+   "cod": "FLRY3",
+   "nome": "FLEURY",
+   "peso": 0.366,
+   "acumulado": 94.302
+  },
+  {
+   "cod": "GOAU4",
+   "nome": "GERDAU MET",
+   "peso": 0.363,
+   "acumulado": 94.665
+  },
+  {
+   "cod": "SMFT3",
+   "nome": "SMART FIT",
+   "peso": 0.363,
+   "acumulado": 95.028
+  },
+  {
+   "cod": "TAEE11",
+   "nome": "TAESA",
+   "peso": 0.352,
+   "acumulado": 95.38
+  },
+  {
+   "cod": "PSSA3",
+   "nome": "PORTO SEGURO",
+   "peso": 0.338,
+   "acumulado": 95.718
+  },
+  {
+   "cod": "CMIN3",
+   "nome": "CSNMINERACAO",
+   "peso": 0.33,
+   "acumulado": 96.048
+  },
+  {
+   "cod": "CPFE3",
+   "nome": "CPFL ENERGIA",
+   "peso": 0.328,
+   "acumulado": 96.376
+  },
+  {
+   "cod": "CSAN3",
+   "nome": "COSAN",
+   "peso": 0.32,
+   "acumulado": 96.696
+  },
+  {
+   "cod": "HYPE3",
+   "nome": "HYPERA",
+   "peso": 0.271,
+   "acumulado": 96.967
+  },
+  {
+   "cod": "CYRE3",
+   "nome": "CYRELA REALT",
+   "peso": 0.263,
+   "acumulado": 97.23
+  },
+  {
+   "cod": "NATU3",
+   "nome": "NATURA",
+   "peso": 0.256,
+   "acumulado": 97.486
+  },
+  {
+   "cod": "IGTI11",
+   "nome": "IGUATEMI S.A",
+   "peso": 0.222,
+   "acumulado": 97.708
+  },
+  {
+   "cod": "BRAP4",
+   "nome": "BRADESPAR",
+   "peso": 0.205,
+   "acumulado": 97.913
+  },
+  {
+   "cod": "BRAV3",
+   "nome": "BRAVA",
+   "peso": 0.185,
+   "acumulado": 98.098
+  },
+  {
+   "cod": "CURY3",
+   "nome": "CURY S/A",
+   "peso": 0.18,
+   "acumulado": 98.278
+  },
+  {
+   "cod": "COGN3",
+   "nome": "COGNA ON",
+   "peso": 0.167,
+   "acumulado": 98.445
+  },
+  {
+   "cod": "CSNA3",
+   "nome": "SID NACIONAL",
+   "peso": 0.164,
+   "acumulado": 98.609
+  },
+  {
+   "cod": "AURE3",
+   "nome": "AUREN",
+   "peso": 0.151,
+   "acumulado": 98.76
+  },
+  {
+   "cod": "TEND3",
+   "nome": "TENDA",
+   "peso": 0.138,
+   "acumulado": 98.898
+  },
+  {
+   "cod": "USIM5",
+   "nome": "USIMINAS",
+   "peso": 0.138,
+   "acumulado": 99.036
+  },
+  {
+   "cod": "DIRR3",
+   "nome": "DIRECIONAL",
+   "peso": 0.126,
+   "acumulado": 99.162
+  },
+  {
+   "cod": "POMO4",
+   "nome": "MARCOPOLO",
+   "peso": 0.12,
+   "acumulado": 99.282
+  },
+  {
+   "cod": "VIVA3",
+   "nome": "VIVARA S.A.",
+   "peso": 0.108,
+   "acumulado": 99.39
+  },
+  {
+   "cod": "YDUQ3",
+   "nome": "YDUQS PART",
+   "peso": 0.101,
+   "acumulado": 99.491
+  },
+  {
+   "cod": "MGLU3",
+   "nome": "MAGAZ LUIZA",
+   "peso": 0.088,
+   "acumulado": 99.579
+  },
+  {
+   "cod": "MRVE3",
+   "nome": "MRV",
+   "peso": 0.075,
+   "acumulado": 99.654
+  },
+  {
+   "cod": "AZZA3",
+   "nome": "AZZAS 2154",
+   "peso": 0.072,
+   "acumulado": 99.726
+  },
+  {
+   "cod": "CEAB3",
+   "nome": "CEA MODAS",
+   "peso": 0.07,
+   "acumulado": 99.796
+  },
+  {
+   "cod": "VAMO3",
+   "nome": "VAMOS",
+   "peso": 0.07,
+   "acumulado": 99.866
+  },
+  {
+   "cod": "BEEF3",
+   "nome": "MINERVA",
+   "peso": 0.068,
+   "acumulado": 99.934
+  },
+  {
+   "cod": "HAPV3",
+   "nome": "HAPVIDA",
+   "peso": 0.066,
+   "acumulado": 100.0
+  }
+ ]
+}

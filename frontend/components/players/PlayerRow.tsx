@@ -45,7 +45,7 @@ export function PlayerRow({ player }: { player: PlayerRead }) {
   const bought = player.saldo_rs >= 0;
   const flat = player.saldo_rs === 0;
   const bar = flat ? "bg-zinc-800" : bought ? "bg-blue-800" : "bg-red-700";
-  const tone = flat ? "text-zinc-500" : bought ? "text-sky-400" : "text-red-400";
+  const tone = flat ? "text-zinc-300" : bought ? "text-sky-400" : "text-red-400";
 
   return (
     <div className="flex items-center gap-3">
@@ -75,7 +75,7 @@ export function PlayerRow({ player }: { player: PlayerRead }) {
           linhas. Sem isso, "ESTRANGEIRO" e "INSTITUCIONAL" empurram o lado pra
           posições diferentes e a leitura fica torta. */}
       <div className="flex shrink-0 items-baseline whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide">
-        <span className="w-[104px] text-right text-zinc-500">{player.papel}</span>
+        <span className="w-[104px] text-right text-zinc-300">{player.papel}</span>
         <span className={cn("w-[94px] pl-2 text-left", tone)}>
           · {bought ? "COMPRADO" : "VENDIDO"}
         </span>

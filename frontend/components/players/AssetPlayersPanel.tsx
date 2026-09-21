@@ -1,17 +1,18 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
 import { LABEL_TONE, MASCOT, PlayerRow, money } from "@/components/players/PlayerRow";
 import { PlayersFlowChart } from "@/components/players/PlayersFlowChart";
 import { cn } from "@/lib/utils";
-import type { AssetPlayers } from "@/lib/types";
+import type { AssetPlayers, PlayersTick } from "@/lib/types";
 
 /** Uma linha de detalhe que reusa as colunas das barras, pra alinhar. */
 function DetailLine({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex items-baseline gap-3">
-      <span className="w-[118px] shrink-0 text-right text-zinc-700">{label}</span>
+      <span className="w-[118px] shrink-0 text-right text-zinc-400">{label}</span>
       <span className="min-w-0 flex-1 truncate">{children}</span>
     </div>
   );
@@ -45,31 +46,171 @@ function freshness(lag: number | null, stale: boolean) {
 }
 
 /** One contract: the player cards, the session shape and who actually traded. */
-export function AssetPlayersPanel({ data }: { data: AssetPlayers }) {
+type Grupo = "todos" | "baleia" | "banco" | "sardinha";
+type Lado = "todos" | "comprado" | "vendido";
+type Ordem = "corretora" | "grupo" | "giro" | "saldo";
+
+/** Filtros do card das corretoras. Ficam no card, e não na barra do topo, porque
+ *  é uma pergunta por ativo: "quem girou o WIN" é outra lista de "quem girou o
+ *  WDO". */
+function BrokerFilters({
+  grupo,
+  lado,
+  ordem,
+  onGrupo,
+  onLado,
+  onOrdem,
+}: {
+  grupo: Grupo;
+  lado: Lado;
+  ordem: Ordem;
+  onGrupo: (value: Grupo) => void;
+  onLado: (value: Lado) => void;
+  onOrdem: (value: Ordem) => void;
+}) {
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
+      <Chips
+        options={["todos", "baleia", "banco", "sardinha"] as const}
+        value={grupo}
+        onChange={onGrupo}
+      />
+      <Chips options={["todos", "comprado", "vendido"] as const} value={lado} onChange={onLado} />
+      <div className="flex items-center gap-1">
+        <span className="text-zinc-400">ordem</span>
+        <Chips options={["giro", "saldo"] as const} value={ordem} onChange={onOrdem} />
+      </div>
+    </div>
+  );
+}
+
+/** Título de coluna que ordena a tabela. A seta mostra por onde está ordenado,
+ *  que é a única forma de a lista não parecer embaralhada depois do clique. */
+function SortHeader({
+  coluna,
+  ordem,
+  desc,
+  onSort,
+  align = "left",
+}: {
+  coluna: Ordem;
+  ordem: Ordem;
+  desc: boolean;
+  onSort: (coluna: Ordem) => void;
+  align?: "left" | "right";
+}) {
+  const active = coluna === ordem;
+  return (
+    <th className={cn("py-1 font-normal", align === "right" ? "text-right" : "text-left")}>
+      <button
+        type="button"
+        onClick={() => onSort(coluna)}
+        className={cn("hover:text-zinc-300", active && "text-zinc-300")}
+      >
+        {coluna}
+        <span className="ml-0.5 text-[11px]">{active ? (desc ? "▼" : "▲") : ""}</span>
+      </button>
+    </th>
+  );
+}
+
+function Chips<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: readonly T[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div className="flex gap-1">
+      {options.map((option) => (
+        <button
+          key={option}
+          type="button"
+          onClick={() => onChange(option)}
+          className={cn(
+            "rounded px-1.5 py-[2px]",
+            option === value
+              ? "bg-zinc-800 text-zinc-200"
+              : "text-zinc-400 hover:text-zinc-400",
+          )}
+        >
+          {option}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function AssetPlayersPanel({
+  data,
+  tick,
+}: {
+  data: AssetPlayers;
+  tick?: PlayersTick;
+}) {
+  // O tick chega 10x por segundo e traz só preço, hora e contagem; o resto do
+  // card continua vindo da leitura inteira.
+  const price = tick?.last_price ?? data.last_price;
+  const lastTrade = tick?.last_trade ?? data.last_trade;
+  const trades = tick?.trades ?? data.trades;
+  const [grupo, setGrupo] = useState<Grupo>("todos");
+  const [lado, setLado] = useState<Lado>("todos");
+  const [ordem, setOrdem] = useState<Ordem>("giro");
+  const [desc, setDesc] = useState(true);
+
+  // Clicar de novo no mesmo título inverte; trocar de coluna começa do maior,
+  // que é o que se quer ver em giro e saldo.
+  const sortBy = (coluna: Ordem) => {
+    setDesc(coluna === ordem ? !desc : true);
+    setOrdem(coluna);
+  };
+
+  // A lista vem do backend já ordenada por giro e cortada no top 12, então
+  // filtrar e ordenar aqui é só mexer no que já está na tela — nada volta pro
+  // servidor.
+  const brokers = useMemo(() => {
+    const rows = data.top_brokers.filter(
+      (broker) =>
+        (grupo === "todos" || broker.grupo === grupo) &&
+        (lado === "todos" ||
+          (lado === "comprado" ? broker.saldo > 0 : broker.saldo < 0)),
+    );
+    const order = desc ? -1 : 1;
+    return [...rows].sort((a, b) => {
+      if (ordem === "corretora") return order * a.name.localeCompare(b.name);
+      if (ordem === "grupo") return order * a.grupo.localeCompare(b.grupo);
+      if (ordem === "saldo") return order * (a.saldo - b.saldo);
+      return order * (a.volume - b.volume);
+    });
+  }, [data.top_brokers, grupo, lado, ordem, desc]);
+
   return (
     <section className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
       <header className="mb-3 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <div className="flex items-baseline gap-2">
           <h2 className="text-sm font-semibold text-zinc-100">{data.asset}</h2>
-          <span className="text-[11px] text-zinc-500">{data.symbol}</span>
+          <span className="text-[11px] text-zinc-300">{data.symbol}</span>
           {data.live && (
             <span
-              className="rounded bg-emerald-950 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-emerald-400"
+              className="rounded bg-emerald-950 px-1.5 py-0.5 text-[11px] font-semibold uppercase text-emerald-400"
               title="Negócio a negócio pelo RTD do Profit, sem esperar o arquivo gravar."
             >
               RTD
             </span>
           )}
-          {data.last_price !== null && (
+          {price !== null && (
             <span className="text-sm font-semibold tabular-nums text-zinc-200">
-              {data.last_price.toLocaleString("pt-BR")}
+              {price.toLocaleString("pt-BR")}
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2 text-[10px] text-zinc-500">
+        <div className="flex items-center gap-2 text-[11px] text-zinc-300">
           <span>
-            {data.session} · {clock(data.first_trade)}–{clock(data.last_trade)} ·{" "}
-            {data.trades.toLocaleString("pt-BR")} negócios
+            {data.session} · {clock(data.first_trade)}–{clock(lastTrade)} ·{" "}
+            {trades.toLocaleString("pt-BR")} negócios
           </span>
           <span
             className={cn(
@@ -103,7 +244,7 @@ export function AssetPlayersPanel({ data }: { data: AssetPlayers }) {
 
       {/* Duas linhas de detalhe, com as mesmas colunas das barras acima, pra
           tudo cair na mesma régua em vez de flutuar. */}
-      <div className="mt-2 space-y-0.5 text-[10px]">
+      <div className="mt-2 space-y-0.5 text-[11px]">
         <DetailLine label="RLP (varejo B3)">
           {(() => {
             const rlp = data.players.find((p) => p.key === "rlp");
@@ -113,7 +254,7 @@ export function AssetPlayersPanel({ data }: { data: AssetPlayers }) {
                 <span className={rlp.saldo_rs >= 0 ? "text-sky-500" : "text-red-500"}>
                   {money(rlp.saldo_rs)}
                 </span>
-                <span className="ml-2 text-zinc-700">
+                <span className="ml-2 text-zinc-400">
                   negócio internalizado pela corretora, fora do book — é a única
                   parte que a B3 marca como varejo
                 </span>
@@ -132,7 +273,7 @@ export function AssetPlayersPanel({ data }: { data: AssetPlayers }) {
           <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
             últimos 15 min
           </span>
-          <span className="text-[10px] text-zinc-600">o que está fazendo agora</span>
+          <span className="text-[11px] text-zinc-400">o que está fazendo agora</span>
         </div>
         <div className="grid min-w-0 flex-1 grid-cols-3 gap-2">
           {MAIN_ROWS.map((key) => {
@@ -151,7 +292,7 @@ export function AssetPlayersPanel({ data }: { data: AssetPlayers }) {
                   </span>
                   <span
                     className={cn(
-                      "text-[10px] font-bold uppercase tracking-wide",
+                      "text-[11px] font-bold uppercase tracking-wide",
                       LABEL_TONE[key],
                     )}
                   >
@@ -161,7 +302,7 @@ export function AssetPlayersPanel({ data }: { data: AssetPlayers }) {
                 <div
                   className={cn(
                     "mt-0.5 text-[13px] font-bold tabular-nums",
-                    flat ? "text-zinc-500" : bought ? "text-sky-400" : "text-red-400",
+                    flat ? "text-zinc-300" : bought ? "text-sky-400" : "text-red-400",
                   )}
                 >
                   {money(player.saldo_recente_rs)}
@@ -177,23 +318,31 @@ export function AssetPlayersPanel({ data }: { data: AssetPlayers }) {
       </div>
 
       <details className="mt-3">
-        <summary className="cursor-pointer text-[11px] text-zinc-500 hover:text-zinc-300">
+        <summary className="cursor-pointer text-[11px] text-zinc-300 hover:text-zinc-300">
           quem girou o dia (top 12 corretoras)
         </summary>
+        <BrokerFilters
+          grupo={grupo}
+          lado={lado}
+          ordem={ordem}
+          onGrupo={setGrupo}
+          onLado={setLado}
+          onOrdem={setOrdem}
+        />
         <table className="mt-2 w-full text-[11px]">
-          <thead className="text-zinc-600">
+          <thead className="text-zinc-400">
             <tr>
-              <th className="py-1 text-left font-normal">corretora</th>
-              <th className="py-1 text-left font-normal">grupo</th>
-              <th className="py-1 text-right font-normal">giro</th>
-              <th className="py-1 text-right font-normal">saldo</th>
+              <SortHeader coluna="corretora" ordem={ordem} desc={desc} onSort={sortBy} />
+              <SortHeader coluna="grupo" ordem={ordem} desc={desc} onSort={sortBy} />
+              <SortHeader coluna="giro" ordem={ordem} desc={desc} onSort={sortBy} align="right" />
+              <SortHeader coluna="saldo" ordem={ordem} desc={desc} onSort={sortBy} align="right" />
             </tr>
           </thead>
           <tbody className="text-zinc-400">
-            {data.top_brokers.map((broker) => (
+            {brokers.map((broker) => (
               <tr key={broker.code} className="border-t border-zinc-900">
                 <td className="py-1">{broker.name}</td>
-                <td className={cn("py-1", GROUP_TONE[broker.grupo] ?? "text-zinc-500")}>
+                <td className={cn("py-1", GROUP_TONE[broker.grupo] ?? "text-zinc-300")}>
                   {broker.grupo}
                 </td>
                 <td className="py-1 text-right tabular-nums">
@@ -210,6 +359,13 @@ export function AssetPlayersPanel({ data }: { data: AssetPlayers }) {
                 </td>
               </tr>
             ))}
+            {brokers.length === 0 && (
+              <tr>
+                <td className="py-2 text-zinc-400" colSpan={4}>
+                  nenhuma corretora nesse filtro.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </details>
