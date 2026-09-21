@@ -69,8 +69,10 @@ export function PlayersFlowChart({ series }: { series: PlayersBucket[] }) {
             .map((bucket, index) => `${x(index)},${yPrice(bucket.price)}`)
             .join(" ")}
           fill="none"
-          stroke="#71717a"
-          strokeWidth={1.5}
+          stroke="#fafafa"
+          strokeWidth={2}
+          strokeDasharray="6 4"
+          strokeLinecap="round"
           vectorEffect="non-scaling-stroke"
         />
         {cumulative.map((line) => (
@@ -99,7 +101,7 @@ export function PlayersFlowChart({ series }: { series: PlayersBucket[] }) {
           </span>
         ))}
         <span className="flex items-center gap-1">
-          <span aria-hidden className="inline-block h-[3px] w-4 rounded-full bg-zinc-500" />
+          <span aria-hidden className="inline-block h-[3px] w-4 rounded-full bg-zinc-50" />
           preço
         </span>
       </div>

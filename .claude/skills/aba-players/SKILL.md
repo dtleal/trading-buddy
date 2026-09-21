@@ -703,5 +703,6 @@ top 12 que o backend já manda.
 ### Leitura visual
 Cinza escuro sobre fundo preto não se lia: `zinc-700/600` viraram `zinc-400`,
 `zinc-500` virou `zinc-300`, os textos de 9-10 px foram pra 11 px. O gráfico de
-saldo acumulado dobrou de altura (150 → 240) e as linhas foram de 1,5 pra 3 px.
-O texto de abertura da aba saiu.
+saldo acumulado dobrou de altura (150 → 240) e as linhas foram de 1,5 pra 3 px;
+a linha de preço é branca e tracejada, pra ser a referência de leitura em cima
+das quatro coloridas. O texto de abertura da aba saiu.
