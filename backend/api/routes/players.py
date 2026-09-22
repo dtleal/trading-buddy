@@ -90,6 +90,7 @@ class AssetPlayersModel(BaseModel):
     players: list[PlayerModel]
     series: list[dict[str, Any]]
     top_brokers: list[dict[str, Any]]
+    aggressions: list[dict[str, Any]]
     stale: bool
     live: bool
 
@@ -193,7 +194,7 @@ def _read_once(
         day = _session_day(prefix, tape, now.date())
         reader = _readers.get(prefix)
         if reader is None or reader.file.path != tape.path or reader.day != day:
-            reader = _Reader(file=tape, day=day, offset=0, accumulator=PlayersAccumulator())
+            reader = _Reader(file=tape, day=day, offset=0, accumulator=PlayersAccumulator(prefix))
             _readers[prefix] = reader
         if reader.day == tape.day:
             trades, reader.offset, reader.pending_bytes = read_trades(
@@ -487,7 +488,7 @@ def _feed_live(message: dict[str, Any]) -> None:
     if live is None or live.day != today or live.symbol != symbol:
         # A new session (or a contract roll) starts from zero — carrying
         # yesterday's totals into today would be worse than showing nothing.
-        live = _Live(symbol=symbol, day=today, accumulator=PlayersAccumulator())
+        live = _Live(symbol=symbol, day=today, accumulator=PlayersAccumulator(prefix))
         _live[prefix] = live
 
     trades = []

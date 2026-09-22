@@ -1,9 +1,13 @@
 ---
 name: aba-players
-description: Plano e mapa de funcionalidades da aba Players (Baleia x Banco x Sardinha) para WIN/WDO da B3, inspirada no Sala Sagrada AI. Use quando o usuário falar de aba Players, fluxo de players, baleia/banco/sardinha, WIN, WDO, mini índice, mini dólar, B3, ProfitDLL ou fluxo de corretoras.
+description: Plano e mapa de funcionalidades da aba Players (Baleia x Banco x Sardinha) para WIN/WDO da B3, inspirada no Sala Sagrada AI. Use quando o usuário falar de aba Players, fluxo de players, baleia/banco/sardinha, WIN, WDO, mini índice, mini dólar, B3, ProfitDLL, fluxo de corretoras, ou perguntar quem são as baleias / quais corretoras estão em cada grupo (ver baleias.md).
 ---
 
 # Aba Players — WIN/WDO (B3)
+
+**Quem são as baleias e os bancos hoje: [`baleias.md`](baleias.md)** — lista
+por código, quanto cada um gira e por que a corretora do banco é sardinha.
+Pra listar com os números do pregão: `python3 baleias.py data/b3_tape/WIN*.trd`.
 
 Plano vivo. Atualize este arquivo conforme as fases forem sendo feitas.
 Criado em 2026-09-16 a partir da engenharia reversa do bundle do
@@ -706,3 +710,54 @@ Cinza escuro sobre fundo preto não se lia: `zinc-700/600` viraram `zinc-400`,
 saldo acumulado dobrou de altura (150 → 240) e as linhas foram de 1,5 pra 3 px;
 a linha de preço é branca e tracejada, pra ser a referência de leitura em cima
 das quatro coloridas. O texto de abertura da aba saiu.
+
+## Card de agressões · 2 min  *(22/09/2026)*
+
+Responde "quem está mandando ordem grande agora". Uma linha por janela de 2
+minutos em que **uma baleia ou um banco** agrediu o mesmo lado.
+
+Por que janela e não negócio: a B3 fatia. O maior negócio único medido foi
+1.465 contratos no WIN e 2.232 no WDO, então "a baleia mandou 10 mil" nunca é
+uma linha na fita — são centenas de linhas seguidas do mesmo agressor.
+
+**Cortes** (`AGGRESSION_CONTRACTS` em `backend/use_cases/aggregate_players.py`):
+WIN **7.000** contratos, WDO **3.000**, janela de 120s. Medido em 21/09 e
+16/09/2026, dá 12 a 25 linhas por dia em cada ativo.
+
+Varejo fica de fora de propósito: a XP agredindo 30.000 contratos em 2 min é a
+soma dos clientes dela (18.574 negócios de ~2,9 contratos cada), não um player.
+Como só baleia/banco entra, o corte teve que cair — com os 25.000 que serviam
+pra fita inteira nada dispararia, já que o maior que baleia ou banco fez numa
+janela foi 13.411 no WIN e 7.278 no WDO.
+
+Colunas: `hora · contratos · negócios · agressor · preço ini · preço méd ·
+preço fim · var`. A de negócios separa mesa de corretora; o preço médio é
+ponderado por contrato, não média simples dos negócios.
+
+Ao vivo de verdade: a janela **aberta** já entra no snapshot (não espera fechar
+os 2 min), o collector RTD entrega o negócio ~100ms depois e a tela busca de 1
+em 1 segundo. Limite conhecido: a janela é o relógio fixo de 2 min, não
+deslizante — uma agressão em cima da virada vira duas linhas.
+
+### Alerta na tela
+Agressão nova acende uma faixa colorida no topo da página inteira (azul compra,
+vermelho venda), com agressor, contratos e o caminho do preço. Some em 20s ou
+no clique. A primeira leitura do backend traz o pregão inteiro e não dispara
+nada — senão a tela abriria gritando por causa de algo das 9h.
+
+## Linha VAREJO  *(22/09/2026)*
+
+Quarta barra, logo abaixo da sardinha, bicho 👤: **sardinha + RLP**, com o
+saldo em R$ e o número de contratos na própria barra. São dois caminhos da
+mesma pessoa (ou a ordem foi pro book pela corretora de varejo, ou a corretora
+executou por dentro), e sem somar não dá pra responder "o que o CPF fez hoje"
+sem fazer conta de cabeça.
+
+Não entra na partição: os três de cima é que somam zero, esta é uma leitura em
+cima deles. E as duas metades não têm a mesma força — sardinha é leitura do
+nome da corretora (tem fundo pequeno e algo no meio), RLP é marcação da própria
+B3 mas com a direção estimada pelo tick do preço.
+
+Exemplo 22/09/2026 no fechamento: WIN −917 mi (book) + −993 mi (RLP) =
+**−R$ 1,91 bi**; WDO −1.998 mi + 78 mi = **−R$ 1,92 bi**. Varejo vendido nos
+dois, institucional comprado.

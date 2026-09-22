@@ -774,6 +774,23 @@ export const PlayersBroker = z.object({
 });
 export type PlayersBroker = z.infer<typeof PlayersBroker>;
 
+/** Um mesmo agressor martelando o mesmo lado numa janela de 2 min. A B3 fatia
+ * ordem grande, então é assim que uma ordem de milhares de contratos aparece —
+ * nunca como um negócio só. */
+export const PlayersAggression = z.object({
+  at: z.string(),
+  qty: z.number(),
+  trades: z.number(),
+  lado: z.enum(["COMPRA", "VENDA"]),
+  agressor: z.string(),
+  grupo: z.string(),
+  price_from: z.number(),
+  /** Preço médio ponderado por contrato, não média simples dos negócios. */
+  price_avg: z.number(),
+  price_to: z.number(),
+});
+export type PlayersAggression = z.infer<typeof PlayersAggression>;
+
 export const AssetPlayers = z.object({
   asset: z.string(),
   symbol: z.string(),
@@ -791,6 +808,8 @@ export const AssetPlayers = z.object({
   players: z.array(PlayerRead),
   series: z.array(PlayersBucket),
   top_brokers: z.array(PlayersBroker),
+  /** Agressões de 2 min, da mais nova pra mais velha. */
+  aggressions: z.array(PlayersAggression),
   stale: z.boolean(),
   /** true = fluxo ao vivo do RTD do Profit. O arquivo `.trd` para de crescer
    * quando o Profit termina o download, então ao vivo só vem por aqui. */

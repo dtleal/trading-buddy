@@ -296,3 +296,54 @@ def test_load_agents_skips_the_header_comment(tmp_path: Path) -> None:
 
 def test_missing_broker_table_is_not_fatal(tmp_path: Path) -> None:
     assert load_agents(tmp_path) == {}
+
+
+def test_agressao_soma_o_agressor_dentro_da_janela() -> None:
+    """WDO corta em 3.000 contratos por janela de 2 min, por agressor e lado."""
+    trades = [
+        # Morgan vendendo 3.500 fatiados no primeiro minuto: passa do corte.
+        _trade(0, 5400.0, 1000, XP, MORGAN, TYPE_SELL_AGGRESSION),
+        _trade(1, 5398.0, 2500, XP, MORGAN, TYPE_SELL_AGGRESSION),
+        # Morgan comprando 2.500 na mesma janela: fica abaixo, não entra.
+        _trade(1, 5398.0, 2500, MORGAN, XP, TYPE_BUY_AGGRESSION),
+        # Janela seguinte: zera a contagem, então 2.500 sozinho não passa.
+        _trade(3, 5399.0, 2500, XP, MORGAN, TYPE_SELL_AGGRESSION),
+    ]
+    snapshot = _snapshot(trades, now=SESSION + timedelta(minutes=5))
+
+    assert len(snapshot.aggressions) == 1
+    item = snapshot.aggressions[0]
+    assert item["agressor"] == "Morgan"
+    assert item["lado"] == "VENDA"
+    assert item["qty"] == 3500
+    assert item["trades"] == 2
+    assert item["price_from"] == 5400.0
+    assert item["price_to"] == 5398.0
+
+
+def test_sardinha_agredindo_nao_vira_agressao() -> None:
+    """Corretora de varejo é a soma dos clientes dela, não um player."""
+    snapshot = _snapshot(
+        [_trade(0, 5400.0, 50_000, MORGAN, XP, TYPE_SELL_AGGRESSION)],
+        now=SESSION + timedelta(seconds=30),
+    )
+
+    assert snapshot.aggressions == []
+
+
+def test_agressao_da_janela_aberta_ja_aparece() -> None:
+    """Esperar a janela fechar atrasaria o alerta em até dois minutos."""
+    snapshot = _snapshot(
+        [_trade(0, 5400.0, 5000, XP, MORGAN, TYPE_SELL_AGGRESSION)],
+        now=SESSION + timedelta(seconds=30),
+    )
+
+    assert [item["qty"] for item in snapshot.aggressions] == [5000]
+
+
+def test_sem_corte_pro_ativo_nao_gera_agressao() -> None:
+    accumulator = PlayersAccumulator("USTEC")
+    accumulator.feed([_trade(0, 5400.0, 50_000, XP, MORGAN, TYPE_SELL_AGGRESSION)])
+
+    snapshot = accumulator.snapshot({}, "USTEC", "USTEC", "2026-09-14", SESSION)
+    assert snapshot.aggressions == []

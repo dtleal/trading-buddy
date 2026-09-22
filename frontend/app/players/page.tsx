@@ -1,20 +1,24 @@
 "use client";
 
 import { Header } from "@/components/shared/Header";
+import { AggressionAlert } from "@/components/players/AggressionAlert";
 import { AssetPlayersPanel } from "@/components/players/AssetPlayersPanel";
 import { IbovBreadth } from "@/components/players/IbovBreadth";
 import { IbovTop10 } from "@/components/players/IbovTop10";
 import { usePlayers } from "@/hooks/usePlayers";
 import { usePlayersTick } from "@/hooks/usePlayersTick";
 import { useIbov } from "@/hooks/useIbov";
+import { useAggressionAlert } from "@/hooks/useAggressionAlert";
 
 export default function PlayersPage() {
   const { data, error } = usePlayers();
   const ibov = useIbov();
   const ticks = usePlayersTick();
+  const { alert, dismiss } = useAggressionAlert(data);
 
   return (
     <>
+      {alert && <AggressionAlert alert={alert} onDismiss={dismiss} />}
       <Header />
       <main className="mx-auto w-full max-w-[2100px] flex-1 px-4 py-6">
         {error && (

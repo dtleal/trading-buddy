@@ -39,7 +39,7 @@ is doing in the index. Contracts are kept alongside it.
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -103,6 +103,26 @@ RECENT_MINUTES = 15
 
 GROUPS = ("baleia", "banco", "sardinha")
 
+# Agressão: um mesmo agressor martelando o mesmo lado dentro de uma janela.
+#
+# É assim que uma ordem grande de verdade aparece. A B3 fatia: o maior negócio
+# único medido foi 1.465 contratos no WIN e 2.232 no WDO, então "a baleia
+# mandou 10 mil" nunca é uma linha na fita — são centenas de linhas do mesmo
+# agressor em poucos minutos.
+#
+# Só baleia e banco entram. Uma corretora de varejo agredindo 30.000 contratos
+# em 2 min não é um player: é a soma dos clientes dela (a XP fez isso em 18.574
+# negócios separados, ~2,9 contratos cada). Só serviria pra empurrar o que
+# interessa pra fora da lista.
+#
+# Os cortes são por ativo, e medidos já com esse filtro: o maior que baleia ou
+# banco fez numa janela foi 13.411 no WIN e 7.278 no WDO, ou seja, o corte de
+# quando a lista tinha varejo (25.000 no WIN) nunca dispararia. Nos valores
+# abaixo dá 12 a 25 por dia em cada ativo, medido em 21/09 e 16/09/2026.
+AGGRESSION_SECONDS = 120
+AGGRESSION_CONTRACTS: dict[str, int] = {"WIN": 7_000, "WDO": 3_000}
+AGGRESSION_KEEP = 20
+
 
 @dataclass(frozen=True, slots=True)
 class PlayerRead:
@@ -137,6 +157,8 @@ class PlayersSnapshot:
     players: list[PlayerRead]
     series: list[dict[str, object]]
     top_brokers: list[dict[str, object]]
+    # Agressões de AGGRESSION_SECONDS, mais nova primeiro (janela aberta inclusa).
+    aggressions: list[dict[str, object]]
     stale: bool
 
 
@@ -166,9 +188,18 @@ class PlayersAccumulator:
         "net", "net_rs", "gross", "gross_rs", "aggressive", "broker_net",
         "broker_vol", "buckets", "_previous_price", "_retail_sign",
         "last_price", "contracts", "trades", "first_trade", "last_trade",
+        "asset", "_cut", "_window", "_open", "aggressions",
     )
 
-    def __init__(self) -> None:
+    def __init__(self, asset: str = "") -> None:
+        # O corte é por ativo, e a janela é montada negócio a negócio, então o
+        # acumulador precisa saber de quem ele é desde o começo. Ativo fora da
+        # tabela simplesmente não gera agressão.
+        self.asset = asset
+        self._cut = AGGRESSION_CONTRACTS.get(asset.upper(), 0)
+        self._window: int | None = None
+        self._open: dict[tuple[int, int], _Aggression] = {}
+        self.aggressions: deque[_Aggression] = deque(maxlen=AGGRESSION_KEEP)
         self.net: dict[str, int] = defaultdict(int)
         self.net_rs: dict[str, float] = defaultdict(float)
         self.gross: dict[str, int] = defaultdict(int)
@@ -220,6 +251,7 @@ class PlayersAccumulator:
                 self.broker_vol[trade.buyer] += trade.qty
                 self.broker_vol[trade.seller] += trade.qty
                 buyer_aggressed = trade.kind == TYPE_BUY_AGGRESSION
+                self._aggression(trade, buyer_aggressed)
                 for code, side, aggressed in (
                     (trade.buyer, 1, buyer_aggressed),
                     (trade.seller, -1, not buyer_aggressed),
@@ -237,6 +269,44 @@ class PlayersAccumulator:
 
             if trade.price != self._previous_price:
                 self._previous_price = trade.price
+
+    def _aggression(self, trade: Trade, buyer_aggressed: bool) -> None:
+        """Soma o negócio na janela do seu agressor, e fecha a janela anterior.
+
+        Só o agressor entra: o passivo estava parado no book, quem repetiu a
+        ordem foi quem cruzou o spread. E só baleia ou banco — ver a nota em
+        AGGRESSION_CONTRACTS.
+        """
+        if not self._cut:
+            return
+        window = (trade.at.toordinal() * 86400 + _seconds(trade.at)) // AGGRESSION_SECONDS
+        if window != self._window:
+            self._close_window()
+            self._window = window
+        code = trade.buyer if buyer_aggressed else trade.seller
+        if _group_of(code) == "sardinha":
+            return
+        key = (code, 1 if buyer_aggressed else -1)
+        current = self._open.get(key)
+        if current is None:
+            current = self._open[key] = _Aggression(
+                code=code,
+                side=key[1],
+                at=trade.at,
+                price_from=trade.price,
+                price_to=trade.price,
+            )
+        current.qty += trade.qty
+        current.trades += 1
+        current.notional += trade.price * trade.qty
+        current.price_to = trade.price
+
+    def _close_window(self) -> None:
+        """Guarda as janelas que bateram o corte e joga o resto fora."""
+        for item in self._open.values():
+            if item.qty >= self._cut:
+                self.aggressions.append(item)
+        self._open = {}
 
     def _bucket(self, at: datetime) -> dict[str, float]:
         key = at.replace(
@@ -310,6 +380,13 @@ class PlayersAccumulator:
             }
             for code, volume in top
         ]
+        # A janela aberta entra junto: uma agressão que só aparece dois minutos
+        # depois de acontecer não serve pra nada em tela.
+        open_now = [item for item in self._open.values() if item.qty >= self._cut]
+        aggressions = [
+            _aggression_row(item, agents)
+            for item in sorted((*open_now, *self.aggressions), key=lambda i: i.at, reverse=True)
+        ]
         residual = sum(self.net_rs[g] for g in GROUPS)
         lag = None if self.last_trade is None else int((now - self.last_trade).total_seconds())
         stale = lag is None or lag > STALE_AFTER_SECONDS
@@ -327,6 +404,7 @@ class PlayersAccumulator:
             players=players,
             series=series,
             top_brokers=top_brokers,
+            aggressions=aggressions,
             stale=stale,
         )
 
@@ -340,9 +418,44 @@ def aggregate_players(
     now: datetime,
 ) -> PlayersSnapshot:
     """One-shot read of a whole tape. Used by replays and tests."""
-    accumulator = PlayersAccumulator()
+    accumulator = PlayersAccumulator(asset)
     accumulator.feed(trades)
     return accumulator.snapshot(agents, asset, symbol, session, now)
+
+
+@dataclass(slots=True)
+class _Aggression:
+    """Uma janela de AGGRESSION_SECONDS de um agressor num lado só."""
+
+    code: int
+    side: int  # 1 = comprando, -1 = vendendo
+    at: datetime  # primeiro negócio da janela
+    price_from: float
+    price_to: float
+    qty: int = 0
+    trades: int = 0
+    # Preço x quantidade somado, pra sair o preço médio ponderado no fim. A
+    # média simples dos negócios mentiria: um print de 1 contrato pesaria o
+    # mesmo que um de 500.
+    notional: float = 0.0
+
+
+def _seconds(at: datetime) -> int:
+    return at.hour * 3600 + at.minute * 60 + at.second
+
+
+def _aggression_row(item: _Aggression, agents: dict[int, str]) -> dict[str, object]:
+    return {
+        "at": item.at.isoformat(),
+        "qty": item.qty,
+        "trades": item.trades,
+        "lado": "COMPRA" if item.side > 0 else "VENDA",
+        "agressor": agents.get(item.code, str(item.code)),
+        "grupo": _group_of(item.code),
+        "price_from": item.price_from,
+        "price_avg": round(item.notional / item.qty, 2) if item.qty else item.price_from,
+        "price_to": item.price_to,
+    }
 
 
 def _group_of(code: int) -> str:

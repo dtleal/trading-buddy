@@ -7,12 +7,14 @@ export const MASCOT: Record<string, string> = {
   baleia: "🐳",
   banco: "🏛️",
   sardinha: "🐟",
+  varejo: "👤",
 };
 
 export const LABEL_TONE: Record<string, string> = {
   baleia: "text-sky-400",
   banco: "text-amber-400",
   sardinha: "text-zinc-300",
+  varejo: "text-zinc-300",
 };
 
 /**
@@ -41,7 +43,7 @@ export function money(value: number): string {
  * to be read at a glance from across the desk, and a half-filled bar reads as
  * "half" rather than "less pressure". The strength number lives in the title.
  */
-export function PlayerRow({ player }: { player: PlayerRead }) {
+export function PlayerRow({ player, count }: { player: PlayerRead; count?: boolean }) {
   const bought = player.saldo_rs >= 0;
   const flat = player.saldo_rs === 0;
   const bar = flat ? "bg-zinc-800" : bought ? "bg-blue-800" : "bg-red-700";
@@ -67,6 +69,14 @@ export function PlayerRow({ player }: { player: PlayerRead }) {
       >
         <span className="text-[13px] font-bold tabular-nums text-white">
           {money(player.saldo_rs)}
+          {/* A linha do varejo mostra o número de contratos junto: é a conta
+              que o usuário faz em cima dela ("estou contra quantos?"). */}
+          {count && (
+            <span className="ml-2 font-normal opacity-80">
+              {player.saldo > 0 ? "+" : ""}
+              {player.saldo.toLocaleString("pt-BR")} contratos
+            </span>
+          )}
         </span>
       </div>
 

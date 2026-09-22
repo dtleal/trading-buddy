@@ -4,9 +4,10 @@ import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
 import { LABEL_TONE, MASCOT, PlayerRow, money } from "@/components/players/PlayerRow";
+import { Aggressions } from "@/components/players/Aggressions";
 import { PlayersFlowChart } from "@/components/players/PlayersFlowChart";
 import { cn } from "@/lib/utils";
-import type { AssetPlayers, PlayersTick } from "@/lib/types";
+import type { AssetPlayers, PlayerRead, PlayersTick } from "@/lib/types";
 
 /** Uma linha de detalhe que reusa as colunas das barras, pra alinhar. */
 function DetailLine({ label, children }: { label: string; children: ReactNode }) {
@@ -20,6 +21,33 @@ function DetailLine({ label, children }: { label: string; children: ReactNode })
 
 /** As três linhas grandes. Juntas somam zero: é a partição do pregão. */
 const MAIN_ROWS = ["baleia", "banco", "sardinha"] as const;
+
+/**
+ * A quarta linha: o varejo inteiro, sardinha (foi pro book) + RLP (a corretora
+ * executou por dentro). São dois caminhos da mesma pessoa, e sem somar não dá
+ * pra responder "o que o CPF fez hoje" sem fazer conta de cabeça.
+ *
+ * Não entra na partição — os três de cima é que somam zero. Esta é uma leitura
+ * em cima deles, e as duas metades nem têm a mesma força: sardinha é leitura do
+ * nome da corretora, RLP é marcação da B3 com a direção estimada pelo tique.
+ */
+function varejoRow(players: PlayerRead[]): PlayerRead | null {
+  const book = players.find((p) => p.key === "sardinha");
+  const rlp = players.find((p) => p.key === "rlp");
+  if (!book || !rlp) return null;
+  return {
+    ...book,
+    key: "varejo",
+    label: "VAREJO",
+    papel: "sardinha + rlp",
+    saldo_rs: book.saldo_rs + rlp.saldo_rs,
+    saldo_recente_rs: book.saldo_recente_rs + rlp.saldo_recente_rs,
+    saldo: book.saldo + rlp.saldo,
+    saldo_recente: book.saldo_recente + rlp.saldo_recente,
+    volume: book.volume + rlp.volume,
+    volume_rs: book.volume_rs + rlp.volume_rs,
+  };
+}
 
 const GROUP_TONE: Record<string, string> = {
   baleia: "text-sky-400",
@@ -240,6 +268,10 @@ export function AssetPlayersPanel({
           const player = data.players.find((p) => p.key === key);
           return player ? <PlayerRow key={key} player={player} /> : null;
         })}
+        {(() => {
+          const varejo = varejoRow(data.players);
+          return varejo ? <PlayerRow player={varejo} count /> : null;
+        })()}
       </div>
 
       {/* Duas linhas de detalhe, com as mesmas colunas das barras acima, pra
@@ -312,6 +344,8 @@ export function AssetPlayersPanel({
           })}
         </div>
       </div>
+
+      <Aggressions items={data.aggressions} />
 
       <div className="mt-4">
         <PlayersFlowChart series={data.series} />
