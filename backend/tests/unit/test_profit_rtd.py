@@ -197,3 +197,10 @@ def test_a_row_with_a_column_out_of_place_is_dropped_not_raised() -> None:
         "seller": "BTG",
         "aggressor": "Comprador",
     }
+
+
+def test_a_cme_row_without_brokers_still_goes_through() -> None:
+    from profit_rtd_collector import _row_to_trade
+
+    row = _row_to_trade(("10:05:03.250", None, 4312.4, 3, None, "Vendedor"))
+    assert row is not None and row["buyer"] == "" and row["seller"] == "" and row["qty"] == 3

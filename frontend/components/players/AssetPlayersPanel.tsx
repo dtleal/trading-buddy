@@ -172,13 +172,21 @@ function Chips<T extends string>({
   );
 }
 
+/** Na CME os grupos saem do tamanho do lote (a fita é anônima), não há RLP
+ *  nem corretora, e o dinheiro é em dólar. */
+const CME_CUT =
+  "Mesmo grupo de lote, mesmo lado, dentro de 2 minutos. Corte: 150 contratos no GC e no NQ, 400 no ES.";
+
 export function AssetPlayersPanel({
   data,
   tick,
+  cme,
 }: {
   data: AssetPlayers;
   tick?: PlayersTick;
+  cme?: boolean;
 }) {
+  const currency = cme ? "USD" : "BRL";
   // O tick chega 10x por segundo e traz só preço, hora e contagem; o resto do
   // card continua vindo da leitura inteira.
   const price = tick?.last_price ?? data.last_price;
@@ -266,7 +274,7 @@ export function AssetPlayersPanel({
       <div className="space-y-1.5">
         {MAIN_ROWS.map((key) => {
           const player = data.players.find((p) => p.key === key);
-          return player ? <PlayerRow key={key} player={player} /> : null;
+          return player ? <PlayerRow key={key} player={player} currency={currency} /> : null;
         })}
         {(() => {
           const varejo = varejoRow(data.players);
@@ -276,6 +284,7 @@ export function AssetPlayersPanel({
 
       {/* Duas linhas de detalhe, com as mesmas colunas das barras acima, pra
           tudo cair na mesma régua em vez de flutuar. */}
+      {!cme && (
       <div className="mt-2 space-y-0.5 text-[11px]">
         <DetailLine label="RLP (varejo B3)">
           {(() => {
@@ -295,6 +304,7 @@ export function AssetPlayersPanel({
           })()}
         </DetailLine>
       </div>
+      )}
 
       {/* Os últimos 15 minutos estavam numa linha só, em 10px cinza escuro, com
           os três grupos espremidos — ilegível. Agora é uma coluna por grupo, na
@@ -337,7 +347,7 @@ export function AssetPlayersPanel({
                     flat ? "text-zinc-300" : bought ? "text-sky-400" : "text-red-400",
                   )}
                 >
-                  {money(player.saldo_recente_rs)}
+                  {money(player.saldo_recente_rs, currency)}
                 </div>
               </div>
             );
@@ -345,12 +355,13 @@ export function AssetPlayersPanel({
         </div>
       </div>
 
-      <Aggressions items={data.aggressions} />
+      <Aggressions items={data.aggressions} cut={cme ? CME_CUT : undefined} />
 
       <div className="mt-4">
-        <PlayersFlowChart series={data.series} />
+        <PlayersFlowChart series={data.series} cme={cme} />
       </div>
 
+      {!cme && (
       <details className="mt-3">
         <summary className="cursor-pointer text-[11px] text-zinc-300 hover:text-zinc-300">
           quem girou o dia (top 12 corretoras)
@@ -403,6 +414,7 @@ export function AssetPlayersPanel({
           </tbody>
         </table>
       </details>
+      )}
     </section>
   );
 }

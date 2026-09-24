@@ -19,7 +19,9 @@ const HEIGHT = 240;
  * library in for that would cost more than it gives. The point is the *shape*
  * — where a group turned around and whether price followed.
  */
-export function PlayersFlowChart({ series }: { series: PlayersBucket[] }) {
+export function PlayersFlowChart({ series, cme }: { series: PlayersBucket[]; cme?: boolean }) {
+  // A CME não tem RLP (é marcação da B3), e o dinheiro lá é em dólar.
+  const lines = cme ? LINES.filter((line) => line.key !== "rlp") : LINES;
   if (series.length < 2) {
     return (
       <p className="py-8 text-center text-xs text-zinc-400">
@@ -28,7 +30,7 @@ export function PlayersFlowChart({ series }: { series: PlayersBucket[] }) {
     );
   }
 
-  const cumulative = LINES.map(({ key, label, color }) => {
+  const cumulative = lines.map(({ key, label, color }) => {
     let running = 0;
     const points = series.map((bucket) => (running += bucket[key]));
     return { key, label, color, points };
@@ -89,8 +91,8 @@ export function PlayersFlowChart({ series }: { series: PlayersBucket[] }) {
         ))}
       </svg>
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-zinc-300">
-        <span className="text-zinc-400">saldo acumulado (R$)</span>
-        {LINES.map((line) => (
+        <span className="text-zinc-400">saldo acumulado ({cme ? "US$" : "R$"})</span>
+        {lines.map((line) => (
           <span key={line.key} className="flex items-center gap-1">
             <span
               aria-hidden

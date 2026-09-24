@@ -43,8 +43,19 @@ class TradeHistory:
         self.currency: str | None = None
         self.balance: float = 0.0
         self.asof: str | None = None  # ISO timestamp of the last push
+        self.account: int | None = None  # MT5 login; each account has its own file
         if self._dir is not None:
             self._dir.mkdir(parents=True, exist_ok=True)
+            self._load()
+
+    def use_account(self, account: int | None) -> None:
+        """Switch to the history of this MT5 account (the one the collector is on)."""
+        if account == self.account:
+            return
+        self._trades, self._flows = {}, {}
+        self.currency, self.balance, self.asof = None, 0.0, None
+        self.account = account
+        if self._dir is not None:
             self._load()
 
     # --- write ---------------------------------------------------------------
@@ -89,7 +100,9 @@ class TradeHistory:
 
     def _path(self) -> Path:
         assert self._dir is not None
-        return self._dir / _FILE_NAME
+        if self.account is None:
+            return self._dir / _FILE_NAME
+        return self._dir / f"closed_trades_{self.account}.json"
 
     def _load(self) -> None:
         path = self._path()

@@ -109,6 +109,10 @@ class Settings(BaseSettings):
     # 14h would lose the middle of the day. One file per contract prefix per
     # session day, in Profit's own record layout. Empty = do not record.
     players_live_dir: str = "data/b3_live"
+    # Every CME print the RTD feed counted (GC, NQ, ES), one JSON line each,
+    # one file per market per day. Rebuilds the day after a restart and is the
+    # tape to calibrate the lot-size groups on. Empty = do not record.
+    cme_tape_dir: str = "data/cme_tape"
 
     # --- Jev (TypeSafe AI) — segunda opinião na entrada do scalper --------
 

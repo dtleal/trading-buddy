@@ -13,18 +13,20 @@ import type { PlayersResponse } from "@/lib/types";
  */
 const POLL_MS = 1_000;
 
-export function usePlayers(): { data: PlayersResponse | null; error: boolean } {
+export function usePlayers(
+  get: () => Promise<PlayersResponse> = api.getPlayers,
+): { data: PlayersResponse | null; error: boolean } {
   const [data, setData] = useState<PlayersResponse | null>(null);
   const [error, setError] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
-      setData(await api.getPlayers());
+      setData(await get());
       setError(false);
     } catch {
       setError(true);
     }
-  }, []);
+  }, [get]);
 
   useEffect(() => {
     const first = setTimeout(refresh, 0);

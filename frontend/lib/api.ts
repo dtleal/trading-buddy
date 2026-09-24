@@ -157,6 +157,7 @@ export const api = {
     return fetchJson(`/api/performance${qs ? `?${qs}` : ""}`, PerformanceReport);
   },
   getPlayers: () => fetchJson("/api/players", PlayersResponse),
+  getCme: () => fetchJson("/api/cme", PlayersResponse),
   getIbov: () => fetchJson("/api/ibov", IbovResponse),
   setBot: (
     armed: boolean,

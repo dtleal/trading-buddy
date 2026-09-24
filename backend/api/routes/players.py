@@ -481,7 +481,13 @@ def _feed_live(message: dict[str, Any]) -> None:
     symbol = str(message.get("asset", "")).upper()
     multiplier = multiplier_for(symbol)
     if multiplier is None:
-        return  # a window on something other than WIN/WDO: not this tab's business
+        # Not WIN/WDO. A CME window (gold, Nasdaq, S&P futures) goes to the CME
+        # tab; anything else is nobody's business. Imported here because the
+        # CME route reuses this module's wire models.
+        from api.routes import cme
+
+        cme.feed(message)
+        return
     prefix = symbol[:3]
     today = datetime.now(B3_TZ).date()
     live = _live.get(prefix)

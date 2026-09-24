@@ -182,3 +182,13 @@ def test_a_pushed_deposit_is_kept_out_of_the_result(client: TestClient) -> None:
     assert body["start_balance"] == 6.77
     assert body["capital"] == 1006.77
     assert len(body["cash_flows"]) == 1
+
+
+def test_each_mt5_account_has_its_own_history(tmp_path) -> None:
+    store = TradeHistory(tmp_path)
+    store.use_account(950191)
+    store.merge([], balance=915.0)
+    store.use_account(6265169)
+    assert store.balance == 0.0 and store.snapshot() == []
+    store.use_account(950191)
+    assert store.balance == 915.0

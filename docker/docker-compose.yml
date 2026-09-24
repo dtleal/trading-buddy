@@ -47,6 +47,9 @@ services:
       # de abrir a janela de Times & Trades, então sem esta gravação um restart
       # no meio do pregão perde o miolo do dia.
       - ../data/b3_live:/app/data/b3_live
+      # Fita da CME (GC, NQ, ES) que o RTD ao vivo vê, pra refazer o dia depois
+      # de um restart e calibrar os cortes de lote da aba CME.
+      - ../data/cme_tape:/app/data/cme_tape
 
   postgres:
     image: postgres:16-alpine

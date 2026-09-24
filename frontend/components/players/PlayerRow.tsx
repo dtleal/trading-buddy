@@ -23,16 +23,17 @@ export const LABEL_TONE: Record<string, string> = {
  * the shape the user reads all day, and the complaint that started this was
  * exactly "faltando dizer se é mi ou bi".
  */
-const MONEY = new Intl.NumberFormat("pt-BR", {
-  style: "currency",
-  currency: "BRL",
-  maximumFractionDigits: 0,
-});
+export type Currency = "BRL" | "USD";
 
-export function money(value: number): string {
+const MONEY: Record<Currency, Intl.NumberFormat> = {
+  BRL: new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 }),
+  USD: new Intl.NumberFormat("pt-BR", { style: "currency", currency: "USD", maximumFractionDigits: 0 }),
+};
+
+export function money(value: number, currency: Currency = "BRL"): string {
   const size = Math.abs(value);
   const suffix = size >= 1e9 ? " bi" : size >= 1e6 ? " mi" : "";
-  return MONEY.format(value) + suffix;
+  return MONEY[currency].format(value) + suffix;
 }
 
 /**
@@ -43,7 +44,15 @@ export function money(value: number): string {
  * to be read at a glance from across the desk, and a half-filled bar reads as
  * "half" rather than "less pressure". The strength number lives in the title.
  */
-export function PlayerRow({ player, count }: { player: PlayerRead; count?: boolean }) {
+export function PlayerRow({
+  player,
+  count,
+  currency = "BRL",
+}: {
+  player: PlayerRead;
+  count?: boolean;
+  currency?: Currency;
+}) {
   const bought = player.saldo_rs >= 0;
   const flat = player.saldo_rs === 0;
   const bar = flat ? "bg-zinc-800" : bought ? "bg-blue-800" : "bg-red-700";
@@ -68,7 +77,7 @@ export function PlayerRow({ player, count }: { player: PlayerRead; count?: boole
         }
       >
         <span className="text-[13px] font-bold tabular-nums text-white">
-          {money(player.saldo_rs)}
+          {money(player.saldo_rs, currency)}
           {/* A linha do varejo mostra o número de contratos junto: é a conta
               que o usuário faz em cima dela ("estou contra quantos?"). */}
           {count && (

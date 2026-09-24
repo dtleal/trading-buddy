@@ -50,12 +50,28 @@ from core.models import (
     SessionLiquidity,
 )
 from settings import get_settings
-from adapters.jev import confirm_entry
+from adapters.jev import ask, confirm_entry
 from use_cases.aggregate_orderflow import OrderFlowAggregator
 from use_cases.assess_trade_signals import assess_trade_signals
 from use_cases.auto_breakeven import protected_count, tickets_to_protect
 from use_cases.autoclose import should_autoclose
 from use_cases.find_price_zones import FindPriceZonesUseCase
+from use_cases.jev_trader import (
+    ENTRY_SPACING_S,
+    MAX_ENTRIES,
+    MR_MAX_S,
+    MR_STOP_ATR,
+    MR_SYMBOLS,
+    PYRAMID_ATR,
+    STOP_ATR,
+    TRAIL_ATR,
+    atr,
+    band_target,
+    decide,
+    entry_questions,
+    mean_reversion_signal,
+)
+from use_cases.leitura_ao_vivo import ler_estado
 from use_cases.orderflow_wire import (
     parse_book,
     parse_dt,
@@ -513,8 +529,8 @@ _DEFAULT_LOTS: dict[AssetSymbol, float] = {
     AssetSymbol.US30: 0.01,
     AssetSymbol.GER40: 0.01,
     AssetSymbol.EURUSD: 0.01,
-    AssetSymbol.BRA50: 0.01,
-    AssetSymbol.MINDOL: 0.01,
+    AssetSymbol.BRA50: 0.05,  # broker minimum for Bra50Oct26
+    AssetSymbol.MINDOL: 0.20,  # at 0.01 a trade moved ~$0.03; 0.20 is ~$0.38 a point
 }
 
 _bot = _BotState()
@@ -813,6 +829,7 @@ async def _handle_message(msg: dict[str, Any]) -> set[AssetSymbol]:
         if isinstance(acct, int):
             _current_account = acct
             logger.info("Order-flow account set: %s", acct)
+            trade_history.use_account(acct)
         _autoclose.enabled = bool(msg.get("auto_close_enabled", False))
         if not _autoclose.enabled and _autoclose.armed:
             # Lost execution capability (reconnect without the flag) → disarm.
@@ -1499,6 +1516,207 @@ async def mark_symbol(symbol: str, body: MarkRequest) -> dict[str, Any]:
 # --- scalper bot (opens AND closes; demo only) -------------------------------
 
 
+# --- Jev trader (the Jev picks the entry, the exit is a fixed rule; demo only) ---
+
+_JEV_EVERY_S = 30.0
+_JEV_TIMEOUT_S = 10.0
+_JEV_TARGET_USD = 100.0  # day goal: stop once realized + open P&L (all symbols) reaches it
+
+
+class _JevTraderState:
+    def __init__(self) -> None:
+        self.task: asyncio.Task[None] | None = None
+        self.last_result: str | None = None
+        self.last: dict[str, str] = {}  # last decision per symbol
+        self.realized: float = 0.0  # P&L of the trades the Jev closed
+        self.last_entry: dict[AssetSymbol, float] = {}  # monotonic() of the last new entry
+        self.best: dict[AssetSymbol, float] = {}  # best price seen since the position opened
+        self.mr: dict[AssetSymbol, float] = {}  # open mean-reversion trades: monotonic() of entry
+        self.mr_bar: dict[AssetSymbol, datetime] = {}  # candle a mean-reversion signal was taken on
+
+
+_jev_trader = _JevTraderState()
+
+
+class JevTraderStatus(BaseModel):
+    armed: bool
+    every_s: float
+    target_usd: float
+    realized: float
+    last_result: str | None
+    last: dict[str, str]
+
+
+def _jev_trader_status() -> JevTraderStatus:
+    return JevTraderStatus(
+        armed=_jev_trader.task is not None,
+        every_s=_JEV_EVERY_S,
+        target_usd=_JEV_TARGET_USD,
+        realized=_jev_trader.realized,
+        last_result=_jev_trader.last_result,
+        last=_jev_trader.last,
+    )
+
+
+async def _jev_trader_tick() -> None:
+    """One read of every symbol the collector sends: MT5 state → Jev → open /
+    close / wait. Stops for good once the day goal is reached."""
+    snaps = [s for s in await get_orderflow() if _candles_store.get(s.symbol) and s.symbol in _bot.lots]
+    if not snaps:
+        _jev_trader.last_result = "sem dados do MT5"
+        return
+    floating = sum(p.profit for s in snaps for p in _positions_store.get(s.symbol, []))
+    if _jev_trader.realized + floating >= _JEV_TARGET_USD:
+        for s in snaps:
+            positions = _positions_store.get(s.symbol, [])
+            if positions:
+                await _close_jev_position(s.symbol, _symbol_side(positions))
+        _jev_trader.realized += floating
+        _jev_trader.last_result = f"meta +{_JEV_TARGET_USD:.0f} batida ({_jev_trader.realized:+.2f} USD) — parou"
+        logger.info("Jev trader: %s", _jev_trader.last_result)
+        _jev_trader.task = None
+        return
+    await asyncio.gather(*(_jev_symbol_tick(s) for s in snaps))
+    _jev_trader.last_result = f"sessao {_jev_trader.realized + floating:+.2f} de +{_JEV_TARGET_USD:.0f} USD"
+
+
+async def _jev_symbol_tick(snap: Any) -> None:
+    symbol = snap.symbol
+    bars = _candles_store[symbol]
+    positions = _positions_store.get(symbol, [])
+    held = _symbol_side(positions)
+    price, state = ler_estado(
+        symbol.value,
+        [b.model_dump(mode="json") for b in bars[-600:]],
+        snap.model_dump(mode="json"),
+    )
+    size = atr(bars)
+    if held is not None:
+        await _jev_manage(symbol, held, positions, price, size, bars)
+        return
+    _jev_trader.best.pop(symbol, None)
+    _jev_trader.mr.pop(symbol, None)
+    wait = _jev_trader.last_entry.get(symbol, 0.0) + ENTRY_SPACING_S - time.monotonic()
+    if wait > 0:
+        _jev_trader.last[symbol.value] = f"espera {wait / 60:.0f} min (1 entrada a cada {ENTRY_SPACING_S // 60} min)"
+        return
+    closed = bars[:-1]  # the last candle is still forming
+    if symbol.value in MR_SYMBOLS and closed and _jev_trader.mr_bar.get(symbol) != closed[-1].timestamp:
+        signal = mean_reversion_signal(closed)
+        if signal != "wait":
+            _jev_trader.mr_bar[symbol] = closed[-1].timestamp
+            _jev_trader.mr[symbol] = time.monotonic()
+            _jev_trader.last[symbol.value] = f"{signal} @ {price:.2f} (reversao a media, banda de 5m)"
+            await _jev_open(symbol, signal)
+            return
+    answers = await ask(state, entry_questions(symbol.value, price), timeout=_JEV_TIMEOUT_S)
+    if answers is None:
+        _jev_trader.last[symbol.value] = "Jev nao respondeu"
+        return
+    action = decide(answers)
+    scores = " ".join(f"{k}={v:.2f}" for k, v in answers.items())
+    _jev_trader.last[symbol.value] = f"{action} @ {price:.2f} ({scores})"
+    if action != "wait":
+        await _jev_open(symbol, action)
+
+
+async def _jev_manage(
+    symbol: AssetSymbol, held: str, positions: list[Any], price: float, size: float, bars: list[Any]
+) -> None:
+    """Fixed exits in ATR of the 5m candles (see use_cases/jev_trader.py)."""
+    pnl = sum(p.profit for p in positions)
+    sign = 1 if held == "buy" else -1
+    first = max(positions, key=lambda p: p.seconds_open).price_open
+    last = min(positions, key=lambda p: p.seconds_open).price_open
+    best = _jev_trader.best.get(symbol, price)
+    best = max(best, price) if held == "buy" else min(best, price)
+    _jev_trader.best[symbol] = best
+    reason = None
+    if symbol in _jev_trader.mr:
+        # Mean reversion: the other band, a wider stop, and a time limit.
+        target = band_target(bars[:-1], held)
+        if target is not None and (price - target) * sign >= 0:
+            reason = f"alvo na banda {target:.2f}"
+        elif (first - price) * sign >= MR_STOP_ATR * size:
+            reason = f"stop {MR_STOP_ATR:g} ATR"
+        elif time.monotonic() - _jev_trader.mr[symbol] >= MR_MAX_S:
+            reason = "tempo esgotado (2h)"
+    elif len(positions) == 1 and (first - price) * sign >= STOP_ATR * size:
+        reason = f"stop {STOP_ATR:g} ATR"
+    elif len(positions) > 1 and (best - price) * sign >= TRAIL_ATR * size:
+        reason = f"trailing: voltou {TRAIL_ATR:g} ATR do melhor {best:.2f}"
+    if reason is not None:
+        _jev_trader.last[symbol.value] = f"fechou @ {price:.2f}: {reason} ({pnl:+.2f} USD)"
+        logger.info("Jev trader: %s %s", symbol.value, _jev_trader.last[symbol.value])
+        await _close_jev_position(symbol, held)
+        _jev_trader.realized += pnl
+        return
+    if symbol not in _jev_trader.mr and len(positions) < MAX_ENTRIES and (price - last) * sign >= PYRAMID_ATR * size:
+        _jev_trader.last[symbol.value] = f"aumentou @ {price:.2f} ({len(positions) + 1} lotes, {pnl:+.2f} USD)"
+        await _send_to_collector({"type": "open", "symbol": symbol.value, "side": held, "lots": _bot.lots[symbol]})
+        return
+    _jev_trader.last[symbol.value] = f"segurando {held} {len(positions)} lote(s) @ {price:.2f} ({pnl:+.2f} USD)"
+
+
+async def _jev_open(symbol: AssetSymbol, side: str) -> None:
+    _jev_trader.last_entry[symbol] = time.monotonic()
+    logger.info("Jev trader: %s %s", symbol.value, _jev_trader.last[symbol.value])
+    await _send_to_collector({"type": "open", "symbol": symbol.value, "side": side, "lots": _bot.lots[symbol]})
+
+
+async def _close_jev_position(symbol: AssetSymbol, side: str | None) -> None:
+    await _send_to_collector(
+        {
+            "type": "close_symbol",
+            "symbol": symbol.value,
+            "origin": "bot",
+            "reason": "jev",
+            "side": side,
+        }
+    )
+
+
+async def _jev_trader_loop() -> None:
+    while _jev_trader.task is not None:
+        try:
+            await _jev_trader_tick()
+        except Exception:
+            logger.exception("Jev trader tick failed")
+            _jev_trader.last_result = "erro na leitura (ver log)"
+        await asyncio.sleep(_JEV_EVERY_S)
+
+
+class JevTraderRequest(BaseModel):
+    armed: bool
+
+
+@router.get("/api/orderflow/jevtrader", response_model=JevTraderStatus, tags=["orderflow"])
+async def get_jev_trader() -> JevTraderStatus:
+    return _jev_trader_status()
+
+
+@router.post("/api/orderflow/jevtrader", response_model=JevTraderStatus, tags=["orderflow"])
+async def set_jev_trader(body: JevTraderRequest) -> JevTraderStatus:
+    """Arm or disarm the Jev trader. Same demo gate as the scalper, and never
+    both at once (the scalper would manage the Jev's position). Disarming does
+    NOT close an open position."""
+    if body.armed and _jev_trader.task is None:
+        if not _bot.enabled:
+            raise HTTPException(
+                status_code=409,
+                detail="Jev trader indisponível: precisa do collector com auto_trade + auto_close em conta DEMO.",
+            )
+        if _bot.armed:
+            raise HTTPException(status_code=409, detail="Desarme o scalper antes de armar o Jev trader.")
+        _jev_trader.task = asyncio.create_task(_jev_trader_loop())
+        _jev_trader.last_result = "armado"
+    elif not body.armed and _jev_trader.task is not None:
+        _jev_trader.task.cancel()
+        _jev_trader.task = None
+        _jev_trader.last_result = "desarmado pelo usuário"
+    return _jev_trader_status()
+
+
 class BotRequest(BaseModel):
     """Arm/disarm the explosion-scalper bot."""
 
@@ -1533,6 +1751,8 @@ async def set_bot(body: BotRequest) -> BotStatus:
             _bot.lots[sym] = float(lot)
 
     if body.armed:
+        if _jev_trader.task is not None:
+            raise HTTPException(status_code=409, detail="Desarme o Jev trader antes de armar o scalper.")
         if not _bot.enabled:
             raise HTTPException(
                 status_code=409,

@@ -95,6 +95,10 @@ OVERLAP_MATCH = 20
 # misconfiguration worth stopping on.
 WANTED = frozenset({"WIN", "WDO"})
 
+# CME futures for the CME tab (needs the Nelogica "Sinal CME Level 2" plugin):
+# gold, Nasdaq and S&P, mini and micro. Their windows have no broker columns.
+CME_ROOTS = ("MGC", "MNQ", "MES", "GC", "NQ", "ES")
+
 # Tools are named after the window type plus an index. Only Times & Trades
 # windows are of interest here, and Profit has never handed out more than a
 # handful, so probing a few is enough to find every linked one.
@@ -303,8 +307,11 @@ def _row_to_trade(row: tuple) -> dict[str, Any] | None:
         return None
     if not isinstance(qty, int) or isinstance(qty, bool) or qty <= 0:
         return None
-    if not isinstance(buyer, str) or not isinstance(seller, str):
-        return None
+    # The CME tape is anonymous, so its broker columns come back empty or as
+    # something that is not a name. Sent as "" and the backend decides: a B3
+    # print without both brokers is dropped there, a CME one does not need them.
+    buyer = buyer if isinstance(buyer, str) else ""
+    seller = seller if isinstance(seller, str) else ""
     if not isinstance(aggressor, str):
         return None
     return {
@@ -524,7 +531,8 @@ def run(cfg: dict[str, Any]) -> None:
             "janela de T&T > 'Linkar Janela com Excel (RTD)'."
         )
     covered = {asset[:3].upper() for _, asset, _ in found}
-    if not covered & WANTED:
+    has_cme = any(asset.upper().lstrip("@").startswith(CME_ROOTS) for _, asset, _ in found)
+    if not covered & WANTED and not has_cme:
         # Every window is on something else, which in practice means the RTD
         # call landed on BlackArrow: it registers the same CLSID as Profit and
         # whichever opened first is the one COM hands out. Saying it plainly

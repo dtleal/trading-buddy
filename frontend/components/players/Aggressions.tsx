@@ -24,12 +24,18 @@ const GROUP_TONE: Record<string, string> = {
   sardinha: "text-zinc-400",
 };
 
-export function Aggressions({ items }: { items: PlayersAggression[] }) {
+export function Aggressions({
+  items,
+  cut = "Mesmo agressor, mesmo lado, dentro de 2 minutos. Corte: 25.000 contratos no WIN, 4.000 no WDO.",
+}: {
+  items: PlayersAggression[];
+  cut?: string;
+}) {
   return (
     <div className="mt-3 rounded-sm border border-zinc-800 bg-zinc-900/40 px-2 py-1.5">
       <span
         className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400"
-        title="Mesmo agressor, mesmo lado, dentro de 2 minutos. Corte: 25.000 contratos no WIN, 4.000 no WDO."
+        title={cut}
       >
         agressões · 2 min
       </span>

@@ -36,14 +36,9 @@ _TIMEOUT_SECONDS = 2.0
 
 async def confirm_entry(state: str) -> float | None:
     """Confidence (0..1) that this entry is worth taking, or None with no answer."""
-    settings = get_settings()
-    key = settings.jev_api_key
-    if key is None:
-        return None
-    payload: dict[str, Any] = {
-        "model": _MODEL,
-        "state": state,
-        "questions": {
+    answers = await ask(
+        state,
+        {
             "entrar": {
                 "type": "noul",
                 "instructions": "Vale abrir esta operação agora?",
@@ -59,17 +54,29 @@ async def confirm_entry(state: str) -> float | None:
                 },
             }
         },
-    }
+    )
+    return None if answers is None else answers["entrar"]
+
+
+async def ask(
+    state: str, questions: dict[str, Any], timeout: float = _TIMEOUT_SECONDS
+) -> dict[str, float] | None:
+    """Jev's 0..1 answer to each `noul` question, or None with no answer."""
+    settings = get_settings()
+    key = settings.jev_api_key
+    if key is None:
+        return None
+    payload: dict[str, Any] = {"model": _MODEL, "state": state, "questions": questions}
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(
                 _URL,
                 json=payload,
                 headers={"Authorization": f"Bearer {key.get_secret_value()}"},
             )
             response.raise_for_status()
-            answer = response.json()["answers"]["entrar"]["noul"]
-        return float(answer)
+            answers = response.json()["answers"]
+        return {name: float(answers[name]["noul"]) for name in questions}
     except Exception:
-        logger.warning("Jev nao respondeu; entrada segue pela regra deterministica")
+        logger.warning("Jev nao respondeu")
         return None

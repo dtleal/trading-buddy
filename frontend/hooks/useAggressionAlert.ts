@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { shout } from "@/lib/alerts/sound";
 import type { PlayersAggression, PlayersResponse } from "@/lib/types";
 
 /** Quanto tempo o aviso fica na tela antes de sumir sozinho. */
@@ -42,7 +43,13 @@ export function useAggressionAlert(data: PlayersResponse | null): {
     for (const item of fresh) seen.current.add(keyOf(item.asset, item));
     // Se caírem duas juntas, a mais nova é a que fica na tela.
     const newest = fresh.sort((a, b) => b.at.localeCompare(a.at))[0];
-    if (newest) setAlert(newest);
+    if (newest) {
+      setAlert(newest);
+      shout(
+        `${newest.agressor} ${newest.lado === "COMPRA" ? "comprando" : "vendendo"} ` +
+          `${newest.qty.toLocaleString("pt-BR")} ${newest.asset}`,
+      );
+    }
   }, [data]);
 
   useEffect(() => {

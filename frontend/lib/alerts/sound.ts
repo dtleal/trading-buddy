@@ -86,6 +86,33 @@ function emit(c: AudioContext, tone: AlertTone): void {
   }
 }
 
+/**
+ * Loud siren + spoken text, for alerts that must be heard from across the room.
+ * The siren is 3 high/low square-wave swings at near full volume; the voice
+ * (pt-BR) says `text` right after.
+ */
+export function shout(text: string): void {
+  const c = getCtx();
+  if (c) {
+    const play = () => {
+      const t = c.currentTime;
+      for (let i = 0; i < 3; i++) {
+        beep(c, 1400, t + i * 0.4, 0.2, 0.9, "square");
+        beep(c, 900, t + i * 0.4 + 0.2, 0.2, 0.9, "square");
+      }
+    };
+    if (c.state === "running") play();
+    else void c.resume().then(() => c.state === "running" && play());
+  }
+  if (typeof window === "undefined" || !window.speechSynthesis) return;
+  const voice = new SpeechSynthesisUtterance(text);
+  voice.lang = "pt-BR";
+  voice.volume = 1;
+  voice.rate = 1.1;
+  window.speechSynthesis.cancel();
+  setTimeout(() => window.speechSynthesis.speak(voice), 1300); // after the siren
+}
+
 /** Play the chime for a given tone. No-op if audio is unavailable/locked. */
 export function playAlertSound(tone: AlertTone): void {
   const c = getCtx();

@@ -21,6 +21,7 @@ from api.routes import brief as brief_route
 from api.routes import orderflow as orderflow_route
 from api.routes import performance as performance_route
 from api.routes import ibov as ibov_route
+from api.routes import cme as cme_route
 from api.routes import players as players_route
 from api.routes import qa as qa_route
 from api.routes import tick as tick_route
@@ -113,6 +114,7 @@ def create_app() -> FastAPI:
     app.include_router(orderflow_route.router)
     app.include_router(performance_route.router)
     app.include_router(players_route.router)
+    app.include_router(cme_route.router)
     app.include_router(ibov_route.router)
 
     @app.get("/health", tags=["meta"])

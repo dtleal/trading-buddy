@@ -12,7 +12,8 @@ const TABS = [
   { href: "/", label: "Dashboard" },
   { href: "/qa", label: "Q&A" },
   { href: "/bands", label: "Bandas" },
-  { href: "/players", label: "Players" },
+  { href: "/players", label: "B3" },
+  { href: "/cme", label: "CME" },
   { href: "/performance", label: "Performance" },
 ] as const;
 

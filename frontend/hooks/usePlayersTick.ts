@@ -12,10 +12,10 @@ import type { PlayersTick } from "@/lib/types";
  * novo a cada 100ms seria uma requisição por negócio; aqui o socket fica aberto
  * e o backend manda quando muda. Mesmo desenho do canal de fluxo do MT5.
  */
-const WS_URL = BASE_URL.replace(/^http/, "ws") + "/api/players/ws/tick";
+const WS_BASE = BASE_URL.replace(/^http/, "ws");
 const RECONNECT_MS = 1_000;
 
-export function usePlayersTick(): Record<string, PlayersTick> {
+export function usePlayersTick(path = "/api/players/ws/tick"): Record<string, PlayersTick> {
   const [ticks, setTicks] = useState<Record<string, PlayersTick>>({});
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -25,7 +25,7 @@ export function usePlayersTick(): Record<string, PlayersTick> {
 
     const connect = () => {
       if (closed) return;
-      ws = new WebSocket(WS_URL);
+      ws = new WebSocket(WS_BASE + path);
       ws.onmessage = (event) => {
         const parsed = PlayersTickList.safeParse(JSON.parse(event.data));
         if (parsed.success) {
@@ -46,7 +46,7 @@ export function usePlayersTick(): Record<string, PlayersTick> {
       if (timer.current) clearTimeout(timer.current);
       ws?.close();
     };
-  }, []);
+  }, [path]);
 
   return ticks;
 }
