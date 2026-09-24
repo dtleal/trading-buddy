@@ -2,6 +2,7 @@
 
 import { Header } from "@/components/shared/Header";
 import { AggressionAlert } from "@/components/players/AggressionAlert";
+import { AgendaPanel } from "@/components/agenda/AgendaPanel";
 import { AssetPlayersPanel } from "@/components/players/AssetPlayersPanel";
 import { IbovBreadth } from "@/components/players/IbovBreadth";
 import { IbovTop10 } from "@/components/players/IbovTop10";
@@ -20,7 +21,7 @@ export default function PlayersPage() {
     <>
       {alert && <AggressionAlert alert={alert} onDismiss={dismiss} />}
       <Header />
-      <main className="mx-auto w-full max-w-[2100px] flex-1 px-4 py-6">
+      <main className="mx-auto w-full max-w-[2100px] flex-1 px-4 py-3">
         {error && (
           <p className="mb-4 rounded border border-red-900 bg-red-950/40 p-3 text-xs text-red-300">
             backend fora do ar ou sem resposta.
@@ -48,21 +49,23 @@ export default function PlayersPage() {
           </p>
         )}
 
-        {/* Quem puxa à esquerda, quantos vieram junto à direita. */}
-        {ibov && ibov.acoes.length > 0 && (
-          <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-[1fr_260px]">
-            <IbovTop10 data={ibov} />
-            <IbovBreadth data={ibov} />
-          </div>
-        )}
-
         {/* WDO e WIN lado a lado: o que interessa é a discordância entre os
-            dois, e pra isso os dois têm que caber na mesma tela. Empilha
-            de novo abaixo de lg, onde não cabe. */}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            dois, e pra isso os dois têm que caber na mesma tela. As ações e a
+            agenda vão numa coluna fina à direita, pra tudo caber sem rolar.
+            Empilha de novo abaixo de xl, onde não cabe. */}
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr_280px]">
           {data?.assets.map((asset) => (
             <AssetPlayersPanel key={asset.asset} data={asset} tick={ticks[asset.asset]} />
           ))}
+          <aside className="space-y-4">
+            {ibov && ibov.acoes.length > 0 && (
+              <>
+                <IbovTop10 data={ibov} />
+                <IbovBreadth data={ibov} />
+              </>
+            )}
+            <AgendaPanel compact />
+          </aside>
         </div>
       </main>
     </>
