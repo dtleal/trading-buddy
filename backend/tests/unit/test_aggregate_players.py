@@ -23,7 +23,8 @@ from use_cases.aggregate_players import PlayersAccumulator, aggregate_players
 MORGAN = 40  # baleia
 BRADESCO = 72  # banco (mesa)
 XP = 3  # sardinha
-ITAU_CORRETORA = 114  # sardinha: é a corretora do banco, não a mesa
+ITAU_CORRETORA = 114  # banco: a mesa do Itaú opera por ela
+BTG_CORRETORA = 85  # sardinha
 SESSION = datetime(2026, 9, 14, 10, 0)
 DELPHI_EPOCH = datetime(1899, 12, 30)
 
@@ -111,15 +112,19 @@ def test_the_three_groups_always_add_up_to_zero() -> None:
     assert players["baleia"].saldo_rs + players["banco"].saldo_rs + players["sardinha"].saldo_rs == 0
 
 
-def test_a_banks_brokerage_is_sardinha_not_banco() -> None:
-    """Itaú CV (114) roteia cliente de varejo — 26% do fluxo dele vem por RLP.
-    Contar isso como BANCO foi o que fez a linha do banco ir pra +R$ 776 mi
-    quando a referência tinha ela perto de zero."""
+def test_itau_brokerage_is_banco_and_btg_is_sardinha() -> None:
+    """A mesa do Itaú só aparece na fita pela corretora (114); o código do banco
+    (2028) nunca opera sozinho. O BTG (85) é varejo e fica em sardinha."""
     players = _by_key(
-        _snapshot([_trade(0, 5000, 100, ITAU_CORRETORA, MORGAN, TYPE_BUY_AGGRESSION)])
+        _snapshot(
+            [
+                _trade(0, 5000, 100, ITAU_CORRETORA, MORGAN, TYPE_BUY_AGGRESSION),
+                _trade(1, 5000, 30, BTG_CORRETORA, MORGAN, TYPE_BUY_AGGRESSION),
+            ]
+        )
     )
-    assert players["sardinha"].saldo == 100
-    assert players["banco"].saldo == 0
+    assert players["banco"].saldo == 100
+    assert players["sardinha"].saldo == 30
 
 
 def test_side_reads_the_recent_window_not_the_session() -> None:

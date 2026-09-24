@@ -44,41 +44,42 @@ importa muito mais no dólar do que no índice.
 Quando a tela diz "a baleia está comprando", quase sempre é a UBS. Se um dia a
 leitura parecer estranha, é nela que se olha primeiro.
 
-## Banco — 10 códigos
+## Banco — 13 códigos
 
-Só as **mesas** dos bancos. As corretoras dos mesmos bancos ficam na sardinha
-— ver a seção seguinte.
+As **mesas** dos bancos e as **corretoras** por onde elas operam (Itaú, Ágora,
+Santander). Mudou em 24/09/2026: a B3 só mostra a corretora por onde a ordem
+passou, e os códigos das mesas (2028, 72, 254) nunca aparecem sozinhos na fita.
+Só com as mesas, o grupo era Santander Institucional + Safra, 0,18% do WIN.
 
 | código | nome no Profit | quem é |
 |---|---|---|
 | 2028 | Itau Unibanco | mesa do Itaú |
+| 114 | Itau | corretora do Itaú |
 | 72 | Bradesco | mesa do Bradesco |
+| 39 | Agora | corretora do Bradesco |
 | 27 / 622 / 635 | Santander Institucional / Santander | mesa do Santander |
+| 4090 | Santander | corretora do Santander |
 | 59 / 304 | Safra | mesa do Safra |
 | 254 / 2659 | BB | mesa do Banco do Brasil |
 | 1026 | BTG | Banco BTG Pactual |
 
-**O grupo é 0,33% da fita do WIN e 1,24% da do WDO** — quase nada. A linha
-"BANCO" na tela é para ser pequena; se ela aparecer grande, é sinal de que uma
-corretora de varejo foi parar no grupo errado.
-
-## Por que a corretora do banco é sardinha
+## O custo: a corretora do banco também carrega cliente
 
 RLP é o mecanismo da B3 em que a corretora é a contraparte do próprio cliente,
 e a regra **só vale para cliente de varejo**. Então a fatia de RLP no fluxo de
-uma corretora mede o quanto ela é varejo. Medido no WIN em 16/09/2026:
+uma corretora mede o quanto ela é varejo. Medido no WIN em 23 e 24/09/2026:
 
-- BTG **21%**, Itaú (corretora) **26%**, Santander (corretora) **29%** — mesma
-  faixa da XP (**25%**).
-- UBS, Morgan, Goldman e Tullett: **0%**.
+- Itaú **6-25%**, Ágora **2-3%** (mas 67% do volume em lotes de até 5),
+  Santander **35-37%**, XP **25-29%**, BTG **21%**.
+- UBS e Goldman: **0%**.
 
-Ou seja, "Itaú" na fita é o cliente do Itaú, não a mesa do Itaú. Colocar a
-corretora do banco em BANCO fazia a linha do banco marcar **+R$ 776 mi** num
-dia em que a tela de referência mostrava perto de zero.
+Os negócios RLP não entram em grupo nenhum (vão pra linha RLP), mas as ordens
+dos clientes no book entram junto com a mesa, e a fita não separa um do outro.
+Em 16/09/2026, com essas corretoras no banco, a linha marcou **+R$ 776 mi**
+quando a tela de referência mostrava perto de zero.
 
-Códigos que são banco no nome mas sardinha no fluxo: **114** (Itaú corretora),
-**85** (BTG corretora), **4090** (Santander corretora), **39** (Ágora,
-Bradesco).
+O **BTG 85** (corretora) fica na sardinha, junto com XP, Genial, Clear e o
+resto do varejo.
 
 ## Regra de quem não está no mapa
 

@@ -11,19 +11,26 @@ lying about how much is on each side.
 
 - **Baleia** — foreign desks and the interdealer brokers (Tullett, BGC), where
   bank and non-resident flow goes through.
-- **Banco** — the bank *desks* only: Itaú Unibanco, Bradesco, Santander
-  Institucional, BB, Safra, Banco BTG.
-- **Sardinha** — everything else, which is the retail houses plus the retail
-  arms of the banks.
+- **Banco** — the bank desks (Itaú Unibanco, Bradesco, Santander
+  Institucional, BB, Safra, Banco BTG) plus the brokerages of Itaú (114),
+  Bradesco (Ágora 39) and Santander (4090).
+- **Sardinha** — everything else: XP, BTG (85), Genial, Clear and the other
+  retail houses.
 
-Why the bank's retail arm counts as sardinha, and not as banco: RLP is B3's
-Retail Liquidity Provider mechanism and by rule only covers retail clients, so
-the share of a broker's flow that comes through RLP measures how retail it is.
-Measured on WIN, 16/09/2026: BTG 21%, Itaú (corretora) 26%, Santander
-(corretora) 29% — same range as XP at 25%. UBS, Morgan, Goldman and Tullett are
-flat 0%. So "Itaú" on the tape is mostly Itaú's customers, not Itaú's desk, and
-putting it under BANCO is what made the bank line read +R$ 776 mi when the
-reference screen had it near zero.
+Why the bank brokerages count as banco: B3 shows only the broker the order
+went through, not whose money it is, and the desk codes (Itaú Unibanco 2028,
+Bradesco 72, BB 254) never show up on their own — the desks trade through
+their brokerage. Left out, the banco line was just Santander Institucional and
+Safra, 0,18% of WIN (24/09/2026).
+
+The cost: those brokerages also carry their customers. RLP is B3's Retail
+Liquidity Provider mechanism and by rule only covers retail clients, so the
+share of a broker's flow that comes through RLP measures how retail it is.
+Measured on WIN, 23-24/09/2026: Itaú 6-25%, Ágora 2-3%, Santander 35-37%, XP
+25-29%, BTG 21%; UBS and Goldman flat 0%. The RLP prints themselves never reach
+any group (they go to the RLP line), but the customers' book orders do. With
+the brokerages in banco the line once read +R$ 776 mi when the reference screen
+had it near zero (16/09/2026).
 
 Alongside the three, the snapshot carries **RLP** on its own: the retail client
 side of the internalised prints, which never touch the book. It is the one
@@ -69,9 +76,8 @@ BALEIA_CODES: frozenset[int] = frozenset(
     }
 )
 
-# Only the bank desks. The banks' own brokerages (Itaú 114, BTG 85, Santander
-# 4090, Ágora 39) trade their customers' flow and carry 20-30% RLP, so they sit
-# with the retail crowd — see the module docstring.
+# The bank desks plus the brokerages they trade through (Itaú, Ágora, Santander).
+# BTG 85 stays in sardinha — see the module docstring.
 BANCO_CODES: frozenset[int] = frozenset(
     {
         2028,         # Itaú Unibanco (o banco)
@@ -80,6 +86,9 @@ BANCO_CODES: frozenset[int] = frozenset(
         59, 304,      # Safra
         254, 2659,    # Banco do Brasil
         1026,         # Banco BTG Pactual
+        114,          # Itaú (corretora)
+        39,           # Ágora (corretora do Bradesco)
+        4090,         # Santander (corretora)
     }
 )
 
@@ -119,8 +128,10 @@ GROUPS = ("baleia", "banco", "sardinha")
 # banco fez numa janela foi 13.411 no WIN e 7.278 no WDO, ou seja, o corte de
 # quando a lista tinha varejo (25.000 no WIN) nunca dispararia. Nos valores
 # abaixo dá 12 a 25 por dia em cada ativo, medido em 21/09 e 16/09/2026.
+# WIN desceu de 7.000 pra 5.000: com 7.000 só o UBS aparecia (38 janelas em
+# 23/09, Goldman chegou a 6.358 e JP Morgan a 5.896 e nunca entravam).
 AGGRESSION_SECONDS = 120
-AGGRESSION_CONTRACTS: dict[str, int] = {"WIN": 7_000, "WDO": 3_000}
+AGGRESSION_CONTRACTS: dict[str, int] = {"WIN": 5_000, "WDO": 3_000}
 AGGRESSION_KEEP = 20
 
 
