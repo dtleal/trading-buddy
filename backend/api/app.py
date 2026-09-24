@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from adapters.db_bottrades import PostgresBotTradeRepository
 from adapters.db_qa import PostgresQARepository
+from api.routes import agenda as agenda_route
 from api.routes import brief as brief_route
 from api.routes import orderflow as orderflow_route
 from api.routes import performance as performance_route
@@ -116,6 +117,7 @@ def create_app() -> FastAPI:
     app.include_router(players_route.router)
     app.include_router(cme_route.router)
     app.include_router(ibov_route.router)
+    app.include_router(agenda_route.router)
 
     @app.get("/health", tags=["meta"])
     async def health() -> dict[str, str]:

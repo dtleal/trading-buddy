@@ -868,3 +868,24 @@ export const IbovResponse = z.object({
   niveis: z.array(IbovLevel),
 });
 export type IbovResponse = z.infer<typeof IbovResponse>;
+
+/** Response from /api/agenda. `at` em UTC; importance -1 baixa, 0 média, 1 alta. */
+export const AgendaEvent = z.object({
+  at: z.string(),
+  country: z.string(),
+  title: z.string(),
+  importance: z.number(),
+  source: z.string(),
+  forecast: z.string().nullable(),
+  previous: z.string().nullable(),
+  actual: z.string().nullable(),
+});
+export type AgendaEvent = z.infer<typeof AgendaEvent>;
+
+export const AgendaResponse = z.object({
+  eventos: z.array(AgendaEvent),
+  manchetes: z.array(
+    z.object({ at: z.string(), title: z.string(), url: z.string(), source: z.string() }),
+  ),
+});
+export type AgendaResponse = z.infer<typeof AgendaResponse>;

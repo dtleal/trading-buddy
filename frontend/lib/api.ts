@@ -3,6 +3,7 @@
  */
 import {
   AccountPnl,
+  AgendaResponse,
   AccountBalanceHistory,
   AutoBreakevenStatus,
   AutoCloseStatus,
@@ -159,6 +160,7 @@ export const api = {
   getPlayers: () => fetchJson("/api/players", PlayersResponse),
   getCme: () => fetchJson("/api/cme", PlayersResponse),
   getIbov: () => fetchJson("/api/ibov", IbovResponse),
+  getAgenda: () => fetchJson("/api/agenda", AgendaResponse),
   setBot: (
     armed: boolean,
     profitTarget: number | null,

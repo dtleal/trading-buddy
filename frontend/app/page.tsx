@@ -10,6 +10,7 @@ import { BiasPanel } from "@/components/bias/BiasPanel";
 import { SetupsPanel } from "@/components/setups/SetupsPanel";
 import { EventsPanel } from "@/components/events/EventsPanel";
 import { NewsPanel } from "@/components/news/NewsPanel";
+import { AgendaPanel } from "@/components/agenda/AgendaPanel";
 import { BreakoutsPanel } from "@/components/breakouts/BreakoutsPanel";
 import { DayOutlookBanner } from "@/components/dayoutlook/DayOutlookBanner";
 import { OrderFlowSection } from "@/components/orderflow/OrderFlowSection";
@@ -105,6 +106,8 @@ export default function Home() {
 
         {/* Row 4: breakouts (full width — most relevant for day trading) */}
         <BreakoutsPanel tick={tick} />
+
+        <AgendaPanel />
 
         {/* Row 5: calendar + news side by side */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
