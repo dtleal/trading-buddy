@@ -244,13 +244,13 @@ export function AssetPlayersPanel({
           )}
         </div>
         <div className="flex items-center gap-2 text-[11px] text-zinc-300">
-          <span>
-            {data.session} · {clock(data.first_trade)}–{clock(lastTrade)} ·{" "}
+          <span className="tabular-nums">
+            {clock(data.first_trade)}–{clock(lastTrade)} ·{" "}
             {trades.toLocaleString("pt-BR")} negócios
           </span>
           <span
             className={cn(
-              "rounded px-1.5 py-0.5 font-semibold uppercase",
+              "min-w-[86px] rounded px-1.5 py-0.5 text-center font-semibold uppercase tabular-nums",
               freshness(data.lag_seconds, data.stale).tone,
             )}
             title="Idade do último negócio lido. O Profit grava o tape em blocos, então esse atraso é dele, não da rede."
@@ -292,12 +292,8 @@ export function AssetPlayersPanel({
             if (!rlp) return null;
             return (
               <span className="whitespace-nowrap">
-                <span className={rlp.saldo_rs >= 0 ? "text-sky-500" : "text-red-500"}>
+                <span className={cn("tabular-nums", rlp.saldo_rs >= 0 ? "text-sky-500" : "text-red-500")}>
                   {money(rlp.saldo_rs)}
-                </span>
-                <span className="ml-2 text-zinc-400">
-                  negócio internalizado pela corretora, fora do book — é a única
-                  parte que a B3 marca como varejo
                 </span>
               </span>
             );
@@ -315,7 +311,6 @@ export function AssetPlayersPanel({
           <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
             últimos 15 min
           </span>
-          <span className="text-[11px] text-zinc-400">o que está fazendo agora</span>
         </div>
         <div className="grid min-w-0 flex-1 grid-cols-3 gap-2">
           {MAIN_ROWS.map((key) => {

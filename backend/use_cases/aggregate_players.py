@@ -13,7 +13,8 @@ lying about how much is on each side.
   bank and non-resident flow goes through.
 - **Banco** — the bank desks (Itaú Unibanco, Bradesco, Santander
   Institucional, BB, Safra, Banco BTG) plus the brokerages of Itaú (114),
-  Bradesco (Ágora 39) and Santander (4090).
+  Bradesco (Ágora 39) and Santander (4090), and Ideal (1618), the broker
+  the HFTs trade through — HFT flow is not retail.
 - **Sardinha** — everything else: XP, BTG (85), Genial, Clear and the other
   retail houses.
 
@@ -89,6 +90,7 @@ BANCO_CODES: frozenset[int] = frozenset(
         114,          # Itaú (corretora)
         39,           # Ágora (corretora do Bradesco)
         4090,         # Santander (corretora)
+        1618,         # Ideal — onde os HFTs operam, não é varejo
     }
 )
 

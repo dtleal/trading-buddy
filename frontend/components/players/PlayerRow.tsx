@@ -89,14 +89,9 @@ export function PlayerRow({
         </span>
       </div>
 
-      {/* Duas colunas de largura fixa: o papel encosta à direita e o lado
-          começa sempre no mesmo x, então o "·" forma uma coluna reta nas três
-          linhas. Sem isso, "ESTRANGEIRO" e "INSTITUCIONAL" empurram o lado pra
-          posições diferentes e a leitura fica torta. */}
       <div className="flex shrink-0 items-baseline whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide">
-        <span className="w-[104px] text-right text-zinc-300">{player.papel}</span>
-        <span className={cn("w-[94px] pl-2 text-left", tone)}>
-          · {bought ? "COMPRADO" : "VENDIDO"}
+        <span className={cn("w-[80px] text-left", tone)}>
+          {bought ? "COMPRADO" : "VENDIDO"}
         </span>
       </div>
     </div>

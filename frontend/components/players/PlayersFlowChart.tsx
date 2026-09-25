@@ -91,7 +91,6 @@ export function PlayersFlowChart({ series, cme }: { series: PlayersBucket[]; cme
         ))}
       </svg>
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-zinc-300">
-        <span className="text-zinc-400">saldo acumulado ({cme ? "US$" : "R$"})</span>
         {lines.map((line) => (
           <span key={line.key} className="flex items-center gap-1">
             <span

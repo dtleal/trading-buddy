@@ -181,8 +181,8 @@ Mapa inicial (ponto de partida, não verdade):
 - **Baleia (estrangeiro):** Morgan, Goldman, JP Morgan, UBS, Citigroup,
   Merrill, Credit, Barclays, Tullett, BGC Liquidez.
 - **Banco (local):** Itaú, Bradesco, Santander, Santander Institucional,
-  BB, Safra, BTG.
-- **Sardinha (CPF):** XP, Genial, Clear, Rico, Modal, Ideal, Ativa, Órama,
+  BB, Safra, BTG, Ideal (corretora dos HFTs — HFT não é sardinha).
+- **Sardinha (CPF):** XP, Genial, Clear, Rico, Modal, Ativa, Órama,
   Nova Futura, Terra, C6, Inter, Ágora, Necton, CM Capital.
 
 ## 3. Mapa de funcionalidades do Sala Sagrada AI
