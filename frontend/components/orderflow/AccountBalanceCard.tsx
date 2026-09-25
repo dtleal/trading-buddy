@@ -52,6 +52,10 @@ export function AccountBalanceCard() {
       timeScale: { timeVisible: true, secondsVisible: false, borderColor: "#27272a" },
       rightPriceScale: { borderColor: "#27272a" },
       crosshair: { mode: 1 },
+      // Fixed view: the mouse wheel scrolls the page instead of zooming the
+      // chart, which the 15s fitContent would then snap back.
+      handleScroll: false,
+      handleScale: false,
     });
     const series = chart.addBaselineSeries({
       baseValue: { type: "price", price: 0 },

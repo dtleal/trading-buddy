@@ -89,9 +89,9 @@ function emit(c: AudioContext, tone: AlertTone): void {
 /**
  * Loud siren + spoken text, for alerts that must be heard from across the room.
  * The siren is 3 high/low square-wave swings at near full volume; the voice
- * (pt-BR) says `text` right after.
+ * says `text` right after, in `lang` (pt-BR by default).
  */
-export function shout(text: string): void {
+export function shout(text: string, lang = "pt-BR"): void {
   const c = getCtx();
   if (c) {
     const play = () => {
@@ -106,7 +106,7 @@ export function shout(text: string): void {
   }
   if (typeof window === "undefined" || !window.speechSynthesis) return;
   const voice = new SpeechSynthesisUtterance(text);
-  voice.lang = "pt-BR";
+  voice.lang = lang;
   voice.volume = 1;
   voice.rate = 1.1;
   window.speechSynthesis.cancel();

@@ -68,7 +68,12 @@ export function useAgendaAlert(data: AgendaResponse | null): {
         for (const s of crossed) fired.current.add(key(s));
         const minutes = Math.ceil(left);
         setAlert({ event, minutes });
-        shout(`Notícia em ${minutes} minutos: ${event.title}`);
+        // TradingView titles are always in English, so read them in English.
+        if (event.source === "TradingView") {
+          shout(`News in ${minutes} minutes: ${event.title}`, "en-US");
+        } else {
+          shout(`Notícia em ${minutes} minutos: ${event.title}`);
+        }
       }
     };
     check();
